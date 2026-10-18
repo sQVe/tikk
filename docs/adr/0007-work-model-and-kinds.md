@@ -1,0 +1,52 @@
+# ADR 0007: Plans, slices, tasks, and issues
+
+**Date**: 2026-10-18\
+**Status**: Accepted
+
+## Context
+
+The Linear tree copies acceptance into each ticket and keeps evidence as comments. Tau needs one PR
+per slice and worker assignments that agents read and update directly. It also needs an inbox for
+work not yet shaped.
+
+## Decision
+
+A ticket has one of four kinds.
+
+- `plan`: an agreed design and its criteria.
+- `slice`: one branch and one PR, which covers criteria.
+- `task`: one worker assignment under a slice, with its own claim and log.
+- `issue`: an inbox item that stands alone.
+
+`parent` is fixed by kind: plan above slice above task. An issue stands alone and becomes a slice or
+plan in place with the same ID. The tool rejects other pairs, cycles, and missing targets. Criteria
+are required on plans and slices only. A task covers all of its slice's criteria unless it names
+some.
+
+## Consequences
+
+### Positive
+
+- Each kind has one job, and workers read their task directly.
+- Coverage is a query over criteria, not copied text.
+
+### Negative
+
+- Agents must write criteria IDs and coverage links. They may pass the check but test nothing, so
+  finish-slice and code-review keep their judgment.
+
+## Alternatives considered
+
+### A Linear-shaped tree
+
+One file per ticket with acceptance copied into each. Rejected because it copies acceptance into
+each ticket and keeps evidence as comments. Revisit if criteria IDs prove too costly for agents.
+
+### The PR as the only record
+
+Track work through PRs alone. Rejected because a PR cannot hold a plan before branches exist.
+
+### An outcome graph only
+
+Track outcomes as a graph. Rejected because it is hard to read and execute. Its shared checks live
+on as criteria.
