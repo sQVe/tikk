@@ -1,4 +1,4 @@
-# ADR 0026: Classifier advice comes from Tau and never blocks
+# ADR 0026: Classifier advice comes from clients and never blocks
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
@@ -10,8 +10,8 @@
 
 Some ticket questions need judgment that a rule cannot give: what an inbox issue is about, whether
 it repeats an open ticket, and whether an acceptance criterion names a real check. A small
-classifier model, such as Jev, can sort text into given categories. Tau already calls Jev from its
-scripts, with the user's chosen model and the Pi session's credentials.
+classifier model, such as Jev, can sort text into given categories. Agent harnesses already hold a
+model choice and credentials. Tau, the first client, calls Jev from its scripts this way.
 
 tikk must run without Pi and offline ([ADR 0010](./0010-cli-contract.md)). The design targets
 `ready` and `claim` in under 200 ms on a store of 2,000 tickets, apart from the Git fetch and PR
@@ -19,9 +19,11 @@ reconcile they may run. A model call can take seconds and can fail.
 
 ## Decision
 
-Tau skills and tools call the classifier. The `tikk` binary makes no model call. Tau reads its input
-through `tikk ... --json` and writes the result back as a `suggestion` fact. A suggestion is advice:
-it never changes ticket intent and never blocks a command.
+Clients call the classifier; the `tikk` binary makes no model call. A client is any agent, harness,
+or script that uses the CLI ([ADR 0010](./0010-cli-contract.md)). It reads its input through
+`tikk ... --json` and writes the result back as a `suggestion` fact with a tikk command. Tau is the
+first client, not the only one. A suggestion is advice: it never changes ticket intent and never
+blocks a command.
 
 ### Uses
 
@@ -43,8 +45,8 @@ it never changes ticket intent and never blocks a command.
   changed input hash marks it stale.
 - A person or agent accepts a suggestion by editing the ticket or running a command. A newer fact
   corrects or dismisses it.
-- Only ticket text goes to the model. When the model is offline or fails, Tau skips the advice and
-  records nothing.
+- Only ticket text goes to the model. When the model is offline or fails, the client skips the
+  advice and records nothing.
 
 The slice that builds a use sets its labels, prompts, thresholds, and fact schema.
 
@@ -58,7 +60,7 @@ The slice that builds a use sets its labels, prompts, thresholds, and fact schem
 
 ### Negative
 
-- Agents and scripts outside Tau get no advice unless they call a model themselves.
+- A client without a model gets no advice. tikk works the same without it.
 - Suggestions add facts to the store that are only advice.
 
 ## Alternatives considered
@@ -67,6 +69,11 @@ The slice that builds a use sets its labels, prompts, thresholds, and fact schem
 
 Let `tikk new` or `tikk ready` call the classifier. Rejected because tikk would need its own model
 key and network, and a call of seconds would add far more than the 200 ms target.
+
+### Advice only from Tau
+
+Let only Tau skills write suggestions. Rejected because tikk serves any agent or script, and a
+suggestion fact needs nothing that only Tau has.
 
 ### Suggestions kept only in the session
 

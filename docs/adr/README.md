@@ -48,4 +48,4 @@ line that links to the replacement.
 - [0023: A slice is done when its PR merged and its criteria are met](./0023-derived-slice-done.md)
 - [0024: Archive is a field](./0024-archive-as-a-field.md)
 - [0025: `tikk needs` holds the attention query](./0025-needs-holds-the-attention-query.md)
-- [0026: Classifier advice comes from Tau and never blocks](./0026-classifier-advice-from-tau.md)
+- [0026: Classifier advice comes from clients and never blocks](./0026-classifier-advice-from-clients.md)
