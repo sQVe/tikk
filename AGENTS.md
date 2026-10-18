@@ -20,6 +20,24 @@ Local ticket tracker for Tau, with a CLI for agents and a TUI for the user. Read
 - Before finishing a document, check its local links and verify the commands it gives against the
   repository.
 
+## Architecture
+
+- `src/` holds capability modules with one public entry file per folder. The first change that adds
+  modules sets the import table in a local lint rule. Once it exists, do not silence it. Put types
+  beside the code that owns them. Do not add barrels, a shared `types.ts`, or `utils/`. See
+  [ADR 0006](docs/adr/0006-capability-modules.md).
+- Return typed results for expected failures, and throw only through `invariant()`. Parse untrusted
+  data once with zod where it enters. See
+  [ADR 0005](docs/adr/0005-results-exceptions-and-zod-boundaries.md).
+- A module that needs I/O declares a record of the functions it uses, beside its own code. Run
+  external tools as argument arrays. See [ADR 0007](docs/adr/0007-side-effect-function-records.md).
+- One module owns the TUI renderer, signals, shutdown, and lending the terminal. See
+  [ADR 0008](docs/adr/0008-terminal-lifetime-owner.md).
+- Inside a module, put code in owner files named owner first, with the owner noun before the job,
+  and keep coordinators to dispatch. See [ADR 0009](docs/adr/0009-owner-files-and-file-names.md).
+- Every command has `--json` and never prompts. Tau calls only `tikk ... --json`. Every TUI action
+  has a CLI equal. See [ADR 0010](docs/adr/0010-cli-contract.md).
+
 ## Tests
 
 - Test behavior a caller can observe. Do not test wording, constants, types, or internal calls.

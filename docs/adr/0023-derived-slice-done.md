@@ -1,8 +1,8 @@
-# ADR 0009: A slice is done when its PR merged and its criteria are met
+# ADR 0023: A slice is done when its PR merged and its criteria are met
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0005 (Observed facts in per-machine JSONL)](./0005-facts-in-per-machine-jsonl.md)
+**Related**: [ADR 0015 (Observed facts in per-machine JSONL)](./0015-facts-in-per-machine-jsonl.md)
 
 ## Context
 
@@ -17,9 +17,10 @@ shows as merged but unverified.
 
 Open tasks at merge stay open and flag the slice until each is accepted or canceled with a reason.
 
-PR facts come from `tikk reconcile`, which checks every PR that tikk last saw as open, so a merge is
-never missed. A `pr` fact with a merge commit wins over one without. Items with stale facts stay out
-of "needs you" and show as unknown.
+PR facts come from `tikk reconcile`. It runs on `ready`, `status`, TUI refresh, and after PR
+actions. It checks every PR that tikk last saw as open, so a merge is never missed. A `pr` fact with
+a merge commit wins over one without. Each derived state shows the age of its oldest input. Items
+with stale facts stay out of "needs you" and show as unknown.
 
 ## Consequences
 

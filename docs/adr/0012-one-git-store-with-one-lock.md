@@ -1,4 +1,4 @@
-# ADR 0003: One Git store per user with one lock
+# ADR 0012: One Git store per user with one lock
 
 **Date**: 2026-10-18\
 **Status**: Accepted

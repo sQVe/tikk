@@ -1,8 +1,8 @@
-# ADR 0011: `tikk needs` holds the attention query
+# ADR 0025: `tikk needs` holds the attention query
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0006 (A disposable SQLite cache)](./0006-disposable-sqlite-cache.md)
+**Related**: [ADR 0017 (A disposable SQLite cache)](./0017-disposable-sqlite-cache.md)
 
 ## Context
 

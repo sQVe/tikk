@@ -2,7 +2,9 @@
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [Seam](https://github.com/sQVe/seam)
+**Related**: [Seam](https://github.com/sQVe/seam),
+[ADR 0003 (Bun as runtime, package manager, test runner, and compiler)](./0003-bun-toolchain.md),
+[ADR 0004 (OpenTUI with React for the TUI)](./0004-opentui-react-tui.md)
 
 ## Context
 
@@ -19,11 +21,11 @@ Tau calls `tikk ... --json`. This keeps tikk usable without Pi and gives Tau a c
 
 ### What is shared
 
-- Runtime and language: Bun and TypeScript. `bun build --compile` produces the binary.
-- UI and validation: OpenTUI React for the TUI and zod for ticket parsing. `bun:sqlite` is built
-  into Bun and holds the cache.
 - Tooling: vite-plus for lint and format, `@sqve/seam` for house style, and Changesets for releases.
   Shared files match Zeta and Phi, except for the project name and description.
+- Runtime and UI: Bun ([ADR 0003](./0003-bun-toolchain.md)) and OpenTUI with React
+  ([ADR 0004](./0004-opentui-react-tui.md)). zod validates ticket files, and `bun:sqlite` holds the
+  cache.
 
 ### What stays local
 

@@ -1,4 +1,4 @@
-# ADR 0007: Plans, slices, tasks, and issues
+# ADR 0018: Plans, slices, tasks, and issues
 
 **Date**: 2026-10-18\
 **Status**: Accepted

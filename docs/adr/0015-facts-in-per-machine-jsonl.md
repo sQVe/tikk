@@ -1,8 +1,8 @@
-# ADR 0005: Observed facts in per-machine JSONL
+# ADR 0015: Observed facts in per-machine JSONL
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0003 (One Git store with one lock)](./0003-one-git-store-with-one-lock.md)
+**Related**: [ADR 0012 (One Git store with one lock)](./0012-one-git-store-with-one-lock.md)
 
 ## Context
 

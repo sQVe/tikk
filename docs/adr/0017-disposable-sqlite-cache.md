@@ -1,8 +1,8 @@
-# ADR 0006: A disposable SQLite cache
+# ADR 0017: A disposable SQLite cache
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0005 (Observed facts in per-machine JSONL)](./0005-facts-in-per-machine-jsonl.md)
+**Related**: [ADR 0015 (Observed facts in per-machine JSONL)](./0015-facts-in-per-machine-jsonl.md)
 
 ## Context
 

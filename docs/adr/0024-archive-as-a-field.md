@@ -1,4 +1,4 @@
-# ADR 0010: Archive is a field
+# ADR 0024: Archive is a field
 
 **Date**: 2026-10-18\
 **Status**: Accepted

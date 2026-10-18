@@ -1,4 +1,4 @@
-# ADR 0004: Ticket intent in Markdown files
+# ADR 0013: Ticket intent in Markdown files
 
 **Date**: 2026-10-18\
 **Status**: Accepted

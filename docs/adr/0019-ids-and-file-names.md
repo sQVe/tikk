@@ -1,4 +1,4 @@
-# ADR 0008: Short random IDs and stable file names
+# ADR 0019: Short random IDs and stable file names
 
 **Date**: 2026-10-18\
 **Status**: Accepted
