@@ -1,6 +1,7 @@
 # tikk
 
-Local ticket tracker for Tau, with a CLI for agents and a TUI for the user. Read
+Local ticket tracker for coding agents and the people who run them, with a CLI for agents and a TUI
+for people. It is built first for Tau, but works without it. Read
 [the development guide](docs/development.md) for local setup and verification.
 
 - Run `bun run check` before finishing changes. It runs typechecking, lint with house style,

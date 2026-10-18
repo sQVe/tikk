@@ -26,6 +26,9 @@ skipped item. Before a claim, tikk fetches when the network is up.
   exactly one succeeds.
 - A claim has a lease. A claim whose lease ended is stale, and stale claims show in `tikk needs`.
 - `release` ends a claim. Both are facts ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
+- A claim records the agent session that took it, such as the Pi session ID and its log path, so
+  `tikk show` points at the log of the work. The log stays outside the store, since raw session
+  dumps never enter it.
 - Fetching before a claim narrows the window for two machines to claim one task. Offline, the clash
   is possible, and reconcile shows it.
 
@@ -34,6 +37,9 @@ skipped item. Before a claim, tikk fetches when the network is up.
 - `ready` returns the ordered candidates, by `rank`, that no `blockedBy` edge holds back
   ([ADR 0020](./0020-edges.md)).
 - For each higher-ranked item it skipped, `ready` names what blocks it.
+- `ready` takes a scope, such as a plan or a slice. Within a plan it returns the next slice to
+  start; within a slice, the next task. It weighs order, `blockedBy` edges, and merge state, so Tau
+  asks tikk what comes next instead of working out the order itself.
 
 ## Consequences
 
@@ -53,6 +59,12 @@ skipped item. Before a claim, tikk fetches when the network is up.
 
 Hold a claim until `release`. Rejected because a dead agent would hold a task forever, and nothing
 would show it as stale.
+
+### Tau works out the next item itself
+
+Tau reads the plan's slices and decides order, blockers, and merge state on its own, as it does with
+Linear today. Rejected because that logic needs order repair, page caps, and one `gh` call per PR in
+Tau, and every caller would repeat it.
 
 ### Ready returns only the first item
 

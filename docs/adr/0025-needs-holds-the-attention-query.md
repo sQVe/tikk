@@ -12,8 +12,9 @@ scripts need the same list.
 ## Decision
 
 `tikk needs` and `tikk needs --json` hold the attention query, and ship before the TUI. The TUI is a
-thin view over that query. It does no attention logic of its own. `e` opens a ticket in `$EDITOR`,
-and the TUI has no editing.
+thin view over that query. It does no attention logic of its own. It can act on a listed item, such
+as closing or accepting it, through the same code as the CLI command. `e` opens a ticket in
+`$EDITOR`, and the TUI edits no ticket text.
 
 The "needs you" view lists drafts waiting for agreement, blocked findings, merged but unverified
 slices, stale claims, unanswered worker questions, and new issues. Each item comes from
@@ -38,6 +39,8 @@ Let the TUI query the cache directly. Rejected because the design wants one atte
 agents read through `tikk needs --json` and the TUI only shows. Two copies of the logic could list
 different items.
 
-### Editing inside the TUI
+### Editing ticket text inside the TUI
 
-Edit fields in the TUI. Rejected because the user edits ticket files in Neovim.
+Edit titles, bodies, or criteria in the TUI. Rejected because the user edits ticket files in Neovim.
+Actions that change state, such as close or accept, stay in the TUI because they are one key and
+have a CLI equal.

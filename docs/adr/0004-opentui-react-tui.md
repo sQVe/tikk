@@ -18,9 +18,10 @@ same problems.
 
 ## Decision
 
-tikk renders its TUI with OpenTUI and its React bindings, on Bun. The TUI is a view only. It reads
-state from the `tikk needs` query and the cache, and sends actions out
-([ADR 0010](./0010-cli-contract.md)).
+tikk renders its TUI with OpenTUI and its React bindings, on Bun. The TUI reads state from the
+`tikk needs` query and the cache. It runs actions such as close, accept, cancel, and archive through
+the same code as their CLI commands ([ADR 0010](./0010-cli-contract.md)). It edits no ticket text;
+`e` opens the ticket in `$EDITOR`.
 
 ### Shortcuts
 

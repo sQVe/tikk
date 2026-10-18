@@ -1,6 +1,8 @@
 # tikk
 
-A local ticket tracker for Tau, with a CLI for agents and a TUI for the user.
+A local ticket tracker for coding agents and the people who run them. Agents use the CLI, and people
+use a TUI and their editor. tikk is built first for [Tau](https://github.com/sQVe/tau), but any
+agent or script can use its `--json` commands.
 
 ```sh
 bun install
