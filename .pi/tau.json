@@ -1,0 +1,5 @@
+{
+  "mutation": {
+    "argv": ["bunx", "--bun", "mutation"]
+  }
+}
