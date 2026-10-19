@@ -1,0 +1,46 @@
+# ADR 0023: A slice is done when its PR merged and its criteria are met
+
+**Date**: 2026-10-18\
+**Status**: Accepted\
+**Related**: [ADR 0015 (Observed facts in per-machine JSONL)](./0015-facts-in-per-machine-jsonl.md)
+
+## Context
+
+A merged PR does not prove that the slice met its criteria. Done must be robust, and unfinished work
+must never close silently.
+
+## Decision
+
+A slice is done when its PR merged into trunk and its criteria are met for the merged head. Done is
+derived from facts and is never written to the file. A slice whose PR merged with no current audit
+shows as merged but unverified.
+
+Open tasks at merge stay open and flag the slice until each is accepted or canceled with a reason.
+
+PR facts come from `tikk reconcile`. It runs on `ready`, `status`, TUI refresh, and after PR
+actions. It checks every PR that tikk last saw as open, so a merge is never missed. A `pr` fact with
+a merge commit wins over one without. Each derived state shows the age of its oldest input. Items
+with stale facts stay out of "needs you" and show as unknown.
+
+## Consequences
+
+### Positive
+
+- Done means merged and verified against the merged code.
+- Open tasks never disappear at merge.
+
+### Negative
+
+- Derived done depends on fresh `gh` facts. A stale cache can show a slice open.
+- A slice sits as merged but unverified until an audit runs.
+
+## Alternatives considered
+
+### Merge alone means done
+
+Mark the slice done when the PR merges. Rejected because done must be robust, and a merge does not
+show that the criteria are met.
+
+### Close open tasks at merge
+
+End unfinished tasks when the slice merges. Rejected because unfinished tasks never close silently.
