@@ -8,5 +8,7 @@ export {
   writeTicketFile,
 } from './ticketFiles.ts';
 
+export type { TicketFileFunctions } from './ticketFiles.ts';
+
 export { resolveStoreRoot } from './storePaths.ts';
 export type { Store } from './storePaths.ts';

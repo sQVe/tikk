@@ -263,3 +263,76 @@ it('creates a ticket with a body from a file and hides archived tickets in ls', 
   expect(all.tickets).toHaveLength(1);
   expect(all.tickets[0]).not.toHaveProperty('body');
 });
+
+it('exits 1 with a storeError when the cache folder cannot be created', async () => {
+  const created = await createTask('First');
+  const before = await readFile(created.path);
+
+  await rm(join(home, '.cache'), { recursive: true, force: true });
+  await writeFile(join(home, '.cache'), 'not a folder');
+
+  const result = await run(['ls', '--json']);
+  const after = await readFile(created.path);
+
+  expect(result.exitCode).toBe(1);
+  expect(errorCodeOf(result)).toBe('storeError');
+  expect(after.equals(before)).toBe(true);
+});
+
+it('exits 1 with a storeError when init cannot create the store folder', async () => {
+  const blocker = join(home, 'blocker');
+
+  await writeFile(blocker, 'not a folder');
+
+  const result = await run(['init', '--json'], { TIKK_HOME: join(blocker, 'store') });
+
+  expect(result.exitCode).toBe(1);
+  expect(errorCodeOf(result)).toBe('storeError');
+  expect(await readFile(blocker, 'utf8')).toBe('not a folder');
+});
+
+it('repairs a ticket that never parsed through $EDITOR and refuses a JSON edit', async () => {
+  await run(['init', '--json']);
+
+  const path = join(home, 'store', 'tickets', 'tikk', 'tikk-3a4b-broken.md');
+  const editor = join(home, 'editor.sh');
+  const repaired = '---\\nkind: task\\ntitle: Repaired\\nproject: tikk\\nstatus: open\\n---\\n';
+
+  await Bun.write(path, '---\nkind: [\n---\nBroken\n');
+  await writeFile(editor, `#!/bin/sh\nprintf '%b' '${repaired}' > "$1"\n`, { mode: 0o755 });
+
+  const refused = await run(['edit', 'tikk-3a4b', '--hash', 'x', '--title', 'X', '--json']);
+  const edited = await run(['edit', 'tikk-3a4b'], { EDITOR: editor });
+  const shown = await runJson<ShownTicket>(['show', 'tikk-3a4b']);
+
+  expect(refused.exitCode).toBe(1);
+  expect(errorCodeOf(refused)).toBe('parseError');
+  expect(edited.exitCode).toBe(0);
+  expect(shown.title).toBe('Repaired');
+});
+
+it('creates a ticket in the project named by --project', async () => {
+  await run(['init', '--json']);
+
+  const created = await runJson<ShownTicket & { project: string }>([
+    'new',
+    'task',
+    'Elsewhere',
+    '--project',
+    'other',
+  ]);
+
+  expect(created.project).toBe('other');
+  expect(created.id.startsWith('other-')).toBe(true);
+  expect(created.path).toContain(join('tickets', 'other'));
+});
+
+it('lists only the tickets of the project named by --project', async () => {
+  await run(['init', '--json']);
+  await runJson<ShownTicket>(['new', 'task', 'Here', '--project', 'tikk']);
+
+  const other = await runJson<ShownTicket>(['new', 'task', 'There', '--project', 'other']);
+  const listing = await runJson<Listing>(['ls', '--project', 'other']);
+
+  expect(listing.tickets.map((ticket) => ticket.id)).toEqual([other.id]);
+});

@@ -3,7 +3,8 @@ import type { Database } from 'bun:sqlite';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { openDatabase } from './cacheSchema.ts';
-import { getTicket, listErrors, listTickets } from './ticketQueries.ts';
+import type { CacheOpenReason } from './cacheSchema.ts';
+import { findTicketPath, getTicket, listErrors, listTickets } from './ticketQueries.ts';
 import type {
   CachedError,
   CachedTicket,
@@ -14,6 +15,7 @@ import { refresh } from './ticketScan.ts';
 import type { CacheFileReason, CacheFiles } from './ticketScan.ts';
 
 export type {
+  CacheOpenReason,
   CachedError,
   CachedTicket,
   CacheFileReason,
@@ -37,6 +39,10 @@ export class TicketCache implements Disposable {
     return getTicket(this.#database, id);
   }
 
+  findTicketPath(id: TicketId): Result<string, TicketNotFound> {
+    return findTicketPath(this.#database, id);
+  }
+
   listTickets(options: ListTicketsOptions): CachedTicket[] {
     return listTickets(this.#database, options);
   }
@@ -50,4 +56,12 @@ export class TicketCache implements Disposable {
   }
 }
 
-export const openCache = (path: string): TicketCache => new TicketCache(openDatabase(path));
+export const openCache = (path: string): Result<TicketCache, CacheOpenReason> => {
+  const database = openDatabase(path);
+
+  if (!database.ok) {
+    return database;
+  }
+
+  return { ok: true, value: new TicketCache(database.value) };
+};

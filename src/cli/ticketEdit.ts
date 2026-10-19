@@ -31,21 +31,40 @@ const findTicket = ({ session }: CommandInput, rawId: string): Result<CliTicket,
 
   const ticket = session.getTicket(id.value);
 
-  if (!ticket.ok) {
+  if (ticket.ok) {
+    return ticket;
+  }
+
+  const path = session.findTicketPath(id.value);
+
+  if (!path.ok) {
     return { ok: false, reason: notFound };
   }
 
-  return ticket;
+  const cached = session.listErrors().find((error) => error.path === path.value);
+  const detail = cached?.message ?? 'The file did not parse.';
+
+  return {
+    ok: false,
+    reason: { code: 'parseError', message: `${path.value} has an error: ${detail}` },
+  };
 };
 
-const editInEditor = async (input: CommandInput, ticket: CliTicket): Promise<CommandResult> => {
-  const edited = await input.effects.runEditor(ticket.path);
+const editInEditor = async (input: CommandInput, rawId: string): Promise<CommandResult> => {
+  const id = parseTicketId(rawId);
+  const path = id.ok ? input.session.findTicketPath(id.value) : undefined;
+
+  if (!id.ok || path === undefined || !path.ok) {
+    return { ok: false, reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` } };
+  }
+
+  const edited = await input.effects.runEditor(path.value);
 
   if (!edited.ok) {
     return storeFailure(edited.reason.message);
   }
 
-  return showAfterRefresh(input.session, ticket.id);
+  return showAfterRefresh(input.session, id.value);
 };
 
 const buildFrontMatter = (
@@ -153,14 +172,14 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     return edit;
   }
 
+  if (edit.value === undefined) {
+    return editInEditor(input, rawId);
+  }
+
   const found = findTicket(input, rawId);
 
   if (!found.ok) {
     return found;
-  }
-
-  if (edit.value === undefined) {
-    return editInEditor(input, found.value);
   }
 
   return applyEdit(input, found.value, edit.value);

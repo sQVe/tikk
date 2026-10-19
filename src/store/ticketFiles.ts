@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 import { customAlphabet } from 'nanoid';
@@ -33,6 +32,24 @@ export interface CreatedTicketFile {
   hash: string;
 }
 
+export interface TicketFileFunctions {
+  readdir: (directory: string) => Promise<string[]>;
+  stat: (path: string) => Promise<{ mtimeMs: number; size: number; isFile: () => boolean }>;
+  readFile: (path: string) => Promise<Uint8Array>;
+  mkdir: (directory: string) => Promise<void>;
+  writeFileExclusive: (path: string, text: string) => Promise<void>;
+  writeFile: (path: string, text: string) => Promise<void>;
+  rename: (from: string, to: string) => Promise<void>;
+  unlink: (path: string) => Promise<void>;
+}
+
+interface NewTicket {
+  store: Store;
+  project: ProjectName;
+  slug: string;
+  text: string;
+}
+
 type ExclusiveWrite = 'created' | 'exists' | 'failed';
 
 const idAlphabet = '346789abcdefghijkmnpqrtwxyz';
@@ -52,9 +69,12 @@ const failed = (message: string): { ok: false; reason: TicketFileReason } => ({
   reason: { kind: 'failed', message },
 });
 
-const listDirectory = async (directory: string): Promise<Result<string[], TicketFileReason>> => {
+const listDirectory = async (
+  files: TicketFileFunctions,
+  directory: string,
+): Promise<Result<string[], TicketFileReason>> => {
   try {
-    return { ok: true, value: await readdir(directory) };
+    return { ok: true, value: await files.readdir(directory) };
   } catch (error) {
     if (errorCode(error) === 'ENOENT') {
       return { ok: true, value: [] };
@@ -65,9 +85,10 @@ const listDirectory = async (directory: string): Promise<Result<string[], Ticket
 };
 
 const listProjectFiles = async (
+  files: TicketFileFunctions,
   directory: string,
 ): Promise<Result<TicketFileEntry[], TicketFileReason>> => {
-  const names = await listDirectory(directory);
+  const names = await listDirectory(files, directory);
 
   if (!names.ok) {
     return names;
@@ -78,7 +99,7 @@ const listProjectFiles = async (
   const entries = await Promise.all(
     markdownNames.map(async (name): Promise<TicketFileEntry | undefined> => {
       const path = join(directory, name);
-      const stats = await stat(path).catch(() => undefined);
+      const stats = await files.stat(path).catch(() => undefined);
 
       if (stats === undefined || !stats.isFile()) {
         return undefined;
@@ -92,17 +113,18 @@ const listProjectFiles = async (
 };
 
 export const listTicketFiles = async (
+  files: TicketFileFunctions,
   store: Store,
 ): Promise<Result<TicketFileEntry[], TicketFileReason>> => {
   const ticketsRoot = ticketsDirectory(store);
-  const projects = await listDirectory(ticketsRoot);
+  const projects = await listDirectory(files, ticketsRoot);
 
   if (!projects.ok) {
     return projects;
   }
 
   const lists = await Promise.all(
-    projects.value.map((project) => listProjectFiles(join(ticketsRoot, project))),
+    projects.value.map((project) => listProjectFiles(files, join(ticketsRoot, project))),
   );
 
   const entries: TicketFileEntry[] = [];
@@ -119,12 +141,13 @@ export const listTicketFiles = async (
 };
 
 export const readTicketFile = async (
+  files: TicketFileFunctions,
   path: string,
 ): Promise<Result<TicketFileContent, TicketFileReason>> => {
-  let bytes: Buffer;
+  let bytes: Uint8Array;
 
   try {
-    bytes = await readFile(path);
+    bytes = await files.readFile(path);
   } catch (error) {
     if (errorCode(error) === 'ENOENT') {
       return { ok: false, reason: { kind: 'notFound', message: `${path} does not exist.` } };
@@ -133,21 +156,19 @@ export const readTicketFile = async (
     return failed(`Cannot read ${path}.`);
   }
 
-  return { ok: true, value: { text: bytes.toString('utf8'), hash: hashText(bytes) } };
+  return { ok: true, value: { text: new TextDecoder().decode(bytes), hash: hashText(bytes) } };
 };
 
 const idIsTaken = (names: string[], id: string): boolean =>
   names.some((name) => name.startsWith(`${id}-`));
 
-const writeExclusive = async (path: string, text: string): Promise<ExclusiveWrite> => {
+const writeExclusive = async (
+  files: TicketFileFunctions,
+  path: string,
+  text: string,
+): Promise<ExclusiveWrite> => {
   try {
-    const handle = await open(path, 'wx');
-
-    try {
-      await handle.writeFile(text);
-    } finally {
-      await handle.close();
-    }
+    await files.writeFileExclusive(path, text);
 
     return 'created';
   } catch (error) {
@@ -156,12 +177,12 @@ const writeExclusive = async (path: string, text: string): Promise<ExclusiveWrit
 };
 
 const createWithFreeId = async (
-  store: Store,
-  project: ProjectName,
-  slug: string,
-  text: string,
+  files: TicketFileFunctions,
+  ticket: NewTicket,
   attemptsLeft: number,
 ): Promise<Result<CreatedTicketFile, TicketFileReason>> => {
+  const { store, project, slug, text } = ticket;
+
   if (attemptsLeft === 0) {
     return failed(`No free ticket ID found for project "${project}".`);
   }
@@ -171,21 +192,21 @@ const createWithFreeId = async (
 
   invariant(parsed.ok, `generated ID "${candidate}" must be valid`);
 
-  const names = await listDirectory(projectDirectory(store, project));
+  const names = await listDirectory(files, projectDirectory(store, project));
 
   if (!names.ok) {
     return names;
   }
 
   if (idIsTaken(names.value, parsed.value)) {
-    return createWithFreeId(store, project, slug, text, attemptsLeft - 1);
+    return createWithFreeId(files, ticket, attemptsLeft - 1);
   }
 
   const path = ticketFilePath(store, project, parsed.value, slug);
-  const written = await writeExclusive(path, text);
+  const written = await writeExclusive(files, path, text);
 
   if (written === 'exists') {
-    return createWithFreeId(store, project, slug, text, attemptsLeft - 1);
+    return createWithFreeId(files, ticket, attemptsLeft - 1);
   }
 
   if (written === 'failed') {
@@ -196,6 +217,7 @@ const createWithFreeId = async (
 };
 
 export const createTicketFile = async (
+  files: TicketFileFunctions,
   store: Store,
   project: ProjectName,
   title: string,
@@ -204,20 +226,23 @@ export const createTicketFile = async (
   const directory = projectDirectory(store, project);
 
   try {
-    await mkdir(directory, { recursive: true });
+    await files.mkdir(directory);
   } catch {
     return failed(`Cannot create ${directory}.`);
   }
 
-  return createWithFreeId(store, project, createTicketSlug(title), text, maxCreateAttempts);
+  const ticket = { store, project, slug: createTicketSlug(title), text };
+
+  return createWithFreeId(files, ticket, maxCreateAttempts);
 };
 
 export const writeTicketFile = async (
+  files: TicketFileFunctions,
   path: string,
   expectedHash: string,
   text: string,
 ): Promise<Result<{ hash: string }, TicketFileReason>> => {
-  const current = await readTicketFile(path);
+  const current = await readTicketFile(files, path);
 
   if (!current.ok) {
     return current;
@@ -233,10 +258,10 @@ export const writeTicketFile = async (
   const temporaryPath = join(dirname(path), `.${basename(path)}.${newIdSuffix()}.tmp`);
 
   try {
-    await writeFile(temporaryPath, text);
-    await rename(temporaryPath, path);
+    await files.writeFile(temporaryPath, text);
+    await files.rename(temporaryPath, path);
   } catch {
-    await unlink(temporaryPath).catch(() => undefined);
+    await files.unlink(temporaryPath).catch(() => undefined);
 
     return failed(`Cannot write ${path}.`);
   }

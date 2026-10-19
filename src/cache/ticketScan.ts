@@ -118,6 +118,18 @@ const parseContent = (
   return { ok: true, value: { id: fileName.value.id, file: file.value } };
 };
 
+const fileNameId = (entry: CacheFileEntry): string | null => {
+  const projectName = parseProjectName(basename(dirname(entry.path)));
+
+  if (!projectName.ok) {
+    return null;
+  }
+
+  const fileName = parseTicketFileName(basename(entry.path), projectName.value);
+
+  return fileName.ok ? fileName.value.id : null;
+};
+
 const recordError = (
   database: Database,
   entry: CacheFileEntry,
@@ -125,13 +137,13 @@ const recordError = (
   message: string,
 ): void => {
   database.run(
-    `INSERT INTO tickets (path, mtime_ms, size, hash, error) VALUES (?, ?, ?, ?, ?)
+    `INSERT INTO tickets (path, mtime_ms, size, hash, id, error) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT (path) DO UPDATE SET
       mtime_ms = excluded.mtime_ms,
       size = excluded.size,
       hash = excluded.hash,
       error = excluded.error`,
-    [entry.path, entry.mtimeMs, entry.size, hash, message],
+    [entry.path, entry.mtimeMs, entry.size, hash, fileNameId(entry), message],
   );
 };
 

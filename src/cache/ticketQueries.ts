@@ -56,6 +56,8 @@ const ticketRowSchema = z.object({
   body: z.string(),
 });
 
+const pathRowSchema = z.object({ path: z.string() });
+
 const errorRowSchema = z.object({ path: z.string(), error: z.string() });
 
 const ticketColumns =
@@ -109,6 +111,26 @@ export const getTicket = (
   }
 
   return { ok: true, value: toCachedTicket(row) };
+};
+
+export const findTicketPath = (
+  database: Database,
+  id: TicketId,
+): Result<string, TicketNotFound> => {
+  const row = pathRowSchema.safeParse(
+    database
+      .query('SELECT path FROM tickets WHERE id = ? ORDER BY title IS NULL, path LIMIT 1')
+      .get(id),
+  );
+
+  if (!row.success) {
+    return {
+      ok: false,
+      reason: { kind: 'notFound', message: `Ticket ${id} is not in the cache.` },
+    };
+  }
+
+  return { ok: true, value: row.data.path };
 };
 
 export const listTickets = (database: Database, options: ListTicketsOptions): CachedTicket[] => {

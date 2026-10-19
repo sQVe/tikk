@@ -3,7 +3,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { CacheFiles } from './cache.ts';
+import { invariant } from '../invariant.ts';
+import { openCache } from './cache.ts';
+import type { CacheFiles, TicketCache } from './cache.ts';
 
 interface FakeFile {
   text: string;
@@ -94,4 +96,12 @@ export const createDatabaseFixture = async (): Promise<{
     databasePath: join(directory, 'nested', 'index.db'),
     cleanup: () => rm(directory, { recursive: true, force: true }),
   };
+};
+
+export const openTestCache = (databasePath: string): TicketCache => {
+  const opened = openCache(databasePath);
+
+  invariant(opened.ok, 'The test cache must open.');
+
+  return opened.value;
 };

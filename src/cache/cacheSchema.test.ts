@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 
 import { openCache } from './cache.ts';
 import {
@@ -9,6 +10,7 @@ import {
   idsOf,
   ticketPath,
   ticketText,
+  openTestCache,
 } from './cacheHarness.ts';
 
 let databasePath = '';
@@ -23,7 +25,7 @@ afterEach(async () => {
 });
 
 const listIds = async (): Promise<string[]> => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
 
   fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
@@ -68,4 +70,13 @@ it('returns the same tickets after the database file is deleted', async () => {
 
   expect(await listIds()).toEqual(before);
   expect(before).toEqual(['tikk-3a4b', 'tikk-3a4c']);
+});
+
+it('returns a failure when the cache folder cannot be created', async () => {
+  await writeFile(dirname(databasePath), 'a file where the folder belongs');
+
+  const opened = openCache(join(dirname(databasePath), 'nested', 'index.db'));
+
+  expect(opened.ok).toBe(false);
+  expect(!opened.ok && opened.reason.message).not.toBe('');
 });

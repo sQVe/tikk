@@ -1,10 +1,15 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { Result } from '../result.ts';
 import type { Store } from './storePaths.ts';
 
-export interface StoreInitEffects {
+export interface StoreOpenFunctions {
+  readFile: (path: string) => Promise<string>;
+}
+
+export interface StoreInitEffects extends StoreOpenFunctions {
+  mkdir: (directory: string) => Promise<void>;
+  writeFile: (path: string, text: string) => Promise<void>;
   runGit: (args: string[]) => Promise<Result<string, StoreReason>>;
 }
 
@@ -22,12 +27,15 @@ const configFileName = 'tikk.json';
 const isMissingFile = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
-export const openStore = async (root: string): Promise<Result<Store, StoreReason>> => {
+export const openStore = async (
+  root: string,
+  effects: StoreOpenFunctions,
+): Promise<Result<Store, StoreReason>> => {
   const configPath = join(root, configFileName);
   let text: string;
 
   try {
-    text = await readFile(configPath, 'utf8');
+    text = await effects.readFile(configPath);
   } catch (error) {
     if (isMissingFile(error)) {
       return {
@@ -58,7 +66,7 @@ export const initStore = async (
   root: string,
   effects: StoreInitEffects,
 ): Promise<Result<{ store: Store; created: boolean }, StoreReason>> => {
-  const existing = await openStore(root);
+  const existing = await openStore(root, effects);
 
   if (existing.ok) {
     return { ok: true, value: { store: existing.value, created: false } };
@@ -66,7 +74,7 @@ export const initStore = async (
 
   const configPath = join(root, configFileName);
 
-  const configExists = await readFile(configPath).then(
+  const configExists = await effects.readFile(configPath).then(
     () => true,
     () => false,
   );
@@ -75,7 +83,11 @@ export const initStore = async (
     return existing;
   }
 
-  await mkdir(root, { recursive: true });
+  try {
+    await effects.mkdir(root);
+  } catch {
+    return { ok: false, reason: { message: `Cannot create the store folder ${root}.` } };
+  }
 
   const git = await effects.runGit(['-C', root, 'init']);
 
@@ -83,7 +95,11 @@ export const initStore = async (
     return git;
   }
 
-  await writeFile(configPath, `${JSON.stringify({ version: 1 })}\n`);
+  try {
+    await effects.writeFile(configPath, `${JSON.stringify({ version: 1 })}\n`);
+  } catch {
+    return { ok: false, reason: { message: `Cannot write ${configPath}.` } };
+  }
 
   return { ok: true, value: { store: { root }, created: true } };
 };

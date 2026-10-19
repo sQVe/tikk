@@ -6,6 +6,7 @@ import { join } from 'node:path';
 
 import { initStore, openStore } from './store.ts';
 import type { StoreInitEffects } from './store.ts';
+import { nodeStoreFiles } from './storeHarness.ts';
 
 let base = '';
 
@@ -18,6 +19,7 @@ afterEach(async () => {
 });
 
 const effects: StoreInitEffects = {
+  ...nodeStoreFiles,
   runGit: async (args) => {
     const process = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'pipe' });
     const stdout = await new Response(process.stdout).text();
@@ -41,7 +43,7 @@ it('creates the store once and reports created only the first time', async () =>
 });
 
 it('fails to open a store without tikk.json and names tikk init', async () => {
-  const result = await openStore(base);
+  const result = await openStore(base, effects);
 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason.message).toContain('tikk init');
@@ -52,7 +54,7 @@ it('fails to open a store with an invalid tikk.json and names the file', async (
 
   await writeFile(configPath, '{"version": 2}');
 
-  const result = await openStore(base);
+  const result = await openStore(base, effects);
 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason.message).toContain(configPath);
@@ -67,4 +69,31 @@ it('does not overwrite an invalid tikk.json on init', async () => {
 
   expect(result.ok).toBe(false);
   expect(await Bun.file(configPath).text()).toBe('nope');
+});
+
+it('fails with a typed reason when the store folder cannot be created', async () => {
+  const blocker = join(base, 'blocker');
+
+  await writeFile(blocker, 'a file');
+
+  const result = await initStore(join(blocker, 'store'), effects);
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toContain(blocker);
+
+  expect(await Bun.file(blocker).text()).toBe('a file');
+});
+
+it('fails with a typed reason when tikk.json cannot be written', async () => {
+  const root = join(base, 'store');
+
+  const result = await initStore(root, {
+    ...effects,
+    writeFile: () => Promise.reject(new Error('read-only')),
+  });
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toContain('tikk.json');
+
+  expect(existsSync(join(root, 'tikk.json'))).toBe(false);
 });

@@ -39,6 +39,7 @@ interface FileWriteReason {
 export interface CliSession extends Disposable {
   refresh: () => Promise<Result<undefined, CliMessage>>;
   getTicket: (id: TicketId) => Result<CliTicket, CliMessage>;
+  findTicketPath: (id: TicketId) => Result<string, CliMessage>;
   listTickets: (options: { includeArchived: boolean }) => CliTicket[];
   listErrors: () => { path: string; message: string }[];
   createTicketFile: (

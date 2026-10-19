@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 
 import { parseTicketId } from '../ticket/ticket.ts';
-import { openCache } from './cache.ts';
 import {
   createDatabaseFixture,
   createFakeFiles,
   idsOf,
   ticketPath,
   ticketText,
+  openTestCache,
 } from './cacheHarness.ts';
 
 let databasePath = '';
@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 it('leaves out an archived ticket unless includeArchived is true', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
 
   fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'Live' }));
@@ -37,7 +37,7 @@ it('leaves out an archived ticket unless includeArchived is true', async () => {
 });
 
 it('sorts tickets by project, then ID, and reports path, hash, and error', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
 
   fake.set(ticketPath('zeta-3a4b', 'zeta'), ticketText({ title: 'Z' }).replace('tikk', 'zeta'));
@@ -60,7 +60,7 @@ it('sorts tickets by project, then ID, and reports path, hash, and error', async
 });
 
 it('returns a notFound result for an unknown ID', () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const id = parseTicketId('tikk-3a4b');
 
   if (!id.ok) {
@@ -68,4 +68,32 @@ it('returns a notFound result for an unknown ID', () => {
   }
 
   expect(cache.getTicket(id.value)).toMatchObject({ ok: false, reason: { kind: 'notFound' } });
+});
+
+it('finds the path of a ticket that has never parsed, and hides it from getTicket', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const id = parseTicketId('tikk-3a4b');
+
+  if (!id.ok) {
+    throw new Error('bad id');
+  }
+
+  fake.set(ticketPath('tikk-3a4b'), '---\nkind: [\n---\n');
+  await cache.refresh(fake.files);
+
+  expect(cache.findTicketPath(id.value)).toEqual({ ok: true, value: ticketPath('tikk-3a4b') });
+  expect(cache.getTicket(id.value)).toMatchObject({ ok: false });
+  expect(cache.listTickets({ includeArchived: true })).toEqual([]);
+});
+
+it('returns a notFound result for the path of an unknown ID', () => {
+  using cache = openTestCache(databasePath);
+  const id = parseTicketId('tikk-3a4b');
+
+  if (!id.ok) {
+    throw new Error('bad id');
+  }
+
+  expect(cache.findTicketPath(id.value)).toMatchObject({ ok: false, reason: { kind: 'notFound' } });
 });

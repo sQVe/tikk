@@ -2,7 +2,11 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 
-import { invariant } from '../invariant.ts';
+import type { Result } from '../result.ts';
+
+export interface CacheOpenReason {
+  message: string;
+}
 
 const cacheVersion = 1;
 
@@ -67,36 +71,70 @@ const openExisting = (path: string): Database | undefined => {
   return undefined;
 };
 
-const createDatabase = (
-  path: string,
-): { ok: true; database: Database } | { ok: false; message: string } => {
+const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const createDatabase = (path: string): Result<Database, CacheOpenReason> => {
   try {
     const database = new Database(path, { create: true, readwrite: true });
 
     createTables(database);
 
-    return { ok: true, database };
+    return { ok: true, value: database };
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+    return { ok: false, reason: { message: describeError(error) } };
   }
 };
 
-export const openDatabase = (path: string): Database => {
-  mkdirSync(dirname(path), { recursive: true });
+const prepareDatabaseFolder = (path: string): CacheOpenReason | undefined => {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+  } catch (error) {
+    return { message: `Cannot create the cache folder for ${path}: ${describeError(error)}` };
+  }
+
+  return undefined;
+};
+
+const clearDatabaseFiles = (path: string): CacheOpenReason | undefined => {
+  try {
+    removeDatabaseFiles(path);
+  } catch (error) {
+    return { message: `Cannot remove the old cache at ${path}: ${describeError(error)}` };
+  }
+
+  return undefined;
+};
+
+export const openDatabase = (path: string): Result<Database, CacheOpenReason> => {
+  const folderProblem = prepareDatabaseFolder(path);
+
+  if (folderProblem !== undefined) {
+    return { ok: false, reason: folderProblem };
+  }
 
   const existing = openExisting(path);
 
   if (existing !== undefined) {
-    return existing;
+    return { ok: true, value: existing };
   }
 
-  removeDatabaseFiles(path);
+  const clearProblem = clearDatabaseFiles(path);
+
+  if (clearProblem !== undefined) {
+    return { ok: false, reason: clearProblem };
+  }
 
   const created = createDatabase(path);
 
-  const detail = created.ok ? '' : created.message;
+  if (!created.ok) {
+    return {
+      ok: false,
+      reason: {
+        message: `The cache database at ${path} cannot be created: ${created.reason.message}`,
+      },
+    };
+  }
 
-  invariant(created.ok, `The cache database at ${path} cannot be created: ${detail}`);
-
-  return created.database;
+  return created;
 };

@@ -109,3 +109,33 @@ it('refuses a throw outside the invariant module', async () => {
   expect(run.diagnostics[0]).toContain('src/store/store.ts');
   expect(run.diagnostics[0]).toContain('tikk(throw-only-in-invariant)');
 }, 30_000);
+
+it('refuses a forbidden module reached by a literal dynamic import, require, or import-equals', async () => {
+  const run = await lintProject({
+    'src/ticket/ticketA.ts': "export const load = () => import('node:fs');\n",
+    'src/ticket/ticketB.ts': "export const load = () => require('node:fs');\n",
+    'src/ticket/ticketC.ts': "import fs = require('node:fs');\nexport const load = fs;\n",
+    'src/ticket/ticketD.ts': 'export const load = () => import(`node:fs`);\n',
+  });
+
+  expect(run.status).toBe(1);
+  expect(run.diagnostics).toHaveLength(4);
+
+  for (const file of ['ticketA', 'ticketB', 'ticketC', 'ticketD']) {
+    const diagnostic = run.diagnostics.find((line) => line.includes(`src/ticket/${file}.ts`));
+
+    expect(diagnostic).toContain('tikk(module-boundaries)');
+  }
+}, 30_000);
+
+it('refuses a computed dynamic import and passes a literal one the table allows', async () => {
+  const run = await lintProject({
+    'src/invariant.ts': 'export const invariant = 1;\n',
+    'src/ticket/ticket.ts':
+      "export const load = (name: string) => import(name);\nexport const ok = () => import('../invariant.ts');\n",
+  });
+
+  expect(run.status).toBe(1);
+  expect(run.diagnostics).toHaveLength(1);
+  expect(run.diagnostics[0]).toContain('src/ticket/ticket.ts');
+}, 30_000);

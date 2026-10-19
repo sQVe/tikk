@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 
 import { parseTicketId } from '../ticket/ticket.ts';
-import { openCache } from './cache.ts';
 import type { TicketCache } from './cache.ts';
 import {
   createDatabaseFixture,
@@ -9,6 +8,7 @@ import {
   idsOf,
   ticketPath,
   ticketText,
+  openTestCache,
 } from './cacheHarness.ts';
 
 let databasePath = '';
@@ -39,7 +39,7 @@ const titleOf = (cache: TicketCache, id: string): string | undefined => {
 };
 
 it('keeps the last good title for a broken file and clears the error when it is restored', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = ticketPath('tikk-3a4b');
   const good = ticketText({ title: 'Good title' });
@@ -61,7 +61,7 @@ it('keeps the last good title for a broken file and clears the error when it is 
 });
 
 it('shows a changed title after refresh', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = ticketPath('tikk-3a4b');
 
@@ -74,7 +74,7 @@ it('shows a changed title after refresh', async () => {
 });
 
 it('removes a deleted file from the list', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
 
   fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
@@ -89,7 +89,7 @@ it('removes a deleted file from the list', async () => {
 });
 
 it('drops a file that vanishes between list and read', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = ticketPath('tikk-3a4b');
 
@@ -114,7 +114,7 @@ it('drops a file that vanishes between list and read', async () => {
 });
 
 it('does not read a file whose mtime and size are unchanged', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
 
   fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
@@ -127,7 +127,7 @@ it('does not read a file whose mtime and size are unchanged', async () => {
 });
 
 it('keeps the parsed state when only the mtime changes', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = ticketPath('tikk-3a4b');
 
@@ -142,7 +142,7 @@ it('keeps the parsed state when only the mtime changes', async () => {
 });
 
 it('records an error-only row for a file name without an ID', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = '/fake/tickets/tikk/notes.md';
 
@@ -154,7 +154,7 @@ it('records an error-only row for a file name without an ID', async () => {
 });
 
 it('gives the later path an error that names the duplicate', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
   const first = ticketPath('tikk-3a4b');
   const second = '/fake/tickets/tikk/tikk-3a4b-zzz.md';
@@ -177,7 +177,7 @@ it('gives the later path an error that names the duplicate', async () => {
 });
 
 it('fails the refresh when the file list fails', async () => {
-  using cache = openCache(databasePath);
+  using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
 
   fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));

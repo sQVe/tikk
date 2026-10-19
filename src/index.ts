@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 import { existsSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
+import type { TicketCache } from './cache/cache.ts';
 import { runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
 import { resolveProject } from './project.ts';
@@ -19,7 +20,7 @@ import {
   resolveStoreRoot,
   writeTicketFile,
 } from './store/store.ts';
-import type { Store } from './store/store.ts';
+import type { Store, StoreInitEffects, TicketFileFunctions } from './store/store.ts';
 
 const homeDirectory = homedir();
 const storeRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
@@ -48,34 +49,66 @@ const runStoreGit = async (args: string[]): Promise<Result<string, { message: st
   return { ok: false, reason: { message: `"git ${args.join(' ')}" failed.` } };
 };
 
+const ticketFiles: TicketFileFunctions = {
+  readdir: (directory) => readdir(directory),
+  stat: (path) => stat(path),
+  readFile: (path) => readFile(path),
+  mkdir: async (directory) => {
+    await mkdir(directory, { recursive: true });
+  },
+  writeFileExclusive: async (path, text) => {
+    const handle = await open(path, 'wx');
+
+    try {
+      await handle.writeFile(text);
+    } finally {
+      await handle.close();
+    }
+  },
+  writeFile: (path, text) => writeFile(path, text),
+  rename: (from, to) => rename(from, to),
+  unlink: (path) => unlink(path),
+};
+
+const storeFiles: Pick<StoreInitEffects, 'readFile' | 'mkdir' | 'writeFile'> = {
+  readFile: (path) => readFile(path, 'utf8'),
+  mkdir: ticketFiles.mkdir,
+  writeFile: ticketFiles.writeFile,
+};
+
 const readTextFile = (path: string): Promise<string | undefined> =>
   readFile(path, 'utf8').catch(() => undefined);
 
-const sessionFor = (store: Store): CliSession => {
-  const cache = openCache(cachePath);
-
-  return {
-    refresh: () =>
-      cache.refresh({
-        listTicketFiles: () => listTicketFiles(store),
-        readTicketFile,
-      }),
-    getTicket: (id) => cache.getTicket(id),
-    listTickets: (options) => cache.listTickets(options),
-    listErrors: () => cache.listErrors(),
-    createTicketFile: (project, title, text) => createTicketFile(store, project, title, text),
-    writeTicketFile,
-    [Symbol.dispose]: () => {
-      cache[Symbol.dispose]();
-    },
-  };
-};
+const sessionFor = (store: Store, cache: TicketCache): CliSession => ({
+  refresh: () =>
+    cache.refresh({
+      listTicketFiles: () => listTicketFiles(ticketFiles, store),
+      readTicketFile: (path) => readTicketFile(ticketFiles, path),
+    }),
+  getTicket: (id) => cache.getTicket(id),
+  findTicketPath: (id) => cache.findTicketPath(id),
+  listTickets: (options) => cache.listTickets(options),
+  listErrors: () => cache.listErrors(),
+  createTicketFile: (project, title, text) =>
+    createTicketFile(ticketFiles, store, project, title, text),
+  writeTicketFile: (path, expectedHash, text) =>
+    writeTicketFile(ticketFiles, path, expectedHash, text),
+  [Symbol.dispose]: () => {
+    cache[Symbol.dispose]();
+  },
+});
 
 const openSession: CliEffects['openSession'] = async () => {
-  const store = await openStore(storeRoot);
+  const store = await openStore(storeRoot, storeFiles);
 
   if (store.ok) {
-    return { ok: true, value: sessionFor(store.value) };
+    const cache = openCache(cachePath);
+
+    if (!cache.ok) {
+      return { ok: false, reason: { code: 'storeError', message: cache.reason.message } };
+    }
+
+    return { ok: true, value: sessionFor(store.value, cache.value) };
   }
 
   const configured = existsSync(join(storeRoot, 'tikk.json'));
@@ -109,7 +142,7 @@ const runEditor = async (path: string): Promise<Result<undefined, { message: str
 
 const effects: CliEffects = {
   initStore: async () => {
-    const initialized = await initStore(storeRoot, { runGit: runStoreGit });
+    const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
 
     if (!initialized.ok) {
       return initialized;
