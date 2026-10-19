@@ -20,7 +20,7 @@ else is data and functions over it.
 Every runtime dependency ships to every user. A version range would let a rebuild pick up new
 dependency code that nobody reviewed.
 
-Zeta and Phi make the same choices for the same reasons.
+Mergit and Koja make the same choices for the same reasons.
 
 ## Decision
 

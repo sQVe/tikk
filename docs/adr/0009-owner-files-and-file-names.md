@@ -15,7 +15,7 @@ Agents write most features as slices that run in parallel branches. When every s
 central file, the branches conflict there, and a reader must scan one long file to find one feature.
 The conflicts come from shared editing paths, not from size.
 
-Zeta and Phi follow the same rule, so an agent that works in all three finds code the same way.
+Mergit and Koja follow the same rule, so an agent that works in all three finds code the same way.
 
 ## Decision
 

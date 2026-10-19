@@ -11,18 +11,18 @@
 Tau plans and tracks work in Linear, which is built for human teams. Agents are the main writers and
 readers. The user wants a local tool with a CLI for agents and a TUI for the user.
 
-Zeta and Phi are Bun and TypeScript terminal apps with the same maintainer. They share a toolchain,
-CI, release flow, and house style. Moving between them needs no relearning.
+Mergit and Koja are Bun and TypeScript terminal apps with the same maintainer. They share a
+toolchain, CI, release flow, and house style. Moving between them needs no relearning.
 
 ## Decision
 
-tikk lives in its own repository and ships its own binary. It uses the same base as Zeta and Phi.
+tikk lives in its own repository and ships its own binary. It uses the same base as Mergit and Koja.
 Tau calls `tikk ... --json`. This keeps tikk usable without Pi and gives Tau a clear boundary.
 
 ### What is shared
 
 - Tooling: vite-plus for lint and format, `@sqve/seam` for house style, and Changesets for releases.
-  Shared files match Zeta and Phi, except for the project name and description.
+  Shared files match Mergit and Koja, except for the project name and description.
 - Runtime and UI: Bun ([ADR 0003](./0003-bun-toolchain.md)) and OpenTUI with React
   ([ADR 0004](./0004-opentui-react-tui.md)). zod validates ticket files, and `bun:sqlite` holds the
   cache.

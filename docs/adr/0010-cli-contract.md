@@ -14,7 +14,7 @@ Tau calls tikk across a repository boundary ([ADR 0002](./0002-shared-project-ba
 that only the TUI can reach is easy to ship and hard to cover later, because each gap is small and
 nothing reports it.
 
-Phi makes the same rule for its UI and CLI.
+Koja makes the same rule for its UI and CLI.
 
 ## Decision
 
