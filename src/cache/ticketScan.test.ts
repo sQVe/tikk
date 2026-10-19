@@ -1,0 +1,193 @@
+import { afterEach, beforeEach, expect, it } from 'bun:test';
+
+import { parseTicketId } from '../ticket/ticket.ts';
+import { openCache } from './cache.ts';
+import type { TicketCache } from './cache.ts';
+import {
+  createDatabaseFixture,
+  createFakeFiles,
+  idsOf,
+  ticketPath,
+  ticketText,
+} from './cacheHarness.ts';
+
+let databasePath = '';
+let cleanup = async () => {};
+
+beforeEach(async () => {
+  ({ databasePath, cleanup } = await createDatabaseFixture());
+});
+
+afterEach(async () => {
+  await cleanup();
+});
+
+const idOf = (value: string) => {
+  const parsed = parseTicketId(value);
+
+  if (!parsed.ok) {
+    throw new Error(parsed.reason.message);
+  }
+
+  return parsed.value;
+};
+
+const titleOf = (cache: TicketCache, id: string): string | undefined => {
+  const found = cache.getTicket(idOf(id));
+
+  return found.ok ? found.value.frontMatter.title : undefined;
+};
+
+it('keeps the last good title for a broken file and clears the error when it is restored', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+  const good = ticketText({ title: 'Good title' });
+
+  fake.set(path, good);
+  expect((await cache.refresh(fake.files)).ok).toBe(true);
+
+  fake.set(path, '---\ntitle: [\n---\n');
+  expect((await cache.refresh(fake.files)).ok).toBe(true);
+
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('Good title');
+  expect(cache.listErrors().map((error) => error.path)).toEqual([path]);
+
+  fake.set(path, good);
+  await cache.refresh(fake.files);
+
+  expect(cache.listErrors()).toEqual([]);
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('Good title');
+});
+
+it('shows a changed title after refresh', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+
+  fake.set(path, ticketText({ title: 'Old' }));
+  await cache.refresh(fake.files);
+  fake.set(path, ticketText({ title: 'New' }));
+  await cache.refresh(fake.files);
+
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('New');
+});
+
+it('removes a deleted file from the list', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
+  fake.set(ticketPath('tikk-3a4c'), ticketText({ title: 'Two' }));
+  await cache.refresh(fake.files);
+  fake.remove(ticketPath('tikk-3a4b'));
+  await cache.refresh(fake.files);
+
+  const ids = idsOf(cache.listTickets({ includeArchived: false }));
+
+  expect(ids).toEqual(['tikk-3a4c']);
+});
+
+it('drops a file that vanishes between list and read', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+
+  fake.set(path, ticketText({ title: 'Two' }));
+
+  const vanishing = {
+    ...fake.files,
+    readTicketFile: async (target: string) => {
+      fake.remove(target);
+
+      return fake.files.readTicketFile(target);
+    },
+  };
+
+  const result = await cache.refresh(vanishing);
+
+  expect(result.ok).toBe(true);
+  expect(cache.listTickets({ includeArchived: false })).toEqual([]);
+});
+
+it('does not read a file whose mtime and size are unchanged', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+  const readsAfterFirst = fake.reads();
+  await cache.refresh(fake.files);
+
+  expect(readsAfterFirst).toBe(1);
+  expect(fake.reads()).toBe(readsAfterFirst);
+});
+
+it('keeps the parsed state when only the mtime changes', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+
+  expect(fake.reads()).toBe(2);
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('One');
+  expect(cache.listErrors()).toEqual([]);
+});
+
+it('records an error-only row for a file name without an ID', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+  const path = '/fake/tickets/tikk/notes.md';
+
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+
+  expect(cache.listTickets({ includeArchived: true })).toEqual([]);
+  expect(cache.listErrors().map((error) => error.path)).toEqual([path]);
+});
+
+it('gives the later path an error that names the duplicate', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+  const first = ticketPath('tikk-3a4b');
+  const second = '/fake/tickets/tikk/tikk-3a4b-zzz.md';
+
+  fake.set(first, ticketText({ title: 'First' }));
+  fake.set(second, ticketText({ title: 'Second' }));
+  await cache.refresh(fake.files);
+
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('First');
+  const errors = cache.listErrors();
+
+  expect(errors.map((error) => error.path)).toEqual([second]);
+  expect(errors[0]?.message).toContain(first);
+
+  fake.remove(first);
+  await cache.refresh(fake.files);
+
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('Second');
+  expect(cache.listErrors()).toEqual([]);
+});
+
+it('fails the refresh when the file list fails', async () => {
+  using cache = openCache(databasePath);
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+
+  const result = await cache.refresh({
+    ...fake.files,
+    listTicketFiles: async () => ({ ok: false, reason: { kind: 'failed', message: 'denied' } }),
+  });
+
+  expect(result).toMatchObject({ ok: false, reason: { message: 'denied' } });
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('One');
+});
