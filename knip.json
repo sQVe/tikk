@@ -3,6 +3,8 @@
   "ignoreDependencies": ["@stryker-mutator/bun-runner"],
   "ignoreIssues": {
     "src/invariant.ts": ["files"],
+    "src/store/store.ts": ["exports", "types"],
+    "src/store/storePaths.ts": ["exports", "types"],
     "src/ticket/ticket.ts": ["exports", "types"]
   }
 }

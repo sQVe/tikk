@@ -40,9 +40,9 @@ const builtinsOnly: PackagePolicy = { builtins: true, packages: [] };
 
 const packagePolicies = new Map<string, PackagePolicy>([
   ['ticket', { builtins: false, packages: ['zod'] }],
-  ['store', builtinsOnly],
+  ['store', { builtins: true, packages: ['nanoid'] }],
   ['cache', builtinsOnly],
-  ['project', builtinsOnly],
+  ['project', { builtins: true, packages: ['zod'] }],
   ['cli', { builtins: false, packages: ['node:util'] }],
   ['index', builtinsOnly],
 ]);
