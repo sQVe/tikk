@@ -1,4 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": ["@stryker-mutator/bun-runner"]
+  "ignoreDependencies": ["@stryker-mutator/bun-runner"],
+  "ignoreIssues": {
+    "src/invariant.ts": ["files"],
+    "src/ticket/ticket.ts": ["exports", "types"]
+  }
 }

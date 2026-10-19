@@ -4,6 +4,11 @@ import { defineConfig } from 'vite-plus';
 export default defineConfig({
   lint: {
     extends: [lint],
+    jsPlugins: ['./scripts/lintRules.ts'],
+    rules: {
+      'tikk/module-boundaries': 'error',
+      'tikk/throw-only-in-invariant': 'error',
+    },
   },
   fmt: {
     ...format,

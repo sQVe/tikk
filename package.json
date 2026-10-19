@@ -26,10 +26,14 @@
     "typecheck": "bunx --bun tsc --noEmit",
     "release:github": "bunx --bun changeset tag"
   },
+  "dependencies": {
+    "zod": "4.6.7"
+  },
   "devDependencies": {
     "@changesets/changelog-github": "1.0.1",
     "@changesets/cli": "3.0.2",
     "@hughescr/stryker-bun-runner": "1.6.0",
+    "@oxlint/plugins": "1.79.0",
     "@sqve/mutation": "0.1.0",
     "@sqve/seam": "0.2.0",
     "@stryker-mutator/api": "10.0.0",
