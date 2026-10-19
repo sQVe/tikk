@@ -4,17 +4,16 @@
 **Status**: Accepted
 
 <!-- Draft only after you can name a choice, the lasting reason for it, and a credible
-alternative. Merging the PR is the approval, so a new ADR is Accepted. Use Superseded or Rejected
-when they apply. When a later ADR replaces this one, keep its reasoning, change the status, and add
-a Superseded by line. When it replaces only part, keep the status and name the part, as in
-`Accepted; <part> superseded by [ADR NNNN (Title)](./NNNN-file-name.md)`. Put optional lines
-after Status in this order: Superseded by, Supersedes, Extends, Extended by, Related. A short
-note may follow a link on its line. End every metadata line with a backslash except the last,
-so Markdown keeps the line breaks:
+alternative. Merging the PR is the approval, so a new ADR is Accepted, the only status. When the
+decision's details change, edit this ADR in place. When a new ADR reverses its core choice, delete
+this file and list it in the Retired table of the index. After Status, add at most one Supersedes
+line and then one Related line. The Supersedes line names the old ADR without a link, because its
+file is gone. A short note may follow a link on its line. End every metadata line
+with a backslash except the last, so Markdown keeps the line breaks:
 
 **Date**: YYYY-MM-DD\
-**Status**: Superseded\
-**Superseded by**: [ADR NNNN (Title)](./NNNN-file-name.md)\
+**Status**: Accepted\
+**Supersedes**: ADR NNNN (Title)\
 **Related**: [ADR NNNN (Title)](./NNNN-file-name.md), [Source](https://example.com) -->
 
 ## Context
@@ -23,7 +22,8 @@ so Markdown keeps the line breaks:
 "because" links between facts, so a reader sees why each one matters. Leave out the investigation
 story, the history of the old mechanism, ticket IDs, and implementation steps. Leave out
 measurements the decision does not rest on, and summarize one it does rest on in one sentence.
-Leave out prices and exact versions or byte counts that go stale. -->
+Leave out prices, benchmark tables, and exact versions or byte counts that go stale. Name a file
+only when the decision is about that file. -->
 
 ## Decision
 
