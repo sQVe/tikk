@@ -407,20 +407,23 @@ it('ignores stray files in tickets and in a project folder', async () => {
   expect(listing.errors).toEqual([]);
 });
 
-it('rebuilds a cache row that passes the integrity check but does not parse', async () => {
-  await createTask('Keep me');
+it.each(["blocked_by = '[x'", "mtime_ms = 'not a number'", 'title = NULL'])(
+  'rebuilds a cache row that passes the integrity check but has %s',
+  async (damage) => {
+    await createTask('Keep me');
 
-  const before = await runJson<Listing>(['ls']);
-  const database = new Database(join(home, '.cache', 'tikk', 'index.db'));
+    const before = await runJson<Listing>(['ls']);
+    const database = new Database(join(home, '.cache', 'tikk', 'index.db'));
 
-  database.run("UPDATE tickets SET blocked_by = '[x'");
-  database.close();
+    database.run(`UPDATE tickets SET ${damage}`);
+    database.close();
 
-  const result = await run(['ls', '--json']);
+    const result = await run(['ls', '--json']);
 
-  expect(result.exitCode).toBe(0);
-  expect(JSON.parse(result.stdout)).toEqual(before);
-});
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(before);
+  },
+);
 
 it('reads a ticket hand edited with CRLF line endings', async () => {
   const created = await createTask('First');
@@ -435,4 +438,22 @@ it('reads a ticket hand edited with CRLF line endings', async () => {
 
   expect(shown.title).toBe('Crlf');
   expect(shown.error).toBeNull();
+});
+
+it('refuses new when the project config cannot be read, and creates no ticket', async () => {
+  await run(['init', '--json']);
+
+  Bun.spawnSync(['git', 'init', '-q', work]);
+  Bun.spawnSync(['git', '-C', work, 'remote', 'add', 'origin', 'git@github.com:sQVe/tikk.git']);
+
+  const config = join(home, '.config', 'tikk', 'config.json');
+
+  await Bun.write(config, '{"projects": {"sQVe/tikk": "mapped"}}\n');
+  await chmod(config, 0o000);
+
+  const created = await run(['new', 'task', 'Somewhere', '--json']);
+  const listing = await runJson<Listing>(['ls']);
+
+  expect(created.exitCode).toBe(1);
+  expect(listing.tickets).toEqual([]);
 });

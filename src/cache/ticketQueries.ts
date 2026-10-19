@@ -114,14 +114,25 @@ const toCachedTicket = (raw: unknown): CachedTicket => {
   return parsed.value;
 };
 
-export const hasValidRows = (database: Database): boolean => {
-  const tickets = database.query(`SELECT ${ticketColumns} FROM tickets WHERE title IS NOT NULL`);
-  const errors = database.query('SELECT path, error FROM tickets WHERE error IS NOT NULL');
+const titleOf = z.object({ title: z.string().nullable() });
 
-  const ticketsValid = tickets.all().every((raw) => parseCachedTicket(raw).ok);
+// A row holds either a ticket that parses, or only an error for a file that never parsed.
+const isValidRow = (raw: unknown): boolean => {
+  const title = titleOf.safeParse(raw);
 
-  return ticketsValid && errors.all().every((raw) => errorRowSchema.safeParse(raw).success);
+  if (!title.success) {
+    return false;
+  }
+
+  if (title.data.title === null) {
+    return errorRowSchema.safeParse(raw).success;
+  }
+
+  return parseCachedTicket(raw).ok;
 };
+
+export const hasValidRows = (database: Database): boolean =>
+  database.query(`SELECT ${ticketColumns} FROM tickets`).all().every(isValidRow);
 
 export const getTicket = (
   database: Database,

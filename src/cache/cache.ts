@@ -18,7 +18,7 @@ import type {
   ListTicketsOptions,
   TicketNotFound,
 } from './ticketQueries.ts';
-import { refresh } from './ticketScan.ts';
+import { hasValidScanRows, refresh } from './ticketScan.ts';
 import type { CacheFileReason, CacheFiles } from './ticketScan.ts';
 
 export type {
@@ -30,6 +30,9 @@ export type {
   ListTicketsOptions,
   TicketNotFound,
 };
+
+const hasValidCache = (database: Database): boolean =>
+  hasValidScanRows(database) && hasValidRows(database);
 
 const isSqliteError = (error: unknown): error is Error =>
   error instanceof Error && 'code' in error && String(error.code).startsWith('SQLITE');
@@ -43,13 +46,13 @@ export class TicketCache implements Disposable {
 
   async refresh(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
     try {
-      if (!hasValidRows(this.#database)) {
+      if (!hasValidCache(this.#database)) {
         this.#database.run('DELETE FROM tickets');
       }
 
       const refreshed = await refresh(this.#database, files);
 
-      if (refreshed.ok && !hasValidRows(this.#database)) {
+      if (refreshed.ok && !hasValidCache(this.#database)) {
         return {
           ok: false,
           reason: {

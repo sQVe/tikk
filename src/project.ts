@@ -11,9 +11,11 @@ export type GitOutcome =
   | { kind: 'failed' }
   | { kind: 'unavailable'; message: string };
 
+export type ConfigRead = { kind: 'text'; text: string } | { kind: 'missing' } | { kind: 'failed' };
+
 export interface ProjectEffects {
   runGit: (args: string[]) => Promise<GitOutcome>;
-  readTextFile: (path: string) => Promise<string | undefined>;
+  readConfigFile: (path: string) => Promise<ConfigRead>;
   homeDirectory: string;
 }
 
@@ -46,17 +48,21 @@ const readMappings = async (
   effects: ProjectEffects,
 ): Promise<Result<Map<string, string>, ProjectReason>> => {
   const configPath = join(effects.homeDirectory, '.config', 'tikk', 'config.json');
-  const text = await effects.readTextFile(configPath);
+  const read = await effects.readConfigFile(configPath);
   const mappings = new Map<string, string>();
 
-  if (text === undefined) {
+  if (read.kind === 'missing') {
     return { ok: true, value: mappings };
+  }
+
+  if (read.kind === 'failed') {
+    return { ok: false, reason: { message: `Cannot read ${configPath}.` } };
   }
 
   let json: unknown;
 
   try {
-    json = JSON.parse(text);
+    json = JSON.parse(read.text);
   } catch {
     return { ok: false, reason: { message: `${configPath} is not valid JSON.` } };
   }

@@ -1,14 +1,23 @@
 import { expect, it } from 'bun:test';
 
 import { resolveProject } from './project.ts';
-import type { GitOutcome } from './project.ts';
+import type { ConfigRead, GitOutcome } from './project.ts';
 
 const configPath = '/home/me/.config/tikk/config.json';
 
-const resolveWith = (git: GitOutcome, config?: string) =>
+const configRead = (config: string | undefined): ConfigRead =>
+  config === undefined ? { kind: 'missing' } : { kind: 'text', text: config };
+
+const resolveWith = (git: GitOutcome, config?: string | ConfigRead) =>
   resolveProject('/work/repo', {
     runGit: async () => git,
-    readTextFile: async (path) => (path === configPath ? config : undefined),
+    readConfigFile: async (path) => {
+      if (path !== configPath) {
+        return { kind: 'missing' };
+      }
+
+      return typeof config === 'object' ? config : configRead(config);
+    },
     homeDirectory: '/home/me',
   });
 
@@ -67,4 +76,12 @@ it('fails when git cannot start', async () => {
   const result = await resolveWith({ kind: 'unavailable', message: 'ENOENT' });
 
   expect(result.ok).toBe(false);
+});
+
+it('fails with the config file name when the config cannot be read', async () => {
+  const origin: GitOutcome = { kind: 'output', stdout: 'git@github.com:sQVe/tikk.git' };
+  const result = await resolveWith(origin, { kind: 'failed' });
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toContain(configPath);
 });

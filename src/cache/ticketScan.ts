@@ -48,6 +48,11 @@ const storedRowSchema = z.object({
 
 type StoredRow = z.infer<typeof storedRowSchema>;
 
+export const hasValidScanRows = (database: Database): boolean =>
+  z
+    .array(storedRowSchema)
+    .safeParse(database.query('SELECT path, mtime_ms, size, hash FROM tickets').all()).success;
+
 const loadRows = (database: Database): Map<string, StoredRow> => {
   const rows = z
     .array(storedRowSchema)

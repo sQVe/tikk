@@ -9,7 +9,7 @@ import type { TicketCache } from './cache/cache.ts';
 import { runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
 import { resolveProject } from './project.ts';
-import type { GitOutcome } from './project.ts';
+import type { ConfigRead, GitOutcome } from './project.ts';
 import type { Result } from './result.ts';
 import {
   createTicketFile,
@@ -78,6 +78,16 @@ const storeFiles: Pick<StoreInitEffects, 'readFile' | 'mkdir' | 'writeFile'> = {
 
 const readTextFile = (path: string): Promise<string | undefined> =>
   readFile(path, 'utf8').catch(() => undefined);
+
+const readConfigFile = async (path: string): Promise<ConfigRead> => {
+  try {
+    return { kind: 'text', text: await readFile(path, 'utf8') };
+  } catch (error) {
+    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+    return missing ? { kind: 'missing' } : { kind: 'failed' };
+  }
+};
 
 const sessionFor = (store: Store, cache: TicketCache): CliSession => ({
   refresh: () =>
@@ -154,7 +164,7 @@ const effects: CliEffects = {
   },
   openSession,
   resolveProject: () =>
-    resolveProject(process.cwd(), { runGit: spawnGit, readTextFile, homeDirectory }),
+    resolveProject(process.cwd(), { runGit: spawnGit, readConfigFile, homeDirectory }),
   readTextFile,
   runEditor,
 };
