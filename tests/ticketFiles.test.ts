@@ -157,6 +157,22 @@ it('keeps the last good state for a file with broken front matter', async () => 
   expect(listing.errors[0]?.message).not.toBe('');
 });
 
+it('shows the parse error of a broken file in plain show and after a human edit', async () => {
+  const created = await createTask('First');
+  const editor = join(home, 'break.sh');
+
+  await writeFile(editor, '#!/bin/sh\nprintf "garbage\\n" > "$1"\n');
+  await chmod(editor, 0o755);
+
+  const edited = await run(['edit', created.id], { EDITOR: editor });
+  const shown = await runJson<ShownTicket>(['show', created.id]);
+  const plain = await run(['show', created.id]);
+
+  expect(shown.error).not.toBeNull();
+  expect(edited.stdout).toContain(shown.error ?? '');
+  expect(plain.stdout).toContain(shown.error ?? '');
+});
+
 it('refuses a JSON edit of a file with a parse error', async () => {
   const created = await createTask('First');
 

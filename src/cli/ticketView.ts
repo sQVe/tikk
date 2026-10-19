@@ -45,7 +45,11 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
 export const ticketText = (ticket: CliTicket): string => {
   const heading = `${ticket.id}  ${ticket.frontMatter.status}  ${ticket.frontMatter.title}`;
 
-  return `${heading}\n${ticket.body}`;
+  if (ticket.error === null) {
+    return `${heading}\n${ticket.body}`;
+  }
+
+  return `${heading}\nerror: ${ticket.path}: ${ticket.error}\n${ticket.body}`;
 };
 
 export const storeFailure = (message: string): CommandResult => ({
