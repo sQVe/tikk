@@ -20,7 +20,7 @@ not clear where state should live".
 Written rules alone did not hold in Tau: it grew four task-ID parsers despite a parse-once rule.
 Boundaries need a mechanical check.
 
-Zeta and Phi use the same approach.
+Mergit and Koja use the same approach.
 
 ## Decision
 
