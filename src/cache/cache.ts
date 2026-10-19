@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 
+import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { openDatabase } from './cacheSchema.ts';
@@ -24,6 +25,9 @@ export type {
   TicketNotFound,
 };
 
+const isSqliteError = (error: unknown): error is Error =>
+  error instanceof Error && 'code' in error && String(error.code).startsWith('SQLITE');
+
 export class TicketCache implements Disposable {
   readonly #database: Database;
 
@@ -31,8 +35,17 @@ export class TicketCache implements Disposable {
     this.#database = database;
   }
 
-  refresh(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
-    return refresh(this.#database, files);
+  async refresh(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
+    try {
+      return await refresh(this.#database, files);
+    } catch (error) {
+      invariant(isSqliteError(error), 'A refresh failed for a reason other than SQLite.');
+
+      return {
+        ok: false,
+        reason: { kind: 'failed', message: `The cache failed: ${error.message}` },
+      };
+    }
   }
 
   getTicket(id: TicketId): Result<CachedTicket, TicketNotFound> {

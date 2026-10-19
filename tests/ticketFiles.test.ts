@@ -1,8 +1,9 @@
+import { Database } from 'bun:sqlite';
 import { beforeEach, afterEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 interface RunResult {
   exitCode: number;
@@ -335,4 +336,57 @@ it('lists only the tickets of the project named by --project', async () => {
   const listing = await runJson<Listing>(['ls', '--project', 'other']);
 
   expect(listing.tickets.map((ticket) => ticket.id)).toEqual([other.id]);
+});
+
+it('refuses init and keeps tikk.json when it cannot be read', async () => {
+  await run(['init', '--json']);
+
+  const config = join(home, 'store', 'tikk.json');
+  const original = '{"version": 9, "preserve": "user data"}\n';
+
+  await writeFile(config, original);
+  await chmod(config, 0o200);
+
+  const result = await run(['init', '--json']);
+
+  await chmod(config, 0o600);
+
+  expect(result.exitCode).toBe(1);
+  expect(errorCodeOf(result)).toBe('storeError');
+  expect(await readFile(config, 'utf8')).toBe(original);
+});
+
+it('rebuilds a cache database with a damaged page and lists the same tickets', async () => {
+  await createTask('Keep me');
+
+  const before = await runJson<Listing>(['ls']);
+  const databasePath = join(home, '.cache', 'tikk', 'index.db');
+  const database = new Database(databasePath);
+  const pageSize = (database.query('PRAGMA page_size').get() as { page_size: number }).page_size;
+  const rootRow = database.query("SELECT rootpage FROM sqlite_master WHERE name = 'tickets'").get();
+  const rootPage = (rootRow as { rootpage: number }).rootpage;
+
+  database.close();
+
+  const handle = await open(databasePath, 'r+');
+
+  await handle.write(new Uint8Array(pageSize), 0, pageSize, (rootPage - 1) * pageSize);
+  await handle.close();
+
+  const result = await run(['ls', '--json']);
+
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual(before);
+});
+
+it('ignores stray files in tickets and in a project folder', async () => {
+  const created = await createTask('Keep me');
+
+  await writeFile(join(home, 'store', 'tickets', '.DS_Store'), 'metadata');
+  await writeFile(join(dirname(created.path), '.DS_Store'), 'metadata');
+
+  const listing = await runJson<Listing>(['ls']);
+
+  expect(listing.tickets.map((ticket) => ticket.id)).toEqual([created.id]);
+  expect(listing.errors).toEqual([]);
 });

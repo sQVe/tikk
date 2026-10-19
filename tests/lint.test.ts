@@ -139,3 +139,16 @@ it('refuses a computed dynamic import and passes a literal one the table allows'
   expect(run.diagnostics).toHaveLength(1);
   expect(run.diagnostics[0]).toContain('src/ticket/ticket.ts');
 }, 30_000);
+
+it('passes a subpath of an allowed package and refuses a subpath of any other package', async () => {
+  const run = await lintProject({
+    'src/ticket/ticketA.ts': "import { z } from 'zod/v4';\nexport const ticket = z;\n",
+    'src/ticket/ticketB.ts':
+      "import { nanoid } from 'nanoid/non-secure';\nexport const ticket = nanoid;\n",
+  });
+
+  expect(run.status).toBe(1);
+  expect(run.diagnostics).toHaveLength(1);
+  expect(run.diagnostics[0]).toContain('src/ticket/ticketB.ts');
+  expect(run.diagnostics[0]).toContain('tikk(module-boundaries)');
+}, 30_000);

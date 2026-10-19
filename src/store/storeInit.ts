@@ -74,12 +74,12 @@ export const initStore = async (
 
   const configPath = join(root, configFileName);
 
-  const configExists = await effects.readFile(configPath).then(
-    () => true,
+  const configMissing = await effects.readFile(configPath).then(
     () => false,
+    (error: unknown) => isMissingFile(error),
   );
 
-  if (configExists) {
+  if (!configMissing) {
     return existing;
   }
 

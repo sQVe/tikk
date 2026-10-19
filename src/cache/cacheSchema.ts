@@ -36,12 +36,18 @@ const createTables = (database: Database): void => {
   database.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['version', cacheVersion]);
 };
 
+const isIntact = (database: Database): boolean => {
+  const row = database.query('PRAGMA quick_check').get();
+
+  return row !== null && typeof row === 'object' && Object.values(row).join('') === 'ok';
+};
+
 const hasCurrentVersion = (database: Database): boolean => {
   try {
     const row = database.query("SELECT value FROM meta WHERE key = 'version'").get();
     const value = row !== null && typeof row === 'object' && 'value' in row ? row.value : undefined;
 
-    return value === cacheVersion;
+    return value === cacheVersion && isIntact(database);
   } catch {
     return false;
   }

@@ -34,7 +34,12 @@ export interface CreatedTicketFile {
 
 export interface TicketFileFunctions {
   readdir: (directory: string) => Promise<string[]>;
-  stat: (path: string) => Promise<{ mtimeMs: number; size: number; isFile: () => boolean }>;
+  stat: (path: string) => Promise<{
+    mtimeMs: number;
+    size: number;
+    isFile: () => boolean;
+    isDirectory: () => boolean;
+  }>;
   readFile: (path: string) => Promise<Uint8Array>;
   mkdir: (directory: string) => Promise<void>;
   writeFileExclusive: (path: string, text: string) => Promise<void>;
@@ -51,6 +56,8 @@ interface NewTicket {
 }
 
 type ExclusiveWrite = 'created' | 'exists' | 'failed';
+
+type EntryStats = Awaited<ReturnType<TicketFileFunctions['stat']>>;
 
 const idAlphabet = '346789abcdefghijkmnpqrtwxyz';
 const idLength = 4;
@@ -84,6 +91,38 @@ const listDirectory = async (
   }
 };
 
+// A vanished entry gives undefined, so a list never fails on a file deleted mid-scan.
+const statEntry = async (
+  files: TicketFileFunctions,
+  path: string,
+): Promise<Result<EntryStats | undefined, TicketFileReason>> => {
+  try {
+    return { ok: true, value: await files.stat(path) };
+  } catch (error) {
+    if (errorCode(error) === 'ENOENT') {
+      return { ok: true, value: undefined };
+    }
+
+    return failed(`Cannot check ${path}.`);
+  }
+};
+
+const firstFailure = <Value>(
+  results: Result<Value, TicketFileReason>[],
+): Result<Value[], TicketFileReason> => {
+  const values: Value[] = [];
+
+  for (const result of results) {
+    if (!result.ok) {
+      return result;
+    }
+
+    values.push(result.value);
+  }
+
+  return { ok: true, value: values };
+};
+
 const listProjectFiles = async (
   files: TicketFileFunctions,
   directory: string,
@@ -96,20 +135,32 @@ const listProjectFiles = async (
 
   const markdownNames = names.value.filter((name) => name.endsWith('.md'));
 
-  const entries = await Promise.all(
-    markdownNames.map(async (name): Promise<TicketFileEntry | undefined> => {
-      const path = join(directory, name);
-      const stats = await files.stat(path).catch(() => undefined);
+  const checked = await Promise.all(
+    markdownNames.map(
+      async (name): Promise<Result<TicketFileEntry | undefined, TicketFileReason>> => {
+        const path = join(directory, name);
+        const stats = await statEntry(files, path);
 
-      if (stats === undefined || !stats.isFile()) {
-        return undefined;
-      }
+        if (!stats.ok) {
+          return stats;
+        }
 
-      return { path, mtimeMs: stats.mtimeMs, size: stats.size };
-    }),
+        if (stats.value?.isFile() !== true) {
+          return { ok: true, value: undefined };
+        }
+
+        return { ok: true, value: { path, mtimeMs: stats.value.mtimeMs, size: stats.value.size } };
+      },
+    ),
   );
 
-  return { ok: true, value: entries.filter((entry) => entry !== undefined) };
+  const entries = firstFailure(checked);
+
+  if (!entries.ok) {
+    return entries;
+  }
+
+  return { ok: true, value: entries.value.filter((entry) => entry !== undefined) };
 };
 
 export const listTicketFiles = async (
@@ -123,21 +174,36 @@ export const listTicketFiles = async (
     return projects;
   }
 
-  const lists = await Promise.all(
-    projects.value.map((project) => listProjectFiles(files, join(ticketsRoot, project))),
+  const checked = await Promise.all(
+    projects.value.map(async (project): Promise<Result<string | undefined, TicketFileReason>> => {
+      const path = join(ticketsRoot, project);
+      const stats = await statEntry(files, path);
+
+      if (!stats.ok) {
+        return stats;
+      }
+
+      return { ok: true, value: stats.value?.isDirectory() === true ? path : undefined };
+    }),
   );
 
-  const entries: TicketFileEntry[] = [];
+  const folders = firstFailure(checked);
 
-  for (const list of lists) {
-    if (!list.ok) {
-      return list;
-    }
-
-    entries.push(...list.value);
+  if (!folders.ok) {
+    return folders;
   }
 
-  return { ok: true, value: entries };
+  const projectFolders = folders.value.filter((path) => path !== undefined);
+
+  const lists = firstFailure(
+    await Promise.all(projectFolders.map((path) => listProjectFiles(files, path))),
+  );
+
+  if (!lists.ok) {
+    return lists;
+  }
+
+  return { ok: true, value: lists.value.flat() };
 };
 
 export const readTicketFile = async (

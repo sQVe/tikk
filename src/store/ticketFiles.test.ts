@@ -113,6 +113,55 @@ it('lists the files of every project', async () => {
   expect(paths).toEqual([first.path, second.ok ? second.value.path : ''].toSorted());
 });
 
+it.each(['project folder', 'ticket file'])(
+  'fails the list when a %s cannot be checked',
+  async (target) => {
+    const created = await createOne('Hidden', 'a');
+    const deniedPath = target === 'project folder' ? join(root, 'tickets', 'tikk') : created.path;
+
+    const denyingFiles: TicketFileFunctions = {
+      ...nodeTicketFiles,
+      stat: async (path) => {
+        if (path === deniedPath) {
+          throw Object.assign(new Error('denied'), { code: 'EACCES' });
+        }
+
+        return nodeTicketFiles.stat(path);
+      },
+    };
+
+    const listed = await listTicketFiles(denyingFiles, { root });
+
+    expect(listed).toMatchObject({ ok: false, reason: { kind: 'failed' } });
+  },
+);
+
+it('skips an entry that vanishes between list and check', async () => {
+  const created = await createOne('Kept', 'a');
+  const vanished = join(root, 'tickets', 'gone');
+
+  const vanishingFiles: TicketFileFunctions = {
+    ...nodeTicketFiles,
+    readdir: async (directory) => {
+      const names = await nodeTicketFiles.readdir(directory);
+
+      return directory === join(root, 'tickets') ? [...names, 'gone'] : names;
+    },
+    stat: async (path) => {
+      if (path === vanished) {
+        throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      }
+
+      return nodeTicketFiles.stat(path);
+    },
+  };
+
+  const listed = await listTicketFiles(vanishingFiles, { root });
+  const paths = listed.ok ? listed.value.map((entry) => entry.path) : [];
+
+  expect(paths).toEqual([created.path]);
+});
+
 it('creates the ticket with another ID after a create collides with an existing file', async () => {
   const attempts: string[] = [];
 

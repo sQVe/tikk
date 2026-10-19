@@ -80,3 +80,19 @@ it('returns a failure when the cache folder cannot be created', async () => {
   expect(opened.ok).toBe(false);
   expect(!opened.ok && opened.reason.message).not.toBe('');
 });
+
+it('returns a failure instead of throwing when SQLite fails during refresh', async () => {
+  using cache = openTestCache(databasePath);
+  const database = new Database(databasePath);
+
+  database.run('DROP TABLE tickets');
+  database.close();
+
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
+
+  const refreshed = await cache.refresh(fake.files);
+
+  expect(refreshed.ok).toBe(false);
+});
