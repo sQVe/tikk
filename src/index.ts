@@ -178,7 +178,10 @@ const effects: CliEffects = {
   runEditor,
 };
 
-process.exitCode = await runCli(process.argv.slice(2), effects, {
-  stdout: (text) => process.stdout.write(text),
-  stderr: (text) => process.stderr.write(text),
-});
+// The mutation test runner imports this file into its test process, where the CLI must not run.
+if (import.meta.main) {
+  process.exitCode = await runCli(process.argv.slice(2), effects, {
+    stdout: (text) => process.stdout.write(text),
+    stderr: (text) => process.stderr.write(text),
+  });
+}
