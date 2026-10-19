@@ -457,3 +457,92 @@ it('refuses new when the project config cannot be read, and creates no ticket', 
   expect(created.exitCode).toBe(1);
   expect(listing.tickets).toEqual([]);
 });
+
+it('rebuilds a cache that lost its tickets table', async () => {
+  await createTask('Keep me');
+
+  const before = await runJson<Listing>(['ls']);
+  const database = new Database(join(home, '.cache', 'tikk', 'index.db'));
+
+  database.run('DROP TABLE tickets');
+  database.close();
+
+  const result = await run(['ls', '--json']);
+
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual(before);
+});
+
+it('repairs a former duplicate whose surviving file breaks', async () => {
+  const created = await createTask('First');
+  const copy = join(dirname(created.path), `${created.id}-zcopy.md`);
+  const editor = join(home, 'editor.sh');
+  const repaired = '---\\nkind: task\\ntitle: Fixed\\nproject: tikk\\nstatus: open\\n---\\n';
+
+  await writeFile(copy, await readFile(created.path));
+  await run(['ls', '--json']);
+  await rm(created.path);
+  await writeFile(copy, '---\nkind: [\n---\n');
+  await writeFile(editor, `#!/bin/sh\nprintf '%b' '${repaired}' > "$1"\n`, { mode: 0o755 });
+
+  const edited = await run(['edit', created.id], { EDITOR: editor });
+  const shown = await runJson<ShownTicket>(['show', created.id]);
+
+  expect(edited.exitCode).toBe(0);
+  expect(shown.title).toBe('Fixed');
+});
+
+it('shows the parse error of a ticket that never parsed', async () => {
+  await run(['init', '--json']);
+
+  const path = join(home, 'store', 'tickets', 'tikk', 'tikk-3a4b-broken.md');
+
+  await Bun.write(path, '---\nkind: [\n---\nBroken\n');
+
+  const result = await run(['show', 'tikk-3a4b', '--json']);
+  const error = (JSON.parse(result.stdout) as { error: { code: string; message: string } }).error;
+
+  expect(result.exitCode).toBe(1);
+  expect(error.code).toBe('parseError');
+  expect(error.message).toContain(path);
+});
+
+it('leaves no ticket file when the write fails after the file was created', async () => {
+  await run(['init', '--json']);
+
+  const bodyPath = join(home, 'large-body.md');
+
+  await writeFile(bodyPath, 'x'.repeat(300_000));
+
+  const limited = Bun.spawn(
+    [
+      'bash',
+      '-c',
+      'trap "" XFSZ; ulimit -f 128; exec "$@"',
+      'tikk',
+      'bun',
+      'run',
+      entryPath,
+      'new',
+      'task',
+      'Large',
+      '--body-file',
+      bodyPath,
+      '--json',
+    ],
+    {
+      cwd: work,
+      env: { ...process.env, HOME: home, TIKK_HOME: join(home, 'store') },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+
+  const exitCode = await limited.exited;
+  const listing = await runJson<Listing>(['ls']);
+
+  expect(exitCode).toBe(1);
+  expect(listing.tickets).toEqual([]);
+  expect(listing.errors).toEqual([]);
+});

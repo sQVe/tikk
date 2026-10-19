@@ -42,6 +42,7 @@ export interface TicketFileFunctions {
   }>;
   readFile: (path: string) => Promise<Uint8Array>;
   mkdir: (directory: string) => Promise<void>;
+  // Must leave no file behind when it fails after creating one, and never remove a file it did not create.
   writeFileExclusive: (path: string, text: string) => Promise<void>;
   writeFile: (path: string, text: string) => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;

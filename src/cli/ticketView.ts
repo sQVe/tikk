@@ -1,5 +1,7 @@
+import type { Result } from '../result.ts';
+import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
-import type { CliSession, CliTicket, CommandResult } from './cliEffects.ts';
+import type { CliFailure, CliSession, CliTicket, CommandResult } from './cliEffects.ts';
 
 export interface TicketView {
   id: string;
@@ -79,4 +81,33 @@ export const showAfterRefresh = async (
   }
 
   return showTicket(ticket.value);
+};
+
+export const findTicket = (session: CliSession, rawId: string): Result<CliTicket, CliFailure> => {
+  const id = parseTicketId(rawId);
+  const notFound = { code: 'notFound', message: `Ticket ${rawId} does not exist.` } as const;
+
+  if (!id.ok) {
+    return { ok: false, reason: notFound };
+  }
+
+  const ticket = session.getTicket(id.value);
+
+  if (ticket.ok) {
+    return ticket;
+  }
+
+  const path = session.findTicketPath(id.value);
+
+  if (!path.ok) {
+    return { ok: false, reason: notFound };
+  }
+
+  const cached = session.listErrors().find((error) => error.path === path.value);
+  const detail = cached?.message ?? 'The file did not parse.';
+
+  return {
+    ok: false,
+    reason: { code: 'parseError', message: `${path.value} has an error: ${detail}` },
+  };
 };

@@ -12,12 +12,21 @@ export const nodeTicketFiles: TicketFileFunctions = {
   },
   writeFileExclusive: async (path, text) => {
     const handle = await open(path, 'wx');
+    const write = handle.writeFile(text);
 
-    try {
-      await handle.writeFile(text);
-    } finally {
-      await handle.close();
+    const succeeded = await write.then(
+      () => true,
+      () => false,
+    );
+
+    await handle.close();
+
+    // This call created the file, so a failed write removes it, then rejects with the write error.
+    if (!succeeded) {
+      await unlink(path).catch(() => undefined);
     }
+
+    await write;
   },
   writeFile: (path, text) => writeFile(path, text),
   rename: (from, to) => rename(from, to),

@@ -202,3 +202,23 @@ it('reports a failure and writes nothing when the create fails for another reaso
   expect(created).toMatchObject({ ok: false, reason: { kind: 'failed' } });
   expect(listed).toMatchObject({ ok: true, value: [] });
 });
+
+it('keeps a file another writer created when the exclusive create fails', async () => {
+  const otherText = 'another writer';
+  let otherPath = '';
+
+  const racing: TicketFileFunctions = {
+    ...nodeTicketFiles,
+    writeFileExclusive: async (path) => {
+      otherPath = path;
+      await nodeTicketFiles.writeFile(path, otherText);
+
+      throw Object.assign(new Error('too many open files'), { code: 'EMFILE' });
+    },
+  };
+
+  const created = await createTicketFile(racing, { root }, projectOf('tikk'), 'Race', 'mine');
+
+  expect(created).toMatchObject({ ok: false, reason: { kind: 'failed' } });
+  expect(await readFile(otherPath, 'utf8')).toBe(otherText);
+});

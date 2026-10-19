@@ -9,7 +9,7 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { showAfterRefresh, storeFailure } from './ticketView.ts';
+import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
 interface FieldEdit {
   hash: string;
@@ -20,35 +20,6 @@ interface FieldEdit {
 
 const usage =
   'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--body-file <f>] --json, or tikk edit <id>';
-
-const findTicket = ({ session }: CommandInput, rawId: string): Result<CliTicket, CliFailure> => {
-  const id = parseTicketId(rawId);
-  const notFound = { code: 'notFound', message: `Ticket ${rawId} does not exist.` } as const;
-
-  if (!id.ok) {
-    return { ok: false, reason: notFound };
-  }
-
-  const ticket = session.getTicket(id.value);
-
-  if (ticket.ok) {
-    return ticket;
-  }
-
-  const path = session.findTicketPath(id.value);
-
-  if (!path.ok) {
-    return { ok: false, reason: notFound };
-  }
-
-  const cached = session.listErrors().find((error) => error.path === path.value);
-  const detail = cached?.message ?? 'The file did not parse.';
-
-  return {
-    ok: false,
-    reason: { code: 'parseError', message: `${path.value} has an error: ${detail}` },
-  };
-};
 
 const editInEditor = async (input: CommandInput, rawId: string): Promise<CommandResult> => {
   const id = parseTicketId(rawId);
@@ -176,7 +147,7 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     return editInEditor(input, rawId);
   }
 
-  const found = findTicket(input, rawId);
+  const found = findTicket(input.session, rawId);
 
   if (!found.ok) {
     return found;

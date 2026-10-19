@@ -42,8 +42,33 @@ const isIntact = (database: Database): boolean => {
   return row !== null && typeof row === 'object' && Object.values(row).join('') === 'ok';
 };
 
+const requiredColumns = new Map([
+  [
+    'tickets',
+    'path,mtime_ms,size,hash,id,kind,title,project,parent,rank,blocked_by,status,archived,body,error',
+  ],
+  ['meta', 'key,value'],
+]);
+
+const hasExpectedTables = (database: Database): boolean => {
+  for (const [table, columns] of requiredColumns) {
+    const rows = database.query('SELECT name FROM pragma_table_info(?)').values(table);
+    const names = rows.map((row) => String(row[0]));
+
+    if (names.toSorted().join(',') !== columns.split(',').toSorted().join(',')) {
+      return false;
+    }
+  }
+
+  return true;
+};
+
 const hasCurrentVersion = (database: Database): boolean => {
   try {
+    if (!hasExpectedTables(database)) {
+      return false;
+    }
+
     const row = database.query("SELECT value FROM meta WHERE key = 'version'").get();
     const value = row !== null && typeof row === 'object' && 'value' in row ? row.value : undefined;
 

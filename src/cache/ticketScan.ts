@@ -147,6 +147,7 @@ const recordError = (
       mtime_ms = excluded.mtime_ms,
       size = excluded.size,
       hash = excluded.hash,
+      id = excluded.id,
       error = excluded.error`,
     [entry.path, entry.mtimeMs, entry.size, hash, fileNameId(entry), message],
   );

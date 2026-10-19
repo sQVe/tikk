@@ -1,7 +1,6 @@
-import { parseTicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { ticketText, ticketView } from './ticketView.ts';
+import { findTicket, ticketText, ticketView } from './ticketView.ts';
 
 export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
   const parsed = parseCommandArguments(args, {});
@@ -16,17 +15,10 @@ export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
     return invalidArguments('Usage: tikk show <id> [--json]');
   }
 
-  const id = parseTicketId(rawId);
-  const notFound = { code: 'notFound', message: `Ticket ${rawId} does not exist.` } as const;
-
-  if (!id.ok) {
-    return { ok: false, reason: notFound };
-  }
-
-  const ticket = session.getTicket(id.value);
+  const ticket = findTicket(session, rawId);
 
   if (!ticket.ok) {
-    return { ok: false, reason: notFound };
+    return ticket;
   }
 
   return {
