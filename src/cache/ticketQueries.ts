@@ -63,19 +63,17 @@ const errorRowSchema = z.object({ path: z.string(), error: z.string() });
 const ticketColumns =
   'id, path, hash, error, kind, title, project, parent, rank, blocked_by, status, archived, body';
 
-const invalid = (message: string) => ({ ok: false as const, reason: { message } });
-
-const parseCachedTicket = (raw: unknown): Result<CachedTicket, { message: string }> => {
+const parseCachedTicket = (raw: unknown): CachedTicket | undefined => {
   const row = ticketRowSchema.safeParse(raw);
 
   if (!row.success) {
-    return invalid('A cached ticket row does not match the cache schema.');
+    return undefined;
   }
 
   const id = parseTicketId(row.data.id);
 
   if (!id.ok) {
-    return invalid('A cached ticket row has an invalid ID.');
+    return undefined;
   }
 
   const frontMatter = ticketFrontMatterSchema.safeParse({
@@ -90,28 +88,25 @@ const parseCachedTicket = (raw: unknown): Result<CachedTicket, { message: string
   });
 
   if (!frontMatter.success) {
-    return invalid('A cached ticket row has invalid front matter.');
+    return undefined;
   }
 
   return {
-    ok: true,
-    value: {
-      id: id.value,
-      path: row.data.path,
-      hash: row.data.hash,
-      error: row.data.error,
-      frontMatter: frontMatter.data,
-      body: row.data.body,
-    },
+    id: id.value,
+    path: row.data.path,
+    hash: row.data.hash,
+    error: row.data.error,
+    frontMatter: frontMatter.data,
+    body: row.data.body,
   };
 };
 
 const toCachedTicket = (raw: unknown): CachedTicket => {
   const parsed = parseCachedTicket(raw);
 
-  invariant(parsed.ok, 'A cached ticket row is invalid.');
+  invariant(parsed !== undefined, 'A cached ticket row is invalid.');
 
-  return parsed.value;
+  return parsed;
 };
 
 const titleOf = z.object({ title: z.string().nullable() });
@@ -128,7 +123,7 @@ const isValidRow = (raw: unknown): boolean => {
     return errorRowSchema.safeParse(raw).success;
   }
 
-  return parseCachedTicket(raw).ok;
+  return parseCachedTicket(raw) !== undefined;
 };
 
 export const hasValidRows = (database: Database): boolean =>

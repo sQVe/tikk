@@ -2,6 +2,8 @@ import { Database } from 'bun:sqlite';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 
+import { z } from 'zod';
+
 import type { Result } from '../result.ts';
 
 export interface CacheOpenReason {
@@ -36,11 +38,12 @@ const createTables = (database: Database): void => {
   database.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['version', cacheVersion]);
 };
 
-const isIntact = (database: Database): boolean => {
-  const row = database.query('PRAGMA quick_check').get();
+const intactRowSchema = z.object({ quick_check: z.literal('ok') });
 
-  return row !== null && typeof row === 'object' && Object.values(row).join('') === 'ok';
-};
+const versionRowSchema = z.object({ value: z.number() });
+
+const isIntact = (database: Database): boolean =>
+  intactRowSchema.safeParse(database.query('PRAGMA quick_check').get()).success;
 
 const requiredColumns = new Map([
   [
@@ -69,10 +72,11 @@ const hasCurrentVersion = (database: Database): boolean => {
       return false;
     }
 
-    const row = database.query("SELECT value FROM meta WHERE key = 'version'").get();
-    const value = row !== null && typeof row === 'object' && 'value' in row ? row.value : undefined;
+    const row = versionRowSchema.safeParse(
+      database.query("SELECT value FROM meta WHERE key = 'version'").get(),
+    );
 
-    return value === cacheVersion && isIntact(database);
+    return row.success && row.data.value === cacheVersion && isIntact(database);
   } catch {
     return false;
   }
@@ -107,7 +111,7 @@ const describeError = (error: unknown): string =>
 
 const createDatabase = (path: string): Result<Database, CacheOpenReason> => {
   try {
-    const database = new Database(path, { create: true, readwrite: true });
+    const database = new Database(path, { create: true });
 
     createTables(database);
 

@@ -188,6 +188,118 @@ it('fails the refresh when the file list fails', async () => {
     listTicketFiles: async () => ({ ok: false, reason: { kind: 'failed', message: 'denied' } }),
   });
 
-  expect(result).toMatchObject({ ok: false, reason: { message: 'denied' } });
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'failed' } });
   expect(titleOf(cache, 'tikk-3a4b')).toBe('One');
+});
+
+it('reads a file again when its size changes but its mtime does not', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+
+  fake.set(path, ticketText({ title: 'One' }), 5);
+  await cache.refresh(fake.files);
+  fake.set(path, ticketText({ title: 'Longer title' }), 5);
+  await cache.refresh(fake.files);
+
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('Longer title');
+});
+
+it('does not read a file again after only its mtime changed once', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+  await cache.refresh(fake.files);
+
+  expect(fake.reads()).toBe(2);
+});
+
+it('reads files in path order', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const first = ticketPath('tikk-3a4b');
+  const second = ticketPath('tikk-3a4c');
+  const third = ticketPath('tikk-3a4d');
+
+  fake.set(third, ticketText({ title: 'Three' }));
+  fake.set(first, ticketText({ title: 'One' }));
+  fake.set(second, ticketText({ title: 'Two' }));
+  await cache.refresh(fake.files);
+
+  expect(fake.readPaths()).toEqual([first, second, third]);
+});
+
+it('records an error for a file that cannot be read and reads it again next time', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+  let reads = 0;
+
+  fake.set(path, ticketText({ title: 'One' }));
+
+  const failing = {
+    ...fake.files,
+    readTicketFile: (target: string) => {
+      reads += 1;
+
+      return Promise.resolve({
+        ok: false as const,
+        reason: { kind: 'failed' as const, message: `Cannot read ${target}.` },
+      });
+    },
+  };
+
+  const refreshed = await cache.refresh(failing);
+
+  expect(refreshed.ok).toBe(true);
+  const errors = cache.listErrors();
+
+  expect(errors.map((error) => error.path)).toEqual([path]);
+  expect(errors[0]?.message).toContain(path);
+
+  await cache.refresh(failing);
+
+  expect(reads).toBe(2);
+
+  await cache.refresh(fake.files);
+
+  expect(cache.listErrors()).toEqual([]);
+  expect(titleOf(cache, 'tikk-3a4b')).toBe('One');
+});
+
+it('records an error that names a project folder that is not a valid name', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = '/fake/tickets/Bad Name/tikk-3a4b-slug.md';
+
+  fake.set(path, ticketText({ title: 'One' }));
+
+  const refreshed = await cache.refresh(fake.files);
+  const errors = cache.listErrors();
+
+  expect(refreshed.ok).toBe(true);
+  expect(errors.map((error) => error.path)).toEqual([path]);
+  expect(errors[0]?.message).toContain('Bad Name');
+  expect(cache.listTickets({ includeArchived: true })).toEqual([]);
+});
+
+it('gives no addressable ticket for a file in an invalid project folder', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = '/fake/tickets/Bad Name/undefined-3467-slug.md';
+
+  fake.set(path, ticketText({ title: 'One' }));
+  await cache.refresh(fake.files);
+
+  expect(cache.findTicketPath(idOf('undefined-3467'))).toMatchObject({
+    ok: false,
+    reason: { kind: 'notFound' },
+  });
+
+  expect(cache.getTicket(idOf('undefined-3467')).ok).toBe(false);
 });

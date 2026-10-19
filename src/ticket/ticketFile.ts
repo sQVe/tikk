@@ -50,5 +50,5 @@ export const parseTicketFile = (text: string): Result<TicketFile, TicketFileReas
 export const serializeTicketFile = (file: TicketFile): string => {
   const yaml = Bun.YAML.stringify(file.frontMatter, null, 2);
 
-  return `---\n${yaml.trimEnd()}\n---\n${file.body}`;
+  return `---\n${yaml}\n---\n${file.body}`;
 };

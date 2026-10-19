@@ -1,6 +1,7 @@
 import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 
 import type { StoreInitEffects } from './storeInit.ts';
+import { newIdSuffix } from './ticketFiles.ts';
 import type { TicketFileFunctions } from './ticketFiles.ts';
 
 export const nodeTicketFiles: TicketFileFunctions = {
@@ -31,6 +32,7 @@ export const nodeTicketFiles: TicketFileFunctions = {
   writeFile: (path, text) => writeFile(path, text),
   rename: (from, to) => rename(from, to),
   unlink: (path) => unlink(path),
+  randomIdSuffix: () => newIdSuffix(),
 };
 
 export const nodeStoreFiles: Pick<StoreInitEffects, 'readFile' | 'mkdir' | 'writeFile'> = {

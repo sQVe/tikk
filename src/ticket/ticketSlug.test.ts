@@ -18,3 +18,7 @@ it('never returns an empty slug', () => {
   expect(createTicketSlug('!!! ???')).not.toBe('');
   expect(createTicketSlug('')).not.toBe('');
 });
+
+it('drops leading characters that are not letters or digits', () => {
+  expect(createTicketSlug('!!! abc')).toBe('abc');
+});

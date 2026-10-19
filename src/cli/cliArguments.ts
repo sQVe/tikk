@@ -1,6 +1,7 @@
 import { parseArgs } from 'node:util';
 import type { ParseArgsOptionsConfig } from 'node:util';
 
+import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
 import type { CliEffects, CliFailure } from './cliEffects.ts';
 
@@ -22,9 +23,9 @@ export const parseCommandArguments = (
 
     return { ok: true, value: { values: parsed.values, positionals: parsed.positionals } };
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Cannot read the arguments.';
+    invariant(error instanceof Error, 'parseArgs threw a value that is not an Error.');
 
-    return { ok: false, reason: { code: 'invalidArguments', message } };
+    return { ok: false, reason: { code: 'invalidArguments', message: error.message } };
   }
 };
 

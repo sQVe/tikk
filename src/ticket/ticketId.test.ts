@@ -50,15 +50,16 @@ it('uses the known project prefix when the project contains a dash', () => {
 });
 
 it.each([
-  'tikk-ab3d.md',
-  'tikk-ab3d-.md',
-  'tikk-ab3d-slug.txt',
-  'other-ab3d-slug.md',
-  'tikk-abl3-slug.md',
-  'tikk-ab3dx-slug.md',
-])('rejects the file name %s', (fileName) => {
+  ['tikk-ab3d.md', 'tikk-ab3d.md'],
+  ['tikk-ab3d-.md', 'tikk-ab3d-.md'],
+  ['tikk-ab3d-slug.txt', 'tikk-ab3d-slug.txt'],
+  ['other-ab3d-slug.md', 'other-ab3d-slug.md'],
+  ['tikk-abl3-slug.md', 'tikk-abl3'],
+  ['tikk-ab3dx-slug.md', 'tikk-ab3dx-slug.md'],
+])('rejects the file name %s and names %s', (fileName, subject) => {
   const project = parseProjectName('tikk');
   const parsed = project.ok ? parseTicketFileName(fileName, project.value) : project;
 
   expect(parsed.ok).toBe(false);
+  expect(!parsed.ok && parsed.reason.message).toContain(subject);
 });

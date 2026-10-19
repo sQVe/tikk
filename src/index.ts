@@ -15,6 +15,7 @@ import {
   createTicketFile,
   initStore,
   listTicketFiles,
+  newIdSuffix,
   openStore,
   readTicketFile,
   resolveStoreRoot,
@@ -77,6 +78,7 @@ const ticketFiles: TicketFileFunctions = {
   writeFile: (path, text) => writeFile(path, text),
   rename: (from, to) => rename(from, to),
   unlink: (path) => unlink(path),
+  randomIdSuffix: () => newIdSuffix(),
 };
 
 const storeFiles: Pick<StoreInitEffects, 'readFile' | 'mkdir' | 'writeFile'> = {

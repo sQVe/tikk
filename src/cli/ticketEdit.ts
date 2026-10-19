@@ -21,12 +21,22 @@ interface FieldEdit {
 const usage =
   'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--body-file <f>] --json, or tikk edit <id>';
 
+const missingTicket = (rawId: string): CommandResult => ({
+  ok: false,
+  reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+});
+
 const editInEditor = async (input: CommandInput, rawId: string): Promise<CommandResult> => {
   const id = parseTicketId(rawId);
-  const path = id.ok ? input.session.findTicketPath(id.value) : undefined;
 
-  if (!id.ok || path === undefined || !path.ok) {
-    return { ok: false, reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` } };
+  if (!id.ok) {
+    return missingTicket(rawId);
+  }
+
+  const path = input.session.findTicketPath(id.value);
+
+  if (!path.ok) {
+    return missingTicket(rawId);
   }
 
   const edited = await input.effects.runEditor(path.value);

@@ -73,9 +73,10 @@ it('fails and names the repository when its name is not a project name', async (
 });
 
 it('fails when git cannot start', async () => {
-  const result = await resolveWith({ kind: 'unavailable', message: 'ENOENT' });
+  const result = await resolveWith({ kind: 'unavailable', message: 'spawn-failure-detail' });
 
   expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toContain('spawn-failure-detail');
 });
 
 it('fails with the config file name when the config cannot be read', async () => {
@@ -84,4 +85,26 @@ it('fails with the config file name when the config cannot be read', async () =>
 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason.message).toContain(configPath);
+});
+
+it('asks git for the origin URL of the working folder', async () => {
+  const calls: string[][] = [];
+
+  await resolveProject('/work/repo', {
+    runGit: async (args) => {
+      calls.push(args);
+
+      return { kind: 'failed' };
+    },
+    readConfigFile: async () => ({ kind: 'missing' }),
+    homeDirectory: '/home/me',
+  });
+
+  expect(calls).toEqual([['-C', '/work/repo', 'remote', 'get-url', 'origin']]);
+});
+
+it('gives personal for an origin it cannot read as a repository', async () => {
+  const result = await resolveWith({ kind: 'output', stdout: 'not a remote url' });
+
+  expect(result).toMatchObject({ ok: true, value: 'personal' });
 });

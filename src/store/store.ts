@@ -4,6 +4,7 @@ export type { StoreInitEffects } from './storeInit.ts';
 export {
   createTicketFile,
   listTicketFiles,
+  newIdSuffix,
   readTicketFile,
   writeTicketFile,
 } from './ticketFiles.ts';

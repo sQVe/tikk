@@ -62,21 +62,57 @@ it('defaults blockedBy to an empty list', () => {
   expect(parsed.ok && parsed.value.frontMatter.blockedBy).toEqual([]);
 });
 
-const failures: [string, string][] = [
-  ['a missing --- block', '# Just a heading\n'],
-  ['invalid YAML', '---\nkind: [task\n---\nBody\n'],
-  ['an unknown key', taskText.replace('status: open', 'status: open\nrelated: []')],
-  ['status closed on a task', taskText.replace('status: open', 'status: closed')],
-  ['an empty title', taskText.replace('Fix the parser', '""')],
-  ['a bad parent ID', taskText.replace('status: open', 'status: open\nparent: tikk-l0l0')],
-  ['an unsupported kind', taskText.replace('kind: task', 'kind: plan')],
+const failures: [string, string, string][] = [
+  ['a missing --- block', '# Just a heading\n', 'missingFrontMatter'],
+  ['invalid YAML', '---\nkind: [task\n---\nBody\n', 'invalidYaml'],
+  [
+    'an unknown key',
+    taskText.replace('status: open', 'status: open\nrelated: []'),
+    'invalidFrontMatter',
+  ],
+  [
+    'status closed on a task',
+    taskText.replace('status: open', 'status: closed'),
+    'invalidFrontMatter',
+  ],
+  ['an empty title', taskText.replace('Fix the parser', '""'), 'invalidFrontMatter'],
+  [
+    'a bad parent ID',
+    taskText.replace('status: open', 'status: open\nparent: tikk-l0l0'),
+    'invalidFrontMatter',
+  ],
+  ['an unsupported kind', taskText.replace('kind: task', 'kind: plan'), 'invalidFrontMatter'],
+  ['an empty front matter block', '---\n---\n', 'invalidFrontMatter'],
 ];
 
-it.each(failures)('returns a failure with a message for %s', (_name, text) => {
+it.each(failures)('returns a failure with a message for %s', (_name, text, kind) => {
   const parsed = parseTicketFile(text);
 
   expect(parsed.ok).toBe(false);
+  const actualKind: string | undefined = parsed.ok ? undefined : parsed.reason.kind;
+
+  expect(actualKind).toBe(kind);
   expect(!parsed.ok && parsed.reason.message.length > 0).toBe(true);
+});
+
+it('reads an empty body when nothing follows the closing delimiter', () => {
+  const parsed = parseTicketFile(taskText.slice(0, taskText.indexOf('\n---\n') + 4));
+
+  expect(parsed.ok && parsed.value.body).toBe('');
+});
+
+it('writes the closing delimiter on the line after the front matter', () => {
+  const parsed = parseTicketFile(taskText);
+
+  if (!parsed.ok) {
+    throw new Error(parsed.reason.message);
+  }
+
+  const text = serializeTicketFile({ frontMatter: parsed.value.frontMatter, body: 'Body\n' });
+
+  expect(text).toStartWith('---\n');
+  expect(text).toEndWith('\n---\nBody\n');
+  expect(text).not.toContain('\n\n---');
 });
 
 it('parses CRLF around the delimiters and keeps the body as written', () => {

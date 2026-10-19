@@ -8,6 +8,7 @@ import {
   ticketPath,
   ticketText,
   openTestCache,
+  runSql,
 } from './cacheHarness.ts';
 
 let databasePath = '';
@@ -96,4 +97,68 @@ it('returns a notFound result for the path of an unknown ID', () => {
   }
 
   expect(cache.findTicketPath(id.value)).toMatchObject({ ok: false, reason: { kind: 'notFound' } });
+});
+
+it('returns parent, rank, and blockedBy of a ticket', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+
+  fake.set(
+    ticketPath('tikk-3a4b'),
+    ticketText({ title: 'Linked', parent: 'tikk-3a4c', rank: 2.5, blockedBy: ['tikk-3a4d'] }),
+  );
+
+  await cache.refresh(fake.files);
+
+  const id = parseTicketId('tikk-3a4b');
+
+  if (!id.ok) {
+    throw new Error('bad id');
+  }
+
+  const found = cache.getTicket(id.value);
+
+  expect(found.ok && found.value.frontMatter).toMatchObject({
+    parent: 'tikk-3a4c',
+    rank: 2.5,
+    blockedBy: ['tikk-3a4d'],
+  });
+});
+
+it('throws instead of returning a ticket row it cannot read', async () => {
+  {
+    using cache = openTestCache(databasePath);
+    const fake = createFakeFiles();
+
+    fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'One' }));
+    await cache.refresh(fake.files);
+  }
+
+  runSql(databasePath, "UPDATE tickets SET status = 'bogus'");
+
+  using cache = openTestCache(databasePath);
+  const id = parseTicketId('tikk-3a4b');
+
+  if (!id.ok) {
+    throw new Error('bad id');
+  }
+
+  expect(() => cache.getTicket(id.value)).toThrow();
+  expect(() => cache.listTickets({ includeArchived: true })).toThrow();
+});
+
+it('throws instead of returning an error row it cannot read', async () => {
+  {
+    using cache = openTestCache(databasePath);
+    const fake = createFakeFiles();
+
+    fake.set('/fake/tickets/tikk/notes.md', ticketText({ title: 'One' }));
+    await cache.refresh(fake.files);
+  }
+
+  runSql(databasePath, "UPDATE tickets SET error = x'00'");
+
+  using cache = openTestCache(databasePath);
+
+  expect(() => cache.listErrors()).toThrow();
 });

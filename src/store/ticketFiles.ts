@@ -47,6 +47,7 @@ export interface TicketFileFunctions {
   writeFile: (path: string, text: string) => Promise<void>;
   rename: (from: string, to: string) => Promise<void>;
   unlink: (path: string) => Promise<void>;
+  randomIdSuffix: () => string;
 }
 
 interface NewTicket {
@@ -64,7 +65,7 @@ const idAlphabet = '346789abcdefghijkmnpqrtwxyz';
 const idLength = 4;
 const maxCreateAttempts = 100;
 
-const newIdSuffix = customAlphabet(idAlphabet, idLength);
+export const newIdSuffix = customAlphabet(idAlphabet, idLength);
 
 const hashText = (text: string | Uint8Array): string =>
   createHash('sha256').update(text).digest('hex');
@@ -254,7 +255,7 @@ const createWithFreeId = async (
     return failed(`No free ticket ID found for project "${project}".`);
   }
 
-  const candidate = `${project}-${newIdSuffix()}`;
+  const candidate = `${project}-${files.randomIdSuffix()}`;
   const parsed = parseTicketId(candidate);
 
   invariant(parsed.ok, `generated ID "${candidate}" must be valid`);
@@ -322,7 +323,7 @@ export const writeTicketFile = async (
     };
   }
 
-  const temporaryPath = join(dirname(path), `.${basename(path)}.${newIdSuffix()}.tmp`);
+  const temporaryPath = join(dirname(path), `.${basename(path)}.${files.randomIdSuffix()}.tmp`);
 
   try {
     await files.writeFile(temporaryPath, text);

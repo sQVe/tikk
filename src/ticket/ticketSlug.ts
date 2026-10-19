@@ -6,9 +6,9 @@ export const createTicketSlug = (title: string): string => {
     .replace(/\p{M}/gu, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+/, '');
+    .replace(/^-/, '');
 
-  const slug = words.slice(0, maxLength).replace(/-+$/, '');
+  const slug = words.slice(0, maxLength).replace(/-$/, '');
 
   return slug === '' ? 'ticket' : slug;
 };
