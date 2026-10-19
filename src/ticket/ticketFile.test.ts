@@ -78,3 +78,11 @@ it.each(failures)('returns a failure with a message for %s', (_name, text) => {
   expect(parsed.ok).toBe(false);
   expect(!parsed.ok && parsed.reason.message.length > 0).toBe(true);
 });
+
+it('parses CRLF around the delimiters and keeps the body as written', () => {
+  const parsed = parseTicketFile(taskText.replaceAll('\n', '\r\n'));
+
+  expect(parsed.ok).toBe(true);
+  expect(parsed.ok && parsed.value.frontMatter.title).toBe('Fix the parser');
+  expect(parsed.ok && parsed.value.body).toBe('Body line one.\r\n\r\nBody line two.\r\n');
+});

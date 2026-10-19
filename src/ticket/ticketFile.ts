@@ -14,7 +14,7 @@ export interface TicketFileReason {
   message: string;
 }
 
-const frontMatterPattern = /^---\n(?:([\s\S]*?)\n)?---(?:\n([\s\S]*))?$/;
+const frontMatterPattern = /^---\r?\n(?:([\s\S]*?)\r?\n)?---(?:\r?\n([\s\S]*))?$/;
 
 const fail = (
   kind: TicketFileReason['kind'],

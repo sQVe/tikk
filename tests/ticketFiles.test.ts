@@ -406,3 +406,33 @@ it('ignores stray files in tickets and in a project folder', async () => {
   expect(listing.tickets.map((ticket) => ticket.id)).toEqual([created.id]);
   expect(listing.errors).toEqual([]);
 });
+
+it('rebuilds a cache row that passes the integrity check but does not parse', async () => {
+  await createTask('Keep me');
+
+  const before = await runJson<Listing>(['ls']);
+  const database = new Database(join(home, '.cache', 'tikk', 'index.db'));
+
+  database.run("UPDATE tickets SET blocked_by = '[x'");
+  database.close();
+
+  const result = await run(['ls', '--json']);
+
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout)).toEqual(before);
+});
+
+it('reads a ticket hand edited with CRLF line endings', async () => {
+  const created = await createTask('First');
+  const text = await readFile(created.path, 'utf8');
+
+  await writeFile(
+    created.path,
+    text.replace('title: First', 'title: Crlf').replaceAll('\n', '\r\n'),
+  );
+
+  const shown = await runJson<ShownTicket>(['show', created.id]);
+
+  expect(shown.title).toBe('Crlf');
+  expect(shown.error).toBeNull();
+});

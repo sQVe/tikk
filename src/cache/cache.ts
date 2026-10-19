@@ -5,7 +5,13 @@ import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { openDatabase } from './cacheSchema.ts';
 import type { CacheOpenReason } from './cacheSchema.ts';
-import { findTicketPath, getTicket, listErrors, listTickets } from './ticketQueries.ts';
+import {
+  findTicketPath,
+  getTicket,
+  hasValidRows,
+  listErrors,
+  listTickets,
+} from './ticketQueries.ts';
 import type {
   CachedError,
   CachedTicket,
@@ -37,7 +43,23 @@ export class TicketCache implements Disposable {
 
   async refresh(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
     try {
-      return await refresh(this.#database, files);
+      if (!hasValidRows(this.#database)) {
+        this.#database.run('DELETE FROM tickets');
+      }
+
+      const refreshed = await refresh(this.#database, files);
+
+      if (refreshed.ok && !hasValidRows(this.#database)) {
+        return {
+          ok: false,
+          reason: {
+            kind: 'failed',
+            message: 'The cache holds rows it cannot read after a rebuild.',
+          },
+        };
+      }
+
+      return refreshed;
     } catch (error) {
       invariant(isSqliteError(error), 'A refresh failed for a reason other than SQLite.');
 

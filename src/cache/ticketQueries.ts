@@ -63,14 +63,20 @@ const errorRowSchema = z.object({ path: z.string(), error: z.string() });
 const ticketColumns =
   'id, path, hash, error, kind, title, project, parent, rank, blocked_by, status, archived, body';
 
-const toCachedTicket = (raw: unknown): CachedTicket => {
+const invalid = (message: string) => ({ ok: false as const, reason: { message } });
+
+const parseCachedTicket = (raw: unknown): Result<CachedTicket, { message: string }> => {
   const row = ticketRowSchema.safeParse(raw);
 
-  invariant(row.success, 'A cached ticket row does not match the cache schema.');
+  if (!row.success) {
+    return invalid('A cached ticket row does not match the cache schema.');
+  }
 
   const id = parseTicketId(row.data.id);
 
-  invariant(id.ok, 'A cached ticket row has an invalid ID.');
+  if (!id.ok) {
+    return invalid('A cached ticket row has an invalid ID.');
+  }
 
   const frontMatter = ticketFrontMatterSchema.safeParse({
     kind: row.data.kind,
@@ -83,16 +89,38 @@ const toCachedTicket = (raw: unknown): CachedTicket => {
     archived: row.data.archived ?? undefined,
   });
 
-  invariant(frontMatter.success, 'A cached ticket row has invalid front matter.');
+  if (!frontMatter.success) {
+    return invalid('A cached ticket row has invalid front matter.');
+  }
 
   return {
-    id: id.value,
-    path: row.data.path,
-    hash: row.data.hash,
-    error: row.data.error,
-    frontMatter: frontMatter.data,
-    body: row.data.body,
+    ok: true,
+    value: {
+      id: id.value,
+      path: row.data.path,
+      hash: row.data.hash,
+      error: row.data.error,
+      frontMatter: frontMatter.data,
+      body: row.data.body,
+    },
   };
+};
+
+const toCachedTicket = (raw: unknown): CachedTicket => {
+  const parsed = parseCachedTicket(raw);
+
+  invariant(parsed.ok, 'A cached ticket row is invalid.');
+
+  return parsed.value;
+};
+
+export const hasValidRows = (database: Database): boolean => {
+  const tickets = database.query(`SELECT ${ticketColumns} FROM tickets WHERE title IS NOT NULL`);
+  const errors = database.query('SELECT path, error FROM tickets WHERE error IS NOT NULL');
+
+  const ticketsValid = tickets.all().every((raw) => parseCachedTicket(raw).ok);
+
+  return ticketsValid && errors.all().every((raw) => errorRowSchema.safeParse(raw).success);
 };
 
 export const getTicket = (
