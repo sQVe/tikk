@@ -1,6 +1,16 @@
 #!/usr/bin/env bun
 import { existsSync } from 'node:fs';
-import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 
@@ -14,14 +24,21 @@ import type { Result } from './result.ts';
 import {
   createTicketFile,
   initStore,
+  listFactFiles,
   listTicketFiles,
   newIdSuffix,
   openStore,
+  readFactFile,
   readTicketFile,
   resolveStoreRoot,
   writeTicketFile,
 } from './store/store.ts';
-import type { Store, StoreInitEffects, TicketFileFunctions } from './store/store.ts';
+import type {
+  FactFileFunctions,
+  Store,
+  StoreInitEffects,
+  TicketFileFunctions,
+} from './store/store.ts';
 
 const homeDirectory = homedir();
 const storeRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
@@ -81,6 +98,14 @@ const ticketFiles: TicketFileFunctions = {
   randomIdSuffix: () => newIdSuffix(),
 };
 
+const factFiles: FactFileFunctions = {
+  readdir: ticketFiles.readdir,
+  stat: ticketFiles.stat,
+  mkdir: ticketFiles.mkdir,
+  readFileFrom: (path, fromByte) => Bun.file(path).slice(fromByte).bytes(),
+  appendFile: (path, text) => appendFile(path, text),
+};
+
 const storeFiles: Pick<StoreInitEffects, 'readFile' | 'mkdir' | 'writeFile'> = {
   readFile: (path) => readFile(path, 'utf8'),
   mkdir: ticketFiles.mkdir,
@@ -105,6 +130,8 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => ({
     cache.refresh({
       listTicketFiles: () => listTicketFiles(ticketFiles, store),
       readTicketFile: (path) => readTicketFile(ticketFiles, path),
+      listFactFiles: () => listFactFiles(factFiles, store),
+      readFactFile: (path, fromByte) => readFactFile(factFiles, path, fromByte),
     }),
   getTicket: (id) => cache.getTicket(id),
   findTicketPath: (id) => cache.findTicketPath(id),

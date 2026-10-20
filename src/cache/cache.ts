@@ -1,10 +1,13 @@
 import type { Database } from 'bun:sqlite';
 
+import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { openDatabase } from './cacheSchema.ts';
 import type { CacheOpenReason } from './cacheSchema.ts';
+import { listFactErrors, listFacts } from './factQueries.ts';
+import { refreshFacts } from './factScan.ts';
 import {
   findTicketPath,
   getTicket,
@@ -52,7 +55,17 @@ export class TicketCache implements Disposable {
 
       const refreshed = await refresh(this.#database, files);
 
-      if (refreshed.ok && !hasValidCache(this.#database)) {
+      if (!refreshed.ok) {
+        return refreshed;
+      }
+
+      const refreshedFacts = await refreshFacts(this.#database, files);
+
+      if (!refreshedFacts.ok) {
+        return refreshedFacts;
+      }
+
+      if (!hasValidCache(this.#database)) {
         return {
           ok: false,
           reason: {
@@ -85,8 +98,12 @@ export class TicketCache implements Disposable {
     return listTickets(this.#database, options);
   }
 
+  listFacts(ticketIds?: TicketId[]): Fact[] {
+    return listFacts(this.#database, ticketIds);
+  }
+
   listErrors(): CachedError[] {
-    return listErrors(this.#database);
+    return [...listErrors(this.#database), ...listFactErrors(this.#database)];
   }
 
   [Symbol.dispose](): void {

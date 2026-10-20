@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Result } from '../result.ts';
 import { parseProjectName, parseTicketFile, parseTicketFileName } from '../ticket/ticket.ts';
 import type { TicketFile } from '../ticket/ticket.ts';
+import type { FactCacheFiles } from './factScan.ts';
 
 interface CacheFileEntry {
   path: string;
@@ -23,7 +24,7 @@ export interface CacheFileReason {
   message: string;
 }
 
-export interface CacheFiles {
+export interface CacheFiles extends FactCacheFiles {
   listTicketFiles: () => Promise<Result<CacheFileEntry[], CacheFileReason>>;
   readTicketFile: (path: string) => Promise<Result<CacheFileContent, CacheFileReason>>;
 }

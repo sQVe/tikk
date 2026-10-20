@@ -10,7 +10,7 @@ export interface CacheOpenReason {
   message: string;
 }
 
-const cacheVersion = 1;
+const cacheVersion = 2;
 
 const createTables = (database: Database): void => {
   database.run(
@@ -34,6 +34,40 @@ const createTables = (database: Database): void => {
   );
 
   database.run('CREATE INDEX tickets_id ON tickets (id)');
+
+  database.run(
+    `CREATE TABLE facts (
+      path TEXT NOT NULL,
+      line INTEGER NOT NULL,
+      ticket TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      at TEXT NOT NULL,
+      json TEXT NOT NULL,
+      PRIMARY KEY (path, line)
+    )`,
+  );
+
+  database.run('CREATE INDEX facts_ticket ON facts (ticket)');
+
+  database.run(
+    `CREATE TABLE fact_errors (
+      path TEXT NOT NULL,
+      line INTEGER NOT NULL,
+      message TEXT NOT NULL,
+      PRIMARY KEY (path, line)
+    )`,
+  );
+
+  database.run(
+    `CREATE TABLE fact_files (
+      path TEXT PRIMARY KEY,
+      size INTEGER NOT NULL,
+      mtime_ms REAL NOT NULL,
+      bytes_read INTEGER NOT NULL,
+      lines_read INTEGER NOT NULL
+    )`,
+  );
+
   database.run('CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL)');
   database.run('INSERT INTO meta (key, value) VALUES (?, ?)', ['version', cacheVersion]);
 };
@@ -50,6 +84,9 @@ const requiredColumns = new Map([
     'tickets',
     'path,mtime_ms,size,hash,id,kind,title,project,parent,rank,blocked_by,status,archived,body,error',
   ],
+  ['facts', 'path,line,ticket,kind,at,json'],
+  ['fact_errors', 'path,line,message'],
+  ['fact_files', 'path,size,mtime_ms,bytes_read,lines_read'],
   ['meta', 'key,value'],
 ]);
 
