@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { existsSync } from 'node:fs';
 import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
@@ -175,7 +175,12 @@ const effects: CliEffects = {
   },
   openSession,
   resolveProject: () =>
-    resolveProject(process.cwd(), { runGit: spawnGit, readConfigFile, homeDirectory }),
+    resolveProject(process.cwd(), {
+      runGit: spawnGit,
+      readConfigFile,
+      homeDirectory,
+      hostName: hostname(),
+    }),
   readTextFile,
   runEditor,
 };
