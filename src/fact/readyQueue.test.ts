@@ -1,0 +1,113 @@
+import { describe, expect, it } from 'bun:test';
+
+import { selectReady } from './fact.ts';
+import { makeFact, makeTicket, now, taskId } from './factHarness.ts';
+
+const noScope = {};
+
+describe('selectReady', () => {
+  it('skips a task blocked by an open task and names the blocker', () => {
+    const blocker = makeTicket('3469', { rank: 3 });
+    const blocked = makeTicket('3478', { rank: 1, blockedBy: ['3469'] });
+    const free = makeTicket('3479', { rank: 2 });
+    const result = selectReady([blocked, free, blocker], [], now, noScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([free.id, blocker.id]);
+
+    expect(result.skipped).toEqual([
+      { ticket: blocked, reason: 'blocked', blockers: [{ id: taskId('3469'), state: 'open' }] },
+    ]);
+  });
+
+  it('does not let a canceled blocker block', () => {
+    const blocker = makeTicket('3469', { status: 'canceled' });
+    const task = makeTicket('3478', { blockedBy: ['3469'] });
+    const result = selectReady([blocker, task], [], now, noScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([task.id]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('does not let an accepted task or a closed issue block', () => {
+    const accepted = makeTicket('3469');
+    const issue = makeTicket('3478', { kind: 'issue', status: 'closed' });
+    const task = makeTicket('3479', { blockedBy: ['3469', '3478'] });
+    const facts = [makeFact('3469', { kind: 'accept' })];
+    const result = selectReady([accepted, issue, task], facts, now, noScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([task.id]);
+  });
+
+  it('blocks on a missing blocker and names it as missing', () => {
+    const task = makeTicket('3478', { blockedBy: ['3469'] });
+    const result = selectReady([task], [], now, noScope);
+
+    expect(result.candidates).toEqual([]);
+
+    expect(result.skipped).toEqual([
+      { ticket: task, reason: 'blocked', blockers: [{ id: taskId('3469'), state: 'missing' }] },
+    ]);
+  });
+
+  it('skips an active task with its holder and lease end', () => {
+    const active = makeTicket('3469', { rank: 1 });
+    const free = makeTicket('3478', { rank: 2 });
+
+    const facts = [
+      makeFact('3469', { kind: 'claim', holder: 'agent', leaseEnd: '2026-10-20T13:00:00.000Z' }),
+    ];
+
+    const result = selectReady([free, active], facts, now, noScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([free.id]);
+
+    expect(result.skipped).toEqual([
+      { ticket: active, reason: 'active', holder: 'agent', leaseEnd: '2026-10-20T13:00:00.000Z' },
+    ]);
+  });
+
+  it('skips a submitted task and omits skipped tasks after the last candidate', () => {
+    const submitted = makeTicket('3469', { rank: 1 });
+    const free = makeTicket('3478', { rank: 2 });
+    const later = makeTicket('3479', { rank: 3, blockedBy: ['3469'] });
+    const facts = [makeFact('3469', { kind: 'log', type: 'submitted', text: 'done' })];
+    const result = selectReady([submitted, free, later], facts, now, noScope);
+
+    expect(result.skipped.map((entry) => entry.reason)).toEqual(['submitted']);
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([free.id]);
+  });
+
+  it('lists every considered task as skipped when there is no candidate', () => {
+    const submitted = makeTicket('3469');
+    const blocked = makeTicket('3478', { blockedBy: ['3469'] });
+    const facts = [makeFact('3469', { kind: 'log', type: 'submitted', text: 'done' })];
+    const result = selectReady([submitted, blocked], facts, now, noScope);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.skipped.map((entry) => entry.reason)).toEqual(['submitted', 'blocked']);
+  });
+
+  it('orders ranked tasks first, then by ID, and ignores drafts, issues, and archived tasks', () => {
+    const unranked = makeTicket('3469');
+    const ranked = makeTicket('3478', { rank: 5 });
+    const draft = makeTicket('3479', { status: 'draft', rank: 0 });
+    const issue = makeTicket('3489', { kind: 'issue', rank: 0 });
+    const archived = makeTicket('3498', { archived: '2026-01-01', rank: 0 });
+    const result = selectReady([unranked, archived, issue, draft, ranked], [], now, noScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([ranked.id, unranked.id]);
+  });
+
+  it('limits candidates to the project and the direct children of the parent', () => {
+    const parent = makeTicket('3469');
+    const child = makeTicket('3478', { parent: '3469' });
+    const grandchild = makeTicket('3479', { parent: '3478' });
+    const other = makeTicket('3489');
+    const tickets = [parent, child, grandchild, other];
+    const byParent = selectReady(tickets, [], now, { parent: parent.id });
+    const byOtherProject = selectReady(tickets, [], now, { project: 'other' });
+
+    expect(byParent.candidates.map((entry) => entry.ticket.id)).toEqual([child.id]);
+    expect(byOtherProject.candidates).toEqual([]);
+  });
+});

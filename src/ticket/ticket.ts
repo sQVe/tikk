@@ -5,6 +5,7 @@ export {
   parseProjectName,
   parseTicketFileName,
   parseTicketId,
+  ticketIdSchema,
   type ProjectName,
   type TicketId,
 } from './ticketId.ts';
