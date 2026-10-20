@@ -12,6 +12,15 @@ export interface CacheOpenReason {
 
 const cacheVersion = 2;
 
+// Other tikk processes write the same cache, so a query waits for their lock instead of failing.
+const busyTimeoutMilliseconds = 5000;
+
+const waitForLocks = (database: Database): Database => {
+  database.run(`PRAGMA busy_timeout = ${busyTimeoutMilliseconds}`);
+
+  return database;
+};
+
 const createTables = (database: Database): void => {
   database.run(
     `CREATE TABLE tickets (
@@ -129,7 +138,7 @@ const openExisting = (path: string): Database | undefined => {
   let database: Database | undefined;
 
   try {
-    database = new Database(path, { readwrite: true });
+    database = waitForLocks(new Database(path, { readwrite: true }));
   } catch {
     return undefined;
   }
@@ -148,7 +157,7 @@ const describeError = (error: unknown): string =>
 
 const createDatabase = (path: string): Result<Database, CacheOpenReason> => {
   try {
-    const database = new Database(path, { create: true });
+    const database = waitForLocks(new Database(path, { create: true }));
 
     createTables(database);
 

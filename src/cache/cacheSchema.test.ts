@@ -211,3 +211,37 @@ it('returns a failure that names the path when one leftover file cannot be remov
     expect(opened.reason.message).toContain(`${databasePath}-shm`);
   }
 });
+
+it('waits for a write by another process instead of rebuilding the database', async () => {
+  const before = await listIds();
+
+  const holder = Bun.spawn(
+    [
+      'bun',
+      '-e',
+      `const { Database } = require('bun:sqlite');
+      const database = new Database(${JSON.stringify(databasePath)});
+      database.run('BEGIN EXCLUSIVE');
+      console.log('locked');
+      await Bun.sleep(300);
+      database.run('ROLLBACK');`,
+    ],
+    { stdout: 'pipe', stderr: 'inherit' },
+  );
+
+  const reader = holder.stdout.getReader();
+
+  await reader.read();
+
+  const opened = openCache(databasePath);
+  const ids = opened.ok ? idsOf(opened.value.listTickets({ includeArchived: true })) : [];
+
+  if (opened.ok) {
+    opened.value[Symbol.dispose]();
+  }
+
+  reader.releaseLock();
+  await holder.exited;
+
+  expect(ids).toEqual(before);
+});
