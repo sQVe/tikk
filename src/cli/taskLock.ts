@@ -42,7 +42,9 @@ const loadTask = async (
   const task = found.value;
 
   if (task.frontMatter.kind !== 'task') {
-    return invalidArguments(`Ticket ${task.id} is a ${task.frontMatter.kind}, not a task.`);
+    return invalidArguments(
+      `Ticket ${task.id} is not a task: its kind is ${task.frontMatter.kind}.`,
+    );
   }
 
   // The cache keeps the last good front matter of a broken file, which a state change must not use.
