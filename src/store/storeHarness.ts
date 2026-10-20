@@ -1,5 +1,6 @@
 import {
   appendFile,
+  link,
   mkdir,
   open,
   readdir,
@@ -63,30 +64,11 @@ export const nodeFactFiles: FactFileFunctions = {
 
 export const nodeStoreLock: StoreLockFunctions = {
   pid: process.pid,
-  createExclusive: async (path, text) => {
-    const handle = await open(path, 'wx');
-    const write = handle.writeFile(text);
-
-    const succeeded = await write.then(
-      () => true,
-      () => false,
-    );
-
-    await handle.close();
-
-    if (!succeeded) {
-      await unlink(path).catch(() => undefined);
-    }
-
-    await write;
-  },
+  writeFile: (path, text) => writeFile(path, text),
+  link: (existingPath, newPath) => link(existingPath, newPath),
+  randomSuffix: () => crypto.randomUUID(),
   readFile: (path) => readFile(path, 'utf8'),
   unlink: (path) => unlink(path),
-  modifiedAt: async (path) => {
-    const stats = await stat(path);
-
-    return stats.mtimeMs;
-  },
   isProcessAlive: (pid) => {
     try {
       process.kill(pid, 0);

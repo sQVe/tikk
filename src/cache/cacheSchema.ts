@@ -7,15 +7,24 @@ import { z } from 'zod';
 import type { Result } from '../result.ts';
 
 export interface CacheOpenReason {
+  kind: 'busy' | 'failed';
   message: string;
 }
+
+type VersionCheck = 'current' | 'outdated' | 'busy';
 
 const cacheVersion = 2;
 
 // Other tikk processes write the same cache, so a query waits for their lock instead of failing.
-const busyTimeoutMilliseconds = 5000;
+const defaultBusyTimeoutMilliseconds = 5000;
 
-const waitForLocks = (database: Database): Database => {
+const isBusyError = (error: unknown): boolean => {
+  const code = error instanceof Error && 'code' in error ? String(error.code) : '';
+
+  return code.startsWith('SQLITE_BUSY') || code.startsWith('SQLITE_LOCKED');
+};
+
+const waitForLocks = (database: Database, busyTimeoutMilliseconds: number): Database => {
   database.run(`PRAGMA busy_timeout = ${busyTimeoutMilliseconds}`);
 
   return database;
@@ -112,19 +121,22 @@ const hasExpectedTables = (database: Database): boolean => {
   return true;
 };
 
-const hasCurrentVersion = (database: Database): boolean => {
+const checkVersion = (database: Database): VersionCheck => {
   try {
     if (!hasExpectedTables(database)) {
-      return false;
+      return 'outdated';
     }
 
     const row = versionRowSchema.safeParse(
       database.query("SELECT value FROM meta WHERE key = 'version'").get(),
     );
 
-    return row.success && row.data.value === cacheVersion && isIntact(database);
-  } catch {
-    return false;
+    const current = row.success && row.data.value === cacheVersion && isIntact(database);
+
+    return current ? 'current' : 'outdated';
+  } catch (error) {
+    // A database that another process holds is not damaged, so it must not be rebuilt.
+    return isBusyError(error) ? 'busy' : 'outdated';
   }
 };
 
@@ -134,36 +146,50 @@ const removeDatabaseFiles = (path: string): void => {
   }
 };
 
-const openExisting = (path: string): Database | undefined => {
+const openExisting = (
+  path: string,
+  busyTimeoutMilliseconds: number,
+): Result<Database | undefined, CacheOpenReason> => {
   let database: Database | undefined;
 
   try {
-    database = waitForLocks(new Database(path, { readwrite: true }));
+    database = waitForLocks(new Database(path, { readwrite: true }), busyTimeoutMilliseconds);
   } catch {
-    return undefined;
+    return { ok: true, value: undefined };
   }
 
-  if (hasCurrentVersion(database)) {
-    return database;
+  const version = checkVersion(database);
+
+  if (version === 'current') {
+    return { ok: true, value: database };
   }
 
   database.close();
 
-  return undefined;
+  if (version === 'busy') {
+    const message = `The cache at ${path} is busy in another process. Try again.`;
+
+    return { ok: false, reason: { kind: 'busy', message } };
+  }
+
+  return { ok: true, value: undefined };
 };
 
 const describeError = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const createDatabase = (path: string): Result<Database, CacheOpenReason> => {
+const createDatabase = (
+  path: string,
+  busyTimeoutMilliseconds: number,
+): Result<Database, CacheOpenReason> => {
   try {
-    const database = waitForLocks(new Database(path, { create: true }));
+    const database = waitForLocks(new Database(path, { create: true }), busyTimeoutMilliseconds);
 
     createTables(database);
 
     return { ok: true, value: database };
   } catch (error) {
-    return { ok: false, reason: { message: describeError(error) } };
+    return { ok: false, reason: { kind: 'failed', message: describeError(error) } };
   }
 };
 
@@ -171,7 +197,10 @@ const prepareDatabaseFolder = (path: string): CacheOpenReason | undefined => {
   try {
     mkdirSync(dirname(path), { recursive: true });
   } catch (error) {
-    return { message: `Cannot create the cache folder for ${path}: ${describeError(error)}` };
+    return {
+      kind: 'failed',
+      message: `Cannot create the cache folder for ${path}: ${describeError(error)}`,
+    };
   }
 
   return undefined;
@@ -181,23 +210,33 @@ const clearDatabaseFiles = (path: string): CacheOpenReason | undefined => {
   try {
     removeDatabaseFiles(path);
   } catch (error) {
-    return { message: `Cannot remove the old cache at ${path}: ${describeError(error)}` };
+    return {
+      kind: 'failed',
+      message: `Cannot remove the old cache at ${path}: ${describeError(error)}`,
+    };
   }
 
   return undefined;
 };
 
-export const openDatabase = (path: string): Result<Database, CacheOpenReason> => {
+export const openDatabase = (
+  path: string,
+  busyTimeoutMilliseconds = defaultBusyTimeoutMilliseconds,
+): Result<Database, CacheOpenReason> => {
   const folderProblem = prepareDatabaseFolder(path);
 
   if (folderProblem !== undefined) {
     return { ok: false, reason: folderProblem };
   }
 
-  const existing = openExisting(path);
+  const existing = openExisting(path, busyTimeoutMilliseconds);
 
-  if (existing !== undefined) {
-    return { ok: true, value: existing };
+  if (!existing.ok) {
+    return existing;
+  }
+
+  if (existing.value !== undefined) {
+    return { ok: true, value: existing.value };
   }
 
   const clearProblem = clearDatabaseFiles(path);
@@ -206,12 +245,13 @@ export const openDatabase = (path: string): Result<Database, CacheOpenReason> =>
     return { ok: false, reason: clearProblem };
   }
 
-  const created = createDatabase(path);
+  const created = createDatabase(path, busyTimeoutMilliseconds);
 
   if (!created.ok) {
     return {
       ok: false,
       reason: {
+        kind: 'failed',
         message: `The cache database at ${path} cannot be created: ${created.reason.message}`,
       },
     };

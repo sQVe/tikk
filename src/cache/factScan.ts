@@ -21,6 +21,8 @@ export interface FactCacheFiles {
   readFactFile: (path: string, fromByte: number) => Promise<Result<Uint8Array, FactFileReason>>;
 }
 
+type Pass = 'applied' | 'conflict';
+
 const storedFileSchema = z.object({
   path: z.string(),
   size: z.number(),
@@ -32,6 +34,42 @@ const storedFileSchema = z.object({
 type StoredFile = z.infer<typeof storedFileSchema>;
 
 const newline = 0x0a;
+
+const loadStoredFile = (database: Database, path: string): StoredFile | undefined => {
+  const row = database
+    .query('SELECT path, size, mtime_ms, bytes_read, lines_read FROM fact_files WHERE path = ?')
+    .get(path);
+
+  return row === null ? undefined : storedFileSchema.parse(row);
+};
+
+const isSameStoredFile = (left: StoredFile | undefined, right: StoredFile | undefined): boolean =>
+  left?.size === right?.size &&
+  left?.mtime_ms === right?.mtime_ms &&
+  left?.bytes_read === right?.bytes_read;
+
+const maximumPasses = 5;
+
+// Another process may refresh the same cache at the same time. A change applies only when the row
+// still matches the one this refresh started from, so an older refresh never undoes a newer one.
+// Returns `false` when the row moved, so the caller reads that file again.
+const writeIfUnchanged = (
+  database: Database,
+  path: string,
+  basis: StoredFile | undefined,
+  write: () => void,
+): boolean =>
+  database
+    .transaction(() => {
+      if (!isSameStoredFile(loadStoredFile(database, path), basis)) {
+        return false;
+      }
+
+      write();
+
+      return true;
+    })
+    .immediate();
 
 const loadStoredFiles = (database: Database): Map<string, StoredFile> => {
   const rows = z
@@ -112,56 +150,98 @@ const applyBytes = (
   );
 };
 
-export const refreshFacts = async (
+const refreshFactFile = async (
   database: Database,
   files: FactCacheFiles,
-): Promise<Result<undefined, FactFileReason>> => {
+  entry: FactFileEntry,
+  previous: StoredFile | undefined,
+): Promise<Result<Pass, FactFileReason>> => {
+  if (isUnchanged(previous, entry)) {
+    return { ok: true, value: 'applied' };
+  }
+
+  const reread = hasShrunk(previous, entry);
+  const base = reread ? undefined : previous;
+  const read = await files.readFactFile(entry.path, base?.bytes_read ?? 0);
+
+  if (!read.ok && read.reason.kind !== 'notFound') {
+    return read;
+  }
+
+  const written = writeIfUnchanged(database, entry.path, previous, () => {
+    if (reread || !read.ok) {
+      deleteFile(database, entry.path);
+    }
+
+    if (read.ok) {
+      applyBytes(database, entry, base, read.value);
+    }
+  });
+
+  return { ok: true, value: written ? 'applied' : 'conflict' };
+};
+
+const refreshFactsOnce = async (
+  database: Database,
+  files: FactCacheFiles,
+): Promise<Result<Pass, FactFileReason>> => {
+  let pass: Pass = 'applied';
+
+  // The rows load before the listing, so a file indexed by another process after this point is not
+  // in the basis, and this refresh does not delete it.
+  const stored = loadStoredFiles(database);
   const listed = await files.listFactFiles();
 
   if (!listed.ok) {
     return listed;
   }
 
-  const stored = loadStoredFiles(database);
   const present = new Set(listed.value.map((entry) => entry.path));
 
-  for (const path of stored.keys()) {
+  for (const [path, basis] of stored) {
     if (!present.has(path)) {
-      deleteFile(database, path);
+      const written = writeIfUnchanged(database, path, basis, () => {
+        deleteFile(database, path);
+      });
+
+      pass = written ? pass : 'conflict';
     }
   }
 
   for (const entry of listed.value.toSorted((left, right) => left.path.localeCompare(right.path))) {
-    const previous = stored.get(entry.path);
-
-    if (isUnchanged(previous, entry)) {
-      continue;
-    }
-
-    const reread = hasShrunk(previous, entry);
-    const base = reread ? undefined : previous;
-
     // oxlint-disable-next-line eslint/no-await-in-loop -- Reads run one at a time to bound open files.
-    const read = await files.readFactFile(entry.path, base?.bytes_read ?? 0);
+    const refreshed = await refreshFactFile(database, files, entry, stored.get(entry.path));
 
-    if (!read.ok) {
-      if (read.reason.kind === 'notFound') {
-        deleteFile(database, entry.path);
-
-        continue;
-      }
-
-      return read;
+    if (!refreshed.ok) {
+      return refreshed;
     }
 
-    database.transaction(() => {
-      if (reread) {
-        deleteFile(database, entry.path);
-      }
-
-      applyBytes(database, entry, base, read.value);
-    })();
+    pass = refreshed.value === 'conflict' ? refreshed.value : pass;
   }
 
-  return { ok: true, value: undefined };
+  return { ok: true, value: pass };
+};
+
+// A refresh that skipped a moved row did not see the newest lines, so it reads again instead of
+// reporting success on stale facts.
+export const refreshFacts = async (
+  database: Database,
+  files: FactCacheFiles,
+): Promise<Result<undefined, FactFileReason>> => {
+  for (let attempt = 0; attempt < maximumPasses; attempt += 1) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each pass depends on the rows the last one left.
+    const pass = await refreshFactsOnce(database, files);
+
+    if (!pass.ok) {
+      return pass;
+    }
+
+    if (pass.value === 'applied') {
+      return { ok: true, value: undefined };
+    }
+  }
+
+  const message = `The fact cache kept changing in another process after ${maximumPasses} reads.`;
+
+  return { ok: false, reason: { kind: 'failed', message } };
 };

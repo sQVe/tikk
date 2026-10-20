@@ -18,13 +18,6 @@ const cancelLocked = async (input: CommandInput, locked: LockedTask): Promise<Co
     return conflict(`Task ${task.id} is done, so it cannot be canceled.`);
   }
 
-  if (task.error !== null) {
-    return {
-      ok: false,
-      reason: { code: 'parseError', message: `${task.path} has an error: ${task.error}` },
-    };
-  }
-
   const frontMatter = { ...task.frontMatter, status: 'canceled' as const };
   const text = serializeTicketFile({ frontMatter, body: task.body });
   const written = await input.session.writeTicketFile(task.path, task.hash, text);
@@ -51,5 +44,5 @@ export const ticketCancel = async (input: CommandInput): Promise<CommandResult> 
     return invalidArguments('Usage: tikk cancel <id> [--json]');
   }
 
-  return withLockedTask(input, rawId, (locked) => cancelLocked(input, locked));
+  return withLockedTask(input, rawId, 'refuse', (locked) => cancelLocked(input, locked));
 };

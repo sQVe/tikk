@@ -14,6 +14,7 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliEffects, CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
+import { withStoreLock } from './taskLock.ts';
 import { showAfterRefresh, storeFailure } from './ticketView.ts';
 
 const usage =
@@ -83,11 +84,9 @@ const readBody = (
   return readBodyFile(effects, bodyPath);
 };
 
-export const ticketNew = async ({
-  args,
-  effects,
-  session,
-}: CommandInput): Promise<CommandResult> => {
+export const ticketNew = async (input: CommandInput): Promise<CommandResult> => {
+  const { args, effects, session } = input;
+
   const parsed = parseCommandArguments(args, {
     project: { type: 'string' },
     parent: { type: 'string' },
@@ -125,13 +124,14 @@ export const ticketNew = async ({
   }
 
   const text = serializeTicketFile({ frontMatter: frontMatter.value, body: body.value });
-  const created = await session.createTicketFile(project.value, title, text);
 
-  if (!created.ok) {
-    return storeFailure(created.reason.message);
-  }
+  return withStoreLock(input, async () => {
+    const created = await session.createTicketFile(project.value, title, text);
 
-  const shown = await showAfterRefresh(session, created.value.id);
+    if (!created.ok) {
+      return storeFailure(created.reason.message);
+    }
 
-  return shown;
+    return showAfterRefresh(session, created.value.id);
+  });
 };

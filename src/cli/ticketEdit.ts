@@ -9,6 +9,7 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { fileErrorFailure, withStoreLock } from './taskLock.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
 interface FieldEdit {
@@ -71,10 +72,7 @@ const applyEdit = async (
   edit: FieldEdit,
 ): Promise<CommandResult> => {
   if (ticket.error !== null) {
-    return {
-      ok: false,
-      reason: { code: 'parseError', message: `${ticket.path} has an error: ${ticket.error}` },
-    };
+    return fileErrorFailure(ticket);
   }
 
   const frontMatter = buildFrontMatter(ticket, edit);
@@ -157,11 +155,21 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     return editInEditor(input, rawId);
   }
 
-  const found = findTicket(input.session, rawId);
+  const fieldEdit = edit.value;
 
-  if (!found.ok) {
-    return found;
-  }
+  return withStoreLock(input, async () => {
+    const refreshed = await input.session.refresh();
 
-  return applyEdit(input, found.value, edit.value);
+    if (!refreshed.ok) {
+      return storeFailure(refreshed.reason.message);
+    }
+
+    const found = findTicket(input.session, rawId);
+
+    if (!found.ok) {
+      return found;
+    }
+
+    return applyEdit(input, found.value, fieldEdit);
+  });
 };

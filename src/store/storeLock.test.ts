@@ -6,7 +6,6 @@ import type { StoreLockFunctions } from './store.ts';
 interface Harness {
   functions: StoreLockFunctions;
   files: Map<string, string>;
-  modified: Map<string, number>;
   advance: (milliseconds: number) => void;
   sleeps: number[];
 }
@@ -19,28 +18,32 @@ const codeError = (code: string): Error => Object.assign(new Error(code), { code
 
 const harness = (livePids: number[], pid = 100): Harness => {
   const files = new Map<string, string>();
-  const modified = new Map<string, number>();
   const sleeps: number[] = [];
   let clock = 0;
+  let suffix = 0;
 
   const functions: StoreLockFunctions = {
     pid,
-    createExclusive: async (path, text) => {
-      if (files.has(path)) {
-        throw codeError('EEXIST');
-      }
-
+    writeFile: async (path, text) => {
       files.set(path, text);
-      modified.set(path, clock);
     },
-    modifiedAt: async (path) => {
-      const time = modified.get(path);
+    link: async (existingPath, newPath) => {
+      const text = files.get(existingPath);
 
-      if (time === undefined) {
+      if (text === undefined) {
         throw codeError('ENOENT');
       }
 
-      return time;
+      if (files.has(newPath)) {
+        throw codeError('EEXIST');
+      }
+
+      files.set(newPath, text);
+    },
+    randomSuffix: () => {
+      suffix += 1;
+
+      return String(suffix);
     },
     readFile: async (path) => {
       const text = files.get(path);
@@ -68,7 +71,7 @@ const harness = (livePids: number[], pid = 100): Harness => {
     clock += milliseconds;
   };
 
-  return { functions, files, modified, advance, sleeps };
+  return { functions, files, advance, sleeps };
 };
 
 it('clears a lock held by a process that no longer exists', async () => {
@@ -152,7 +155,7 @@ it('leaves a lock file that another process holds when it releases', async () =>
 it('fails when the lock file cannot be created', async () => {
   const { functions } = harness([]);
 
-  functions.createExclusive = async () => {
+  functions.link = async () => {
     throw codeError('EACCES');
   };
 
@@ -195,7 +198,7 @@ it('lets only one of two acquirers that saw the same stale lock hold it', async 
 });
 
 it('retries while another process holds the breaker', async () => {
-  const { functions, files, sleeps } = harness([]);
+  const { functions, files, sleeps } = harness([555]);
 
   files.set(lockPath, '999\n');
   files.set(breakerPath, '555\n');
@@ -212,15 +215,164 @@ it('retries while another process holds the breaker', async () => {
   expect(files.get(lockPath)).toBe('100\n');
 });
 
-it('removes a breaker older than 5 seconds', async () => {
-  const { functions, files, modified, advance } = harness([]);
+it('never lets a second acquirer clear a lock whose holder has not written its PID yet', async () => {
+  const { functions: first, files } = harness([100, 200]);
+  const second: StoreLockFunctions = { ...first, pid: 200 };
+  const writeFile = first.writeFile;
+  let secondResult: Awaited<ReturnType<typeof acquireStoreLock>> | undefined;
+  let paused = false;
+
+  // The first write creates the file before its text is there, as a real file system does.
+  first.writeFile = async (path, text) => {
+    if (paused) {
+      await writeFile(path, text);
+
+      return;
+    }
+
+    paused = true;
+    await writeFile(path, '');
+    secondResult = await acquireStoreLock(second, store);
+    files.set(path, text);
+  };
+
+  const firstResult = await acquireStoreLock(first, store);
+  const holders = [firstResult, secondResult].filter((result) => result?.ok === true);
+
+  expect(holders).toHaveLength(1);
+  expect(files.get(lockPath)).toBe('200\n');
+  expect([...files.keys()]).toEqual([lockPath]);
+});
+
+it('fails when a stale lock cannot be removed', async () => {
+  const { functions, files } = harness([]);
+  const unlink = functions.unlink;
+  let failedOnce = false;
+
+  files.set(lockPath, '999\n');
+
+  functions.unlink = async (path) => {
+    if (path === lockPath && !failedOnce) {
+      failedOnce = true;
+      throw codeError('EACCES');
+    }
+
+    await unlink(path);
+  };
+
+  expect(await acquireStoreLock(functions, store)).toMatchObject({
+    ok: false,
+    reason: { kind: 'failed' },
+  });
+
+  expect(files.get(lockPath)).toBe('999\n');
+  expect(files.has(breakerPath)).toBe(false);
+});
+
+it('removes a breaker whose owner no longer exists', async () => {
+  const { functions, files } = harness([]);
 
   files.set(lockPath, '999\n');
   files.set(breakerPath, '555\n');
-  modified.set(breakerPath, 0);
-  advance(5001);
 
   expect((await acquireStoreLock(functions, store)).ok).toBe(true);
   expect(files.get(lockPath)).toBe('100\n');
   expect(files.has(breakerPath)).toBe(false);
+});
+
+it('keeps the breaker of a live owner that pauses longer than 5 seconds', async () => {
+  const { functions: first, files, advance } = harness([100, 200]);
+  const second: StoreLockFunctions = { ...first, pid: 200 };
+  const unlink = first.unlink;
+  let secondResult: Awaited<ReturnType<typeof acquireStoreLock>> | undefined;
+  let breakerDuringPause: string | undefined;
+
+  files.set(lockPath, '999\n');
+
+  // The first acquirer holds the breaker and has read the stale PID when it pauses.
+  first.unlink = async (path) => {
+    if (path === lockPath && secondResult === undefined) {
+      advance(6000);
+      secondResult = await acquireStoreLock(second, store);
+      breakerDuringPause = files.get(breakerPath);
+    }
+
+    await unlink(path);
+  };
+
+  const firstResult = await acquireStoreLock(first, store);
+  const holders = [firstResult, secondResult].filter((result) => result?.ok === true);
+
+  expect(breakerDuringPause).toBe('100\n');
+  expect(holders).toHaveLength(1);
+  expect(secondResult).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(files.get(lockPath)).toBe('100\n');
+});
+
+it('fails when it cannot read the PID of a breaker', async () => {
+  const { functions, files } = harness([]);
+  const readFile = functions.readFile;
+
+  files.set(lockPath, '999\n');
+  files.set(breakerPath, '555\n');
+
+  functions.readFile = async (path) => {
+    if (path === breakerPath) {
+      throw codeError('EIO');
+    }
+
+    return readFile(path);
+  };
+
+  expect(await acquireStoreLock(functions, store)).toMatchObject({
+    ok: false,
+    reason: { kind: 'failed' },
+  });
+
+  expect(files.get(lockPath)).toBe('999\n');
+  expect(files.get(breakerPath)).toBe('555\n');
+});
+
+it('retries when the lock disappears before it reads the PID', async () => {
+  const { functions, files } = harness([999]);
+  const readFile = functions.readFile;
+  let removed = false;
+
+  files.set(lockPath, '999\n');
+
+  functions.readFile = async (path) => {
+    if (path === lockPath && !removed) {
+      removed = true;
+      files.delete(lockPath);
+    }
+
+    return readFile(path);
+  };
+
+  expect((await acquireStoreLock(functions, store)).ok).toBe(true);
+  expect(files.get(lockPath)).toBe('100\n');
+});
+
+it('fails and keeps the lock when it cannot read the PID of the lock', async () => {
+  const { functions, files } = harness([]);
+  const readFile = functions.readFile;
+  let failedOnce = false;
+
+  files.set(lockPath, '999\n');
+
+  functions.readFile = async (path) => {
+    if (path === lockPath && !failedOnce) {
+      failedOnce = true;
+      throw codeError('EACCES');
+    }
+
+    return readFile(path);
+  };
+
+  expect(await acquireStoreLock(functions, store)).toMatchObject({
+    ok: false,
+    reason: { kind: 'failed' },
+  });
+
+  expect(files.get(lockPath)).toBe('999\n');
 });

@@ -28,6 +28,8 @@ const logUsage =
 const submitUsage = 'Usage: tikk submit <id> --holder <h> [--text <t>] [--json]';
 const acceptUsage = 'Usage: tikk accept <id> [--json]';
 const leasePattern = /^([1-9][0-9]*)([smh])$/;
+const maximumLeaseDays = 30;
+const hoursPerDay = 24;
 
 const secondMilliseconds = 1000;
 const minuteMilliseconds = 60_000;
@@ -85,7 +87,13 @@ const parseLease = (text: string): Result<number, CliFailure> => {
     return invalidArguments(`Lease "${text}" must be <n>s, <n>m, or <n>h.`);
   }
 
-  return { ok: true, value: Number(match[1]) * unit };
+  const milliseconds = Number(match[1]) * unit;
+
+  if (milliseconds > maximumLeaseDays * hoursPerDay * hourMilliseconds) {
+    return invalidArguments(`Lease "${text}" is longer than ${maximumLeaseDays} days.`);
+  }
+
+  return { ok: true, value: milliseconds };
 };
 
 const resolveMachine = async (input: CommandInput): Promise<Result<string, CliFailure>> => {
@@ -106,7 +114,9 @@ const appendAndShow = async (
   const appended = await input.session.appendFact(fact.machine, fact);
 
   if (!appended.ok) {
-    return storeFailure(appended.reason.message);
+    const { kind, message } = appended.reason;
+
+    return kind === 'invalid' ? invalidArguments(message) : storeFailure(message);
   }
 
   const { state, claim } = deriveTaskState(locked.task, [...locked.facts, fact], locked.now);
@@ -180,7 +190,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
   const session = stringValue(values, 'session');
   const sessionLog = stringValue(values, 'session-log');
 
-  return withLockedTask(input, rawId, async (locked) => {
+  return withLockedTask(input, rawId, 'refuse', async (locked) => {
     const allowed = requireClaimable(locked, holder.value);
 
     if (!allowed.ok) {
@@ -222,7 +232,7 @@ export const taskRelease = async (input: CommandInput): Promise<CommandResult> =
     return machine;
   }
 
-  return withLockedTask(input, target.value.rawId, async (locked) => {
+  return withLockedTask(input, target.value.rawId, 'refuse', async (locked) => {
     const allowed = requireHolder(locked, holder.value);
 
     if (!allowed.ok) {
@@ -277,7 +287,7 @@ export const taskLog = async (input: CommandInput): Promise<CommandResult> => {
 
   const holder = stringValue(values, 'holder');
 
-  return withLockedTask(input, rawId, (locked) =>
+  return withLockedTask(input, rawId, 'allow', (locked) =>
     appendAndShow(input, locked, {
       version: 1,
       kind: 'log',
@@ -315,7 +325,7 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
     return machine;
   }
 
-  return withLockedTask(input, rawId, async (locked) => {
+  return withLockedTask(input, rawId, 'refuse', async (locked) => {
     const allowed = requireHolder(locked, holder.value);
 
     if (!allowed.ok) {
@@ -348,7 +358,7 @@ export const taskAccept = async (input: CommandInput): Promise<CommandResult> =>
     return machine;
   }
 
-  return withLockedTask(input, target.value.rawId, async (locked) => {
+  return withLockedTask(input, target.value.rawId, 'refuse', async (locked) => {
     const { state } = deriveTaskState(locked.task, locked.facts, locked.now);
 
     if (state !== 'submitted') {

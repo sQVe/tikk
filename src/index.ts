@@ -2,6 +2,7 @@
 import { existsSync } from 'node:fs';
 import {
   appendFile,
+  link,
   mkdir,
   open,
   readdir,
@@ -111,14 +112,11 @@ const factFiles: FactFileFunctions = {
 
 const storeLock: StoreLockFunctions = {
   pid: process.pid,
-  createExclusive: ticketFiles.writeFileExclusive,
+  writeFile: (path, text) => writeFile(path, text),
+  link: (existingPath, newPath) => link(existingPath, newPath),
+  randomSuffix: () => crypto.randomUUID(),
   readFile: (path) => readFile(path, 'utf8'),
   unlink: ticketFiles.unlink,
-  modifiedAt: async (path) => {
-    const stats = await stat(path);
-
-    return stats.mtimeMs;
-  },
   isProcessAlive: (pid) => {
     try {
       process.kill(pid, 0);

@@ -360,3 +360,74 @@ it('refuses to accept a task that is not submitted and writes nothing', async ()
     expectNothingWritten(fakeSession);
   }
 });
+
+it('refuses claim, release, submit, and accept on a task whose file has an error', async () => {
+  const broken = makeTicket('demo-3467', { error: 'Bad YAML.' });
+
+  const commands: [Command, string[]][] = [
+    [taskClaim, ['demo-3467', '--holder', 'agent']],
+    [taskRelease, ['demo-3467', '--holder', 'agent']],
+    [taskSubmit, ['demo-3467', '--holder', 'agent']],
+    [taskAccept, ['demo-3467']],
+  ];
+
+  for (const [command, args] of commands) {
+    const { fakeSession, result } = await run(command, args, {
+      tickets: [broken],
+      facts: [claimBy('agent'), submittedBy('agent')],
+    });
+
+    expect(failureOf(result).code).toBe('parseError');
+    expectNothingWritten(fakeSession);
+  }
+});
+
+it('logs to a task whose file has an error', async () => {
+  const broken = makeTicket('demo-3467', { error: 'Bad YAML.' });
+
+  const { fakeSession, result } = await run(
+    taskLog,
+    ['demo-3467', '--type', 'progress', '--text', 'A note'],
+    {
+      tickets: [broken],
+    },
+  );
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
+});
+
+it('refuses a lease longer than 30 days before it takes the lock', async () => {
+  for (const lease of ['721h', '999999999999999999h']) {
+    const { fakeSession, result } = await run(taskClaim, [
+      'demo-3467',
+      '--holder',
+      'agent',
+      '--lease',
+      lease,
+    ]);
+
+    expect(failureOf(result).code).toBe('invalidArguments');
+    expect(fakeSession.locks()).toBe(0);
+  }
+
+  const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent', '--lease', '720h']);
+
+  expect(successOf(result).json).toMatchObject({ claim: { leaseEnd: '2026-11-19T12:00:00.000Z' } });
+});
+
+it('reports a fact the store refuses as invalid arguments', async () => {
+  const { result } = await run(taskLog, ['demo-3467', '--type', 'progress', '--text', 'A note'], {
+    session: {
+      overrides: {
+        appendFact: () =>
+          Promise.resolve({
+            ok: false,
+            reason: { kind: 'invalid', message: 'holder: Too small.' },
+          }),
+      },
+    },
+  });
+
+  expect(failureOf(result)).toEqual({ code: 'invalidArguments', message: 'holder: Too small.' });
+});

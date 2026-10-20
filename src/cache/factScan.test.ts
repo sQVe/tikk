@@ -7,6 +7,7 @@ import {
   createFakeFiles,
   factPath,
   factText,
+  makeGate,
   openTestCache,
   runSql,
 } from './cacheHarness.ts';
@@ -166,4 +167,137 @@ it('rebuilds a cache with an old version and indexes the facts again', async () 
   await cache.refresh(fake.files);
 
   expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b']);
+});
+
+it('keeps facts that a newer refresh indexed when an older refresh saw no fact file', async () => {
+  using older = openTestCache(databasePath);
+  using newer = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const gate = makeGate();
+
+  const pausedFiles = {
+    ...fake.files,
+    listFactFiles: async () => {
+      await gate.wait();
+
+      return { ok: true as const, value: [] };
+    },
+  };
+
+  const olderRefresh = older.refresh(pausedFiles);
+
+  await gate.reached;
+  fake.setFactFile(factPath(), factText('me-3a4b', claim));
+  await newer.refresh(fake.files);
+  gate.open();
+  await olderRefresh;
+
+  expect(ticketsOf(newer.listFacts())).toEqual(['me-3a4b']);
+});
+
+it('skips the lines an older refresh read when a newer refresh indexed the file first', async () => {
+  using older = openTestCache(databasePath);
+  using newer = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = factPath();
+  const gate = makeGate();
+
+  fake.setFactFile(path, factText('me-3a4b', claim));
+
+  const pausedFiles = {
+    ...fake.files,
+    readFactFile: async (filePath: string, fromByte: number) => {
+      const read = await fake.files.readFactFile(filePath, fromByte);
+
+      await gate.wait();
+
+      return read;
+    },
+  };
+
+  const olderRefresh = older.refresh(pausedFiles);
+
+  await gate.reached;
+  fake.setFactFile(path, factText('me-3a4b', claim) + factText('me-3a4c'));
+  await newer.refresh(fake.files);
+  gate.open();
+  await olderRefresh;
+
+  const readsBefore = fake.factReads().length;
+
+  await newer.refresh(fake.files);
+
+  expect(ticketsOf(newer.listFacts())).toEqual(['me-3a4b', 'me-3a4c']);
+  expect(fake.factReads().length).toBe(readsBefore);
+});
+
+it('fails the refresh and keeps the cached facts when a fact file read fails', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = factPath();
+
+  fake.setFactFile(path, factText('me-3a4b'));
+  await cache.refresh(fake.files);
+  fake.setFactFile(path, factText('me-3a4b') + factText('me-3a4c'));
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    readFactFile: () =>
+      Promise.resolve({ ok: false, reason: { kind: 'failed', message: 'Cannot read.' } }),
+  });
+
+  expect(refreshed.ok).toBe(false);
+  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b']);
+});
+
+it('fails the refresh when the fact file row keeps changing under every read', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = factPath();
+
+  fake.setFactFile(path, factText('me-3a4b'));
+  await cache.refresh(fake.files);
+  fake.setFactFile(path, factText('me-3a4b') + factText('me-3a4c'));
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    readFactFile: async (filePath: string, fromByte: number) => {
+      runSql(databasePath, 'UPDATE fact_files SET mtime_ms = mtime_ms + 1000');
+
+      return fake.files.readFactFile(filePath, fromByte);
+    },
+  });
+
+  expect(refreshed).toMatchObject({ ok: false, reason: { kind: 'failed' } });
+});
+
+it('reads again and removes a deleted file whose row another refresh changed meanwhile', async () => {
+  using older = openTestCache(databasePath);
+  using newer = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = factPath();
+  const gate = makeGate();
+
+  fake.setFactFile(path, factText('me-3a4b'));
+  await older.refresh(fake.files);
+
+  const olderRefresh = older.refresh({
+    ...fake.files,
+    listFactFiles: async () => {
+      await gate.wait();
+
+      return fake.files.listFactFiles();
+    },
+  });
+
+  await gate.reached;
+  fake.setFactFile(path, factText('me-3a4b') + factText('me-3a4c'));
+  await newer.refresh(fake.files);
+  fake.removeFactFile(path);
+  gate.open();
+
+  const refreshed = await olderRefresh;
+
+  expect(refreshed.ok).toBe(true);
+  expect(older.listFacts()).toEqual([]);
 });

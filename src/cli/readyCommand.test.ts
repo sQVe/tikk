@@ -66,6 +66,11 @@ it('names the holder and lease end of a skipped active task', () => {
       { id: 'demo-3467', reason: 'active', holder: 'agent', leaseEnd: '2026-10-20T13:00:00.000Z' },
     ],
   });
+
+  const skippedLine = output.text.split('\n').find((line) => line.includes('demo-3467'));
+
+  expect(skippedLine).toContain('agent');
+  expect(skippedLine).toContain('2026-10-20T13:00:00.000Z');
 });
 
 it('treats a blocker that is archived and canceled as cleared', () => {

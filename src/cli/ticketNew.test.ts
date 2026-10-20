@@ -1,6 +1,7 @@
 import { expect, it } from 'bun:test';
 
 import { parseTicketFile } from '../ticket/ticket.ts';
+import type { CliSession } from './cliEffects.ts';
 import {
   failed,
   failureOf,
@@ -12,8 +13,16 @@ import {
 import type { EffectsOptions } from './cliHarness.ts';
 import { ticketNew } from './ticketNew.ts';
 
-const create = (args: string[], effectsOptions: EffectsOptions = {}) => {
-  const fakeSession = makeSession({ created: makeTicket('demo-3467', { body: 'Made\n' }) });
+const create = (
+  args: string[],
+  effectsOptions: EffectsOptions = {},
+  sessionOverrides: Partial<CliSession> = {},
+) => {
+  const fakeSession = makeSession({
+    created: makeTicket('demo-3467', { body: 'Made\n' }),
+    overrides: sessionOverrides,
+  });
+
   const fakeEffects = makeEffects({ session: fakeSession, ...effectsOptions });
 
   const result = ticketNew({
@@ -169,4 +178,30 @@ it('refuses a missing title before it resolves the project', async () => {
   expect(failureOf(await result).code).toBe('invalidArguments');
   expect(fakeEffects.resolveCalls()).toBe(0);
   expect(fakeSession.creates).toHaveLength(0);
+});
+
+it('creates the ticket file under the store lock', async () => {
+  const { fakeSession, result } = create(['task', 'My title']);
+
+  successOf(await result);
+
+  expect(fakeSession.writesUnderLock()).toBe(1);
+  expect(fakeSession.releases()).toBe(fakeSession.locks());
+});
+
+it('fails with locked and creates nothing when the store lock is held', async () => {
+  const { fakeSession, result } = create(
+    ['task', 'My title'],
+    {},
+    {
+      lockStore: () =>
+        Promise.resolve({
+          ok: false as const,
+          reason: { kind: 'locked' as const, message: 'The store is locked by process 42.' },
+        }),
+    },
+  );
+
+  expect(failureOf(await result).code).toBe('locked');
+  expect(fakeSession.creates).toEqual([]);
 });

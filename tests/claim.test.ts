@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -189,4 +189,106 @@ it('logs to a task in any state', async () => {
 
   expect(logged.map((result) => result.exitCode)).toEqual([0, 0, 0, 0]);
   expect(await stateOf(done.id)).toBe('done');
+});
+
+const readFactFiles = async (): Promise<Record<string, string>> => {
+  const root = join(home, 'store', 'facts');
+  const files: Record<string, string> = {};
+
+  for await (const path of new Bun.Glob('**/*.jsonl').scan({ cwd: root, onlyFiles: true })) {
+    files[path] = await Bun.file(join(root, path)).text();
+  }
+
+  return files;
+};
+
+it('refuses claim and submit on a task whose file has a parse error, but still logs', async () => {
+  const task = await createTask('Broken task');
+
+  await runJson(['log', task.id, '--type', 'progress', '--text', 'Before the break']);
+  await Bun.write(task.path, '---\nkind: [task\n---\nBroken\n');
+
+  const before = await readFactFiles();
+  const claimed = await run(['claim', task.id, '--holder', 'first']);
+  const submitted = await run(['submit', task.id, '--holder', 'first']);
+  const after = await readFactFiles();
+  const logged = await run(['log', task.id, '--type', 'progress', '--text', 'A note']);
+
+  expect([claimed.exitCode, submitted.exitCode]).toEqual([1, 1]);
+  expect([errorCodeOf(claimed), errorCodeOf(submitted)]).toEqual(['parseError', 'parseError']);
+  expect(after).toEqual(before);
+  expect(logged.exitCode).toBe(0);
+});
+
+it('refuses an empty log holder and an oversized lease without writing a fact', async () => {
+  const task = await createTask('Guarded task');
+
+  await runJson(['log', task.id, '--type', 'progress', '--text', 'First note']);
+
+  const before = await readFactFiles();
+  const logged = await run(['log', task.id, '--type', 'progress', '--text', 'A', '--holder', '']);
+
+  const claimed = await run([
+    'claim',
+    task.id,
+    '--holder',
+    'first',
+    '--lease',
+    '999999999999999999h',
+  ]);
+
+  const after = await readFactFiles();
+
+  expect([logged.exitCode, claimed.exitCode]).toEqual([1, 1]);
+
+  expect([errorCodeOf(logged), errorCodeOf(claimed)]).toEqual([
+    'invalidArguments',
+    'invalidArguments',
+  ]);
+
+  expect(after).toEqual(before);
+});
+
+it('saves the session log path of a claim and shows it', async () => {
+  const task = await createTask('Logged session');
+
+  await runJson(['claim', task.id, '--holder', 'first', '--session-log', '/tmp/session.log']);
+
+  const shown = await runJson<ShownTask & { claim: { sessionLog: string | null } }>([
+    'show',
+    task.id,
+  ]);
+
+  expect(shown.claim.sessionLog).toBe('/tmp/session.log');
+});
+
+it('keeps a claim that follows an unfinished fact line, and reports the broken line', async () => {
+  const task = await createTask('Interrupted write');
+
+  await runJson(['log', task.id, '--type', 'progress', '--text', 'First note']);
+
+  const [factFile] = Object.keys(await readFactFiles());
+  const factPath = join(home, 'store', 'facts', factFile ?? '');
+
+  await appendFile(factPath, '{"version":1,"kind":"cla');
+  await runJson(['claim', task.id, '--holder', 'first']);
+
+  const shown = await runJson<ShownTask>(['show', task.id]);
+  const listing = await runJson<{ errors: { path: string }[] }>(['ls']);
+
+  expect(shown.state).toBe('active');
+  expect(listing.errors.map((error) => error.path)).toEqual([`${factPath}:2`]);
+});
+
+it('clears a lock left by a process that has exited', async () => {
+  const task = await createTask('Abandoned lock');
+  const child = Bun.spawn(['bun', '-e', '0'], { stdout: 'ignore', stderr: 'ignore' });
+
+  await child.exited;
+  await Bun.write(join(home, 'store', '.git', 'tikk.lock'), `${child.pid}\n`);
+
+  const claimed = await run(['claim', task.id, '--holder', 'first']);
+
+  expect(claimed.exitCode).toBe(0);
+  expect(await Bun.file(join(home, 'store', '.git', 'tikk.lock')).exists()).toBe(false);
 });

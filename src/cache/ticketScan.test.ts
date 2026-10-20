@@ -6,9 +6,11 @@ import {
   createDatabaseFixture,
   createFakeFiles,
   idsOf,
+  makeGate,
   ticketPath,
   ticketText,
   openTestCache,
+  runSql,
 } from './cacheHarness.ts';
 
 let databasePath = '';
@@ -302,4 +304,86 @@ it('gives no addressable ticket for a file in an invalid project folder', async 
   });
 
   expect(cache.getTicket(idOf('undefined-3467')).ok).toBe(false);
+});
+
+it('keeps a row that a newer refresh wrote when an older refresh read the file first', async () => {
+  using older = openTestCache(databasePath);
+  using newer = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+  const gate = makeGate();
+
+  fake.set(path, ticketText({ title: 'Before' }));
+  await newer.refresh(fake.files);
+  fake.set(path, ticketText({ title: 'Old read' }));
+
+  const pausedFiles = {
+    ...fake.files,
+    readTicketFile: async (filePath: string) => {
+      const read = await fake.files.readTicketFile(filePath);
+
+      await gate.wait();
+
+      return read;
+    },
+  };
+
+  const olderRefresh = older.refresh(pausedFiles);
+
+  await gate.reached;
+  fake.set(path, ticketText({ title: 'Newest' }));
+  await newer.refresh(fake.files);
+  gate.open();
+  await olderRefresh;
+
+  const ticket = newer.getTicket(idOf('tikk-3a4b'));
+
+  expect(ticket.ok && ticket.value.frontMatter.title).toBe('Newest');
+});
+
+it('keeps a row that a newer refresh added when an older refresh listed no file', async () => {
+  using older = openTestCache(databasePath);
+  using newer = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const gate = makeGate();
+
+  const pausedFiles = {
+    ...fake.files,
+    listTicketFiles: async () => {
+      await gate.wait();
+
+      return { ok: true as const, value: [] };
+    },
+  };
+
+  const olderRefresh = older.refresh(pausedFiles);
+
+  await gate.reached;
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'New' }));
+  await newer.refresh(fake.files);
+  gate.open();
+  await olderRefresh;
+
+  expect(idsOf(newer.listTickets({ includeArchived: true }))).toEqual(['tikk-3a4b']);
+});
+
+it('fails the refresh when the row keeps changing under every read', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+  const path = ticketPath('tikk-3a4b');
+
+  fake.set(path, ticketText({ title: 'First' }));
+  await cache.refresh(fake.files);
+  fake.set(path, ticketText({ title: 'Second' }));
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    readTicketFile: async (filePath: string) => {
+      runSql(databasePath, 'UPDATE tickets SET mtime_ms = mtime_ms + 1000');
+
+      return fake.files.readTicketFile(filePath);
+    },
+  });
+
+  expect(refreshed).toMatchObject({ ok: false, reason: { kind: 'failed' } });
 });

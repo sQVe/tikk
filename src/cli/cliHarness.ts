@@ -36,6 +36,7 @@ export interface FakeSession {
   locks: () => number;
   releases: () => number;
   refreshesUnderLock: () => number;
+  writesUnderLock: () => number;
   disposed: () => boolean;
 }
 
@@ -117,6 +118,14 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
   let lockCount = 0;
   let releaseCount = 0;
   let lockedRefreshCount = 0;
+  let lockedWriteCount = 0;
+
+  const countLockedWrite = (): void => {
+    if (lockCount > releaseCount) {
+      lockedWriteCount += 1;
+    }
+  };
+
   let isDisposed = false;
 
   const session: CliSession = {
@@ -182,6 +191,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     },
     createTicketFile: (project, title, text) => {
       creates.push({ project, title, text });
+      countLockedWrite();
 
       const created = options.created ?? makeTicket('demo-3467');
 
@@ -194,6 +204,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     },
     writeTicketFile: (path, expectedHash, text) => {
       writes.push({ path, expectedHash, text });
+      countLockedWrite();
 
       return Promise.resolve({ ok: true, value: { hash: 'new-hash' } });
     },
@@ -213,6 +224,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     locks: () => lockCount,
     releases: () => releaseCount,
     refreshesUnderLock: () => lockedRefreshCount,
+    writesUnderLock: () => lockedWriteCount,
     disposed: () => isDisposed,
   };
 };

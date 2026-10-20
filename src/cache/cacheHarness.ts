@@ -26,6 +26,12 @@ export interface FakeFiles {
   readPaths: () => string[];
 }
 
+interface Gate {
+  reached: Promise<void>;
+  open: () => void;
+  wait: () => Promise<void>;
+}
+
 export interface TicketTextOptions {
   title: string;
   archived?: string;
@@ -199,4 +205,22 @@ export const rewriteDatabaseText = (databasePath: string, from: string, to: stri
 
   bytes.write(to, offset);
   writeFileSync(databasePath, bytes);
+};
+
+// Pauses a fake file call until the test opens the gate, so two refreshes can interleave.
+export const makeGate = (): Gate => {
+  const reached = Promise.withResolvers<undefined>();
+  const opened = Promise.withResolvers<undefined>();
+
+  return {
+    reached: reached.promise,
+    open: () => {
+      opened.resolve(undefined);
+    },
+    wait: () => {
+      reached.resolve(undefined);
+
+      return opened.promise;
+    },
+  };
 };

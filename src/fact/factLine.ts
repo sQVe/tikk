@@ -59,6 +59,20 @@ const fail = (message: string): { ok: false; reason: FactLineReason } => ({
   reason: { message },
 });
 
+export const validateFact = (value: unknown): Result<Fact, FactLineReason> => {
+  const parsed = factSchema.safeParse(value);
+
+  if (parsed.success) {
+    return { ok: true, value: parsed.data };
+  }
+
+  const issue = parsed.error.issues[0];
+  const location = issue?.path.join('.') ?? '';
+  const prefix = location === '' ? '' : `${location}: `;
+
+  return fail(`${prefix}${issue?.message ?? 'Invalid fact line.'}`);
+};
+
 export const parseFactLine = (text: string): Result<Fact, FactLineReason> => {
   let json: unknown;
 
@@ -70,17 +84,7 @@ export const parseFactLine = (text: string): Result<Fact, FactLineReason> => {
     return fail(`The fact line is not valid JSON: ${detail}`);
   }
 
-  const parsed = factSchema.safeParse(json);
-
-  if (parsed.success) {
-    return { ok: true, value: parsed.data };
-  }
-
-  const issue = parsed.error.issues[0];
-  const location = issue?.path.join('.') ?? '';
-  const prefix = location === '' ? '' : `${location}: `;
-
-  return fail(`${prefix}${issue?.message ?? 'Invalid fact line.'}`);
+  return validateFact(json);
 };
 
 export const serializeFactLine = (fact: Fact): string => `${JSON.stringify(fact)}\n`;

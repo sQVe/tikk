@@ -111,8 +111,11 @@ export class TicketCache implements Disposable {
   }
 }
 
-export const openCache = (path: string): Result<TicketCache, CacheOpenReason> => {
-  const database = openDatabase(path);
+export const openCache = (
+  path: string,
+  busyTimeoutMilliseconds?: number,
+): Result<TicketCache, CacheOpenReason> => {
+  const database = openDatabase(path, busyTimeoutMilliseconds);
 
   if (!database.ok) {
     return database;

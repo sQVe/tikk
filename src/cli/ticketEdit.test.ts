@@ -47,7 +47,7 @@ it('writes a changed title and status with the expected hash, then shows the tic
   expect(fakeSession.writes[0]?.text).toContain('title: New');
   expect(fakeSession.writes[0]?.text).toContain('status: draft');
   expect(fakeSession.writes[0]?.text).toEndWith('A body\n');
-  expect(fakeSession.refreshes()).toBe(1);
+  expect(fakeSession.refreshes()).toBe(2);
 });
 
 it('keeps the title and status that are not given', async () => {
@@ -251,4 +251,36 @@ it('does not look up the path of an invalid ID', async () => {
 
   expect(lookups).toHaveLength(0);
   expect(fakeEffects.editorPaths).toHaveLength(0);
+});
+
+it('writes a JSON edit under the store lock after a refresh', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'hash-demo-3467', '--title', 'New'],
+    true,
+  );
+
+  successOf(await result);
+
+  expect(fakeSession.writesUnderLock()).toBe(1);
+  expect(fakeSession.refreshesUnderLock()).toBe(2);
+  expect(fakeSession.releases()).toBe(fakeSession.locks());
+});
+
+it('fails with locked and writes nothing when the store lock is held', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'hash-demo-3467', '--title', 'New'],
+    true,
+    {
+      overrides: {
+        lockStore: () =>
+          Promise.resolve({
+            ok: false as const,
+            reason: { kind: 'locked' as const, message: 'The store is locked by process 42.' },
+          }),
+      },
+    },
+  );
+
+  expect(failureOf(await result).code).toBe('locked');
+  expect(fakeSession.writes).toEqual([]);
 });

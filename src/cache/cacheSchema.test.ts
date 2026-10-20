@@ -245,3 +245,43 @@ it('waits for a write by another process instead of rebuilding the database', as
 
   expect(ids).toEqual(before);
 });
+
+it('fails without replacing the database when another process holds it past the timeout', async () => {
+  await listIds();
+  runSql(databasePath, 'CREATE TABLE marker (value INTEGER)');
+
+  const holder = Bun.spawn(
+    [
+      'bun',
+      '-e',
+      `const { Database } = require('bun:sqlite');
+      const database = new Database(${JSON.stringify(databasePath)});
+      database.run('BEGIN EXCLUSIVE');
+      console.log('locked');
+      await Bun.sleep(1000);
+      database.run('ROLLBACK');`,
+    ],
+    { stdout: 'pipe', stderr: 'inherit' },
+  );
+
+  const reader = holder.stdout.getReader();
+
+  await reader.read();
+
+  const opened = openCache(databasePath, 50);
+
+  if (opened.ok) {
+    opened.value[Symbol.dispose]();
+  }
+
+  reader.releaseLock();
+  await holder.exited;
+
+  const database = new Database(databasePath);
+  const marker = database.query("SELECT name FROM sqlite_master WHERE name = 'marker'").get();
+
+  database.close();
+
+  expect(opened).toMatchObject({ ok: false, reason: { kind: 'busy' } });
+  expect(marker).toEqual({ name: 'marker' });
+});

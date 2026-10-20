@@ -34,6 +34,11 @@ interface CreatedFile {
   hash: string;
 }
 
+interface FactAppendReason {
+  kind: 'invalid' | 'failed';
+  message: string;
+}
+
 interface FileWriteReason {
   kind: 'notFound' | 'changedOnDisk' | 'failed';
   message: string;
@@ -47,7 +52,7 @@ export interface CliSession extends Disposable {
   listErrors: () => { path: string; message: string }[];
   listFacts: (ticketIds?: TicketId[]) => Fact[];
   lockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
-  appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FileWriteReason>>;
+  appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FactAppendReason>>;
   createTicketFile: (
     project: ProjectName,
     title: string,

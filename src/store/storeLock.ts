@@ -4,10 +4,11 @@ import type { Store } from './storePaths.ts';
 
 export interface StoreLockFunctions {
   pid: number;
-  createExclusive: (path: string, text: string) => Promise<void>;
+  writeFile: (path: string, text: string) => Promise<void>;
+  link: (existingPath: string, newPath: string) => Promise<void>;
+  randomSuffix: () => string;
   readFile: (path: string) => Promise<string>;
   unlink: (path: string) => Promise<void>;
-  modifiedAt: (path: string) => Promise<number>;
   isProcessAlive: (pid: number) => boolean;
   sleep: (milliseconds: number) => Promise<void>;
   now: () => number;
@@ -35,7 +36,6 @@ type Clearing = 'cleared' | 'busy';
 const timeoutMilliseconds = 5000;
 const minimumWaitMilliseconds = 10;
 const maximumWaitMilliseconds = 50;
-const breakerTimeoutMilliseconds = 5000;
 
 const errorCode = (error: unknown): string | undefined =>
   error instanceof Error && 'code' in error && typeof error.code === 'string'
@@ -56,6 +56,19 @@ const failed = (message: string): Result<never, StoreLockReason> => ({
   ok: false,
   reason: { kind: 'failed', message },
 });
+
+// The file appears under its name only through `link`, which fails with EEXIST when the name is
+// taken. So a reader never sees the lock or the breaker without the PID of its holder.
+const publishExclusive = async (functions: StoreLockFunctions, path: string): Promise<void> => {
+  const temporaryPath = `${path}.${functions.pid}.${functions.randomSuffix()}`;
+
+  try {
+    await functions.writeFile(temporaryPath, `${functions.pid}\n`);
+    await functions.link(temporaryPath, path);
+  } finally {
+    await functions.unlink(temporaryPath).catch(() => undefined);
+  }
+};
 
 const readHolder = async (
   functions: StoreLockFunctions,
@@ -95,26 +108,6 @@ const releaseLock = async (functions: StoreLockFunctions, path: string): Promise
   }
 };
 
-// An owner that died while clearing leaves its breaker behind, so an old one is removed.
-const removeAbandonedBreaker = async (
-  functions: StoreLockFunctions,
-  breaker: string,
-): Promise<Result<undefined, StoreLockReason>> => {
-  try {
-    const modified = await functions.modifiedAt(breaker);
-
-    if (functions.now() - modified <= breakerTimeoutMilliseconds) {
-      return { ok: true, value: undefined };
-    }
-  } catch (error) {
-    return errorCode(error) === 'ENOENT'
-      ? { ok: true, value: undefined }
-      : failed(`Cannot check ${breaker}.`);
-  }
-
-  return removeLock(functions, breaker);
-};
-
 const removeStaleLock = async (
   functions: StoreLockFunctions,
   path: string,
@@ -133,6 +126,28 @@ const removeStaleLock = async (
   return removeLock(functions, path);
 };
 
+const isStale = (functions: StoreLockFunctions, holder: number | undefined): boolean =>
+  holder === undefined || !functions.isProcessAlive(holder);
+
+// An owner that died while clearing leaves its breaker behind. A breaker of a live owner stays,
+// however old it is, because that owner may still remove the lock it read as stale.
+const removeDeadBreaker = async (
+  functions: StoreLockFunctions,
+  breaker: string,
+): Promise<Result<undefined, StoreLockReason>> => {
+  const owner = await readHolder(functions, breaker);
+
+  if (!owner.ok) {
+    return owner;
+  }
+
+  if (owner.value === 'gone' || !isStale(functions, owner.value)) {
+    return { ok: true, value: undefined };
+  }
+
+  return removeStaleLock(functions, breaker, owner.value);
+};
+
 // Only the owner of the breaker may remove a stale lock, and only while the lock still holds the
 // stale PID. Without it, a second process could remove the lock a first process just took.
 const clearStaleLock = async (
@@ -141,13 +156,13 @@ const clearStaleLock = async (
   stale: number | undefined,
 ): Promise<Result<Clearing, StoreLockReason>> => {
   try {
-    await functions.createExclusive(breaker, `${functions.pid}\n`);
+    await publishExclusive(functions, breaker);
   } catch (error) {
     if (errorCode(error) !== 'EEXIST') {
       return failed(`Cannot create ${breaker}.`);
     }
 
-    const abandoned = await removeAbandonedBreaker(functions, breaker);
+    const abandoned = await removeDeadBreaker(functions, breaker);
 
     return abandoned.ok ? { ok: true, value: 'busy' } : abandoned;
   }
@@ -166,7 +181,7 @@ const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLock
   const { functions, path, breaker, deadline, waitMilliseconds } = attempt;
 
   try {
-    await functions.createExclusive(path, `${functions.pid}\n`);
+    await publishExclusive(functions, path);
 
     return { ok: true, value: { release: () => releaseLock(functions, path) } };
   } catch (error) {
@@ -185,7 +200,7 @@ const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLock
     return tryAcquire(attempt);
   }
 
-  if (holder.value === undefined || !functions.isProcessAlive(holder.value)) {
+  if (isStale(functions, holder.value)) {
     const cleared = await clearStaleLock(functions, { path, breaker }, holder.value);
 
     if (!cleared.ok) {

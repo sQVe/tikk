@@ -83,3 +83,51 @@ it('lists nothing before any fact exists and reports a missing file', async () =
     reason: { kind: 'notFound' },
   });
 });
+
+it('refuses a fact that does not match the fact schema and writes nothing', async () => {
+  const invalid = { ...releaseAt('2026-10-20T10:00:00.000Z'), holder: '' };
+  const appended = await appendFact(nodeFactFiles, store, 'laptop', invalid);
+  const listed = await listFactFiles(nodeFactFiles, store);
+
+  expect(appended).toMatchObject({ ok: false, reason: { kind: 'invalid' } });
+  expect(listed).toEqual({ ok: true, value: [] });
+});
+
+it('starts a new line after an unfinished last line, so the new fact stays whole', async () => {
+  const fact = releaseAt('2026-10-20T10:00:00.000Z');
+  const path = join(store.root, 'facts/laptop/2026-10.jsonl');
+
+  await appendFact(nodeFactFiles, store, 'laptop', fact);
+  await Bun.write(path, `${await readFile(path, 'utf8')}{"version":1,"kin`);
+  await appendFact(nodeFactFiles, store, 'laptop', fact);
+
+  const lines = (await readFile(path, 'utf8')).split('\n');
+  const parsed = lines.map((line) => parseFactLine(line).ok);
+
+  expect(lines).toHaveLength(4);
+  expect(parsed).toEqual([true, false, true, false]);
+  expect(lines[3]).toBe('');
+});
+
+it('writes nothing when it cannot check the end of the fact file', async () => {
+  const appended: string[] = [];
+
+  const functions = {
+    ...nodeFactFiles,
+    stat: () => Promise.reject(Object.assign(new Error('EACCES'), { code: 'EACCES' })),
+    appendFile: async (path: string, text: string) => {
+      appended.push(text);
+      await nodeFactFiles.appendFile(path, text);
+    },
+  };
+
+  const result = await appendFact(
+    functions,
+    store,
+    'laptop',
+    releaseAt('2026-10-20T10:00:00.000Z'),
+  );
+
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'failed' } });
+  expect(appended).toEqual([]);
+});
