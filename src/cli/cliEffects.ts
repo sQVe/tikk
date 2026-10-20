@@ -1,3 +1,4 @@
+import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { ProjectName, TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
 
@@ -17,7 +18,9 @@ export interface CliFailure {
     | 'changedOnDisk'
     | 'parseError'
     | 'invalidArguments'
-    | 'storeError';
+    | 'storeError'
+    | 'conflict'
+    | 'locked';
   message: string;
 }
 
@@ -42,6 +45,9 @@ export interface CliSession extends Disposable {
   findTicketPath: (id: TicketId) => Result<string, CliMessage>;
   listTickets: (options: { includeArchived: boolean }) => CliTicket[];
   listErrors: () => { path: string; message: string }[];
+  listFacts: (ticketIds?: TicketId[]) => Fact[];
+  lockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
+  appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FileWriteReason>>;
   createTicketFile: (
     project: ProjectName,
     title: string,
@@ -52,6 +58,15 @@ export interface CliSession extends Disposable {
     expectedHash: string,
     text: string,
   ) => Promise<Result<{ hash: string }, FileWriteReason>>;
+}
+
+interface StoreLockReason {
+  kind: 'locked' | 'failed';
+  message: string;
+}
+
+interface StoreLock {
+  release: () => Promise<void>;
 }
 
 interface SessionReason {
@@ -65,6 +80,8 @@ export interface CliEffects {
   resolveProject: () => Promise<Result<ProjectName, CliMessage>>;
   readTextFile: (path: string) => Promise<string | undefined>;
   runEditor: (path: string) => Promise<Result<undefined, CliMessage>>;
+  resolveMachine: () => Promise<Result<string, CliMessage>>;
+  now: () => Date;
 }
 
 export interface CommandInput {

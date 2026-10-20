@@ -1,9 +1,21 @@
+import { deriveTaskState } from '../fact/fact.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
-import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { findTicket, ticketText, ticketView } from './ticketView.ts';
+import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { findTicket, taskView, ticketText, ticketView } from './ticketView.ts';
 
-export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
-  const parsed = parseCommandArguments(args, {});
+const showView = ({ effects, session }: CommandInput, ticket: CliTicket): unknown => {
+  if (ticket.frontMatter.kind !== 'task') {
+    return ticketView(ticket, true);
+  }
+
+  const facts = session.listFacts([ticket.id]);
+  const { state, claim } = deriveTaskState(ticket, facts, effects.now());
+
+  return taskView(ticket, state, claim);
+};
+
+export const ticketShow = (input: CommandInput): CommandResult => {
+  const parsed = parseCommandArguments(input.args, {});
 
   if (!parsed.ok) {
     return parsed;
@@ -15,7 +27,7 @@ export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
     return invalidArguments('Usage: tikk show <id> [--json]');
   }
 
-  const ticket = findTicket(session, rawId);
+  const ticket = findTicket(input.session, rawId);
 
   if (!ticket.ok) {
     return ticket;
@@ -23,6 +35,6 @@ export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
 
   return {
     ok: true,
-    value: { json: ticketView(ticket.value, true), text: ticketText(ticket.value) },
+    value: { json: showView(input, ticket.value), text: ticketText(ticket.value) },
   };
 };

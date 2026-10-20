@@ -1,3 +1,5 @@
+import { parseFactLine } from '../fact/fact.ts';
+import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
 import { parseProjectName, parseTicketId } from '../ticket/ticket.ts';
@@ -18,6 +20,7 @@ interface FakeCreate {
 
 export interface SessionOptions {
   tickets?: CliTicket[];
+  facts?: Fact[];
   errors?: { path: string; message: string }[];
   created?: CliTicket;
   overrides?: Partial<CliSession>;
@@ -27,8 +30,12 @@ export interface FakeSession {
   session: CliSession;
   writes: FakeWrite[];
   creates: FakeCreate[];
+  appends: { machine: string; fact: Fact }[];
   listOptions: { includeArchived: boolean }[];
   refreshes: () => number;
+  locks: () => number;
+  releases: () => number;
+  refreshesUnderLock: () => number;
   disposed: () => boolean;
 }
 
@@ -45,6 +52,8 @@ export interface FakeEffects {
   resolveCalls: () => number;
   editorPaths: string[];
 }
+
+const fakeNow = new Date('2026-10-20T12:00:00.000Z');
 
 export const ticketIdOf = (raw: string): TicketId => {
   const parsed = parseTicketId(raw);
@@ -81,17 +90,42 @@ export const makeTicket = (
   ...overrides,
 });
 
+export const makeFact = (fields: Record<string, unknown>): Fact => {
+  const parsed = parseFactLine(
+    JSON.stringify({
+      version: 1,
+      ticket: 'demo-3467',
+      at: '2026-10-20T11:00:00.000Z',
+      machine: 'laptop',
+      ...fields,
+    }),
+  );
+
+  invariant(parsed.ok, 'The test fact should parse.');
+
+  return parsed.value;
+};
+
 export const makeSession = (options: SessionOptions = {}): FakeSession => {
   const tickets = new Map((options.tickets ?? []).map((ticket) => [ticket.id, ticket]));
   const writes: FakeWrite[] = [];
   const creates: FakeCreate[] = [];
+  const facts = [...(options.facts ?? [])];
+  const appends: { machine: string; fact: Fact }[] = [];
   const listOptions: { includeArchived: boolean }[] = [];
   let refreshCount = 0;
+  let lockCount = 0;
+  let releaseCount = 0;
+  let lockedRefreshCount = 0;
   let isDisposed = false;
 
   const session: CliSession = {
     refresh: () => {
       refreshCount += 1;
+
+      if (lockCount > releaseCount) {
+        lockedRefreshCount += 1;
+      }
 
       return Promise.resolve({ ok: true, value: undefined });
     },
@@ -121,6 +155,31 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       );
     },
     listErrors: () => options.errors ?? [],
+    listFacts: (ticketIds) =>
+      facts.filter((fact) => ticketIds === undefined || ticketIds.includes(fact.ticket)),
+    lockStore: () => {
+      lockCount += 1;
+
+      return Promise.resolve({
+        ok: true,
+        value: {
+          release: () => {
+            releaseCount += 1;
+
+            return Promise.resolve();
+          },
+        },
+      });
+    },
+    appendFact: (machine, fact) => {
+      appends.push({ machine, fact });
+      facts.push(fact);
+
+      return Promise.resolve({
+        ok: true,
+        value: { path: `/store/facts/${machine}/2026-10.jsonl` },
+      });
+    },
     createTicketFile: (project, title, text) => {
       creates.push({ project, title, text });
 
@@ -148,8 +207,12 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     session,
     writes,
     creates,
+    appends,
     listOptions,
     refreshes: () => refreshCount,
+    locks: () => lockCount,
+    releases: () => releaseCount,
+    refreshesUnderLock: () => lockedRefreshCount,
     disposed: () => isDisposed,
   };
 };
@@ -183,6 +246,8 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
 
       return Promise.resolve({ ok: true, value: undefined });
     },
+    resolveMachine: () => Promise.resolve({ ok: true, value: 'laptop' }),
+    now: () => fakeNow,
     ...options.overrides,
   };
 

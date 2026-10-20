@@ -1,3 +1,4 @@
+import type { TaskClaim, TaskStateName } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
@@ -17,6 +18,11 @@ export interface TicketView {
   archived: string | null;
   body?: string;
   error: string | null;
+}
+
+export interface TaskView extends TicketView {
+  state: TaskStateName;
+  claim: TaskClaim | null;
 }
 
 export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => {
@@ -43,6 +49,24 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
 
   return view;
 };
+
+export const taskView = (
+  ticket: CliTicket,
+  state: TaskStateName,
+  claim: TaskClaim | null,
+): TaskView => ({ ...ticketView(ticket, true), state, claim });
+
+export const taskOutput = (
+  ticket: CliTicket,
+  state: TaskStateName,
+  claim: TaskClaim | null,
+): CommandResult => ({
+  ok: true,
+  value: {
+    json: taskView(ticket, state, claim),
+    text: `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
+  },
+});
 
 export const ticketText = (ticket: CliTicket): string => {
   const heading = `${ticket.id}  ${ticket.frontMatter.status}  ${ticket.frontMatter.title}`;

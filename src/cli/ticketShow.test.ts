@@ -1,10 +1,19 @@
 import { expect, it } from 'bun:test';
 
-import { failureOf, makeEffects, makeSession, makeTicket, successOf } from './cliHarness.ts';
+import type { Fact } from '../fact/fact.ts';
+import {
+  failureOf,
+  makeEffects,
+  makeFact,
+  makeSession,
+  makeTicket,
+  projectNameOf,
+  successOf,
+} from './cliHarness.ts';
 import { ticketShow } from './ticketShow.ts';
 
-const show = (args: string[], tickets = [makeTicket('demo-3467')]) => {
-  const { session } = makeSession({ tickets });
+const show = (args: string[], tickets = [makeTicket('demo-3467')], facts: Fact[] = []) => {
+  const { session } = makeSession({ tickets, facts });
   const { effects } = makeEffects();
 
   return ticketShow({ args, json: false, effects, session });
@@ -38,4 +47,39 @@ it('returns notFound with the ID for an unknown ticket', () => {
 
   expect(reason.code).toBe('notFound');
   expect(reason.message).toContain('demo-3468');
+});
+
+it('shows the state of a task and its claim while the claim is active', () => {
+  const claim = makeFact({ kind: 'claim', holder: 'agent', leaseEnd: '2026-10-20T13:00:00.000Z' });
+  const open = successOf(show(['demo-3467']));
+  const active = successOf(show(['demo-3467'], [makeTicket('demo-3467')], [claim]));
+
+  expect(open.json).toMatchObject({ state: 'open', claim: null });
+
+  expect(active.json).toMatchObject({
+    state: 'active',
+    claim: {
+      holder: 'agent',
+      leaseEnd: '2026-10-20T13:00:00.000Z',
+      session: null,
+      sessionLog: null,
+    },
+  });
+});
+
+it('shows no state for an issue', () => {
+  const issue = makeTicket('demo-3467', {
+    frontMatter: {
+      kind: 'issue',
+      title: 'An issue',
+      project: projectNameOf('demo'),
+      blockedBy: [],
+      status: 'closed',
+    },
+  });
+
+  const output = successOf(show(['demo-3467'], [issue]));
+
+  expect(output.json).not.toHaveProperty('state');
+  expect(output.json).not.toHaveProperty('claim');
 });
