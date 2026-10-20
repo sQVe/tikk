@@ -1,4 +1,4 @@
-import { parseCommandArguments } from './cliArguments.ts';
+import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliEffects, CommandResult } from './cliEffects.ts';
 
 export const cliInit = async (args: string[], effects: CliEffects): Promise<CommandResult> => {
@@ -6,6 +6,10 @@ export const cliInit = async (args: string[], effects: CliEffects): Promise<Comm
 
   if (!parsed.ok) {
     return parsed;
+  }
+
+  if (parsed.value.positionals.length > 0) {
+    return invalidArguments('Usage: tikk init [--json]');
   }
 
   const initialized = await effects.initStore();

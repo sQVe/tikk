@@ -36,6 +36,15 @@ it('refuses unknown arguments without touching the store', async () => {
   expect(fake.initCalls()).toBe(0);
 });
 
+it('refuses a positional argument without touching the store', async () => {
+  const fake = makeEffects();
+  const reason = failureOf(await cliInit(['typo'], fake.effects));
+
+  expect(reason.code).toBe('invalidArguments');
+  expect(reason.message).toContain('init');
+  expect(fake.initCalls()).toBe(0);
+});
+
 it('returns a storeError with the message when the store cannot be created', async () => {
   const { effects } = makeEffects({
     overrides: { initStore: () => failed('Cannot create /store.') },
