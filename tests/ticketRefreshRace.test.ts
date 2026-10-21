@@ -12,8 +12,8 @@ import {
   ticketPath,
   ticketText,
 } from '../src/cache/cacheHarness.ts';
-import { taskClaim } from '../src/cli/claimCommands.ts';
 import { makeEffects, makeSession, ticketIdOf } from '../src/cli/cliHarness.ts';
+import { taskClaim } from '../src/cli/taskClaim.ts';
 
 let databasePath = '';
 let cleanup = async () => {};

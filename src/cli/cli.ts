@@ -1,10 +1,12 @@
 import packageJson from '../../package.json' with { type: 'json' };
 import { sweepArchive } from './archiveSweep.ts';
-import { taskAccept, taskClaim, taskLog, taskRelease, taskSubmit } from './claimCommands.ts';
 import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
 import { needsCommand } from './needsCommand.ts';
 import { readyCommand } from './readyCommand.ts';
+import { taskClaim, taskRelease } from './taskClaim.ts';
+import { taskLog } from './taskLog.ts';
+import { taskAccept, taskSubmit } from './taskSubmit.ts';
 import { ticketArchive, ticketUnarchive } from './ticketArchive.ts';
 import { ticketCancel } from './ticketCancel.ts';
 import { ticketClose } from './ticketClose.ts';

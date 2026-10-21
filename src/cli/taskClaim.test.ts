@@ -1,8 +1,5 @@
 import { expect, it } from 'bun:test';
 
-import type { Fact } from '../fact/fact.ts';
-import { taskAccept, taskClaim, taskLog, taskRelease, taskSubmit } from './claimCommands.ts';
-import type { CliEffects, CliSession, CommandInput, CommandResult } from './cliEffects.ts';
 import {
   failed,
   failureOf,
@@ -11,63 +8,23 @@ import {
   makeSession,
   makeTicket,
   projectNameOf,
-  ticketIdOf,
   successOf,
 } from './cliHarness.ts';
-import type { FakeSession } from './cliHarness.ts';
-
-type Command = (input: CommandInput) => Promise<CommandResult>;
-
-interface RunOptions {
-  facts?: Fact[];
-  tickets?: ReturnType<typeof makeTicket>[];
-  effects?: Partial<CliEffects>;
-  session?: Parameters<typeof makeSession>[0];
-}
-
-const task = makeTicket('demo-3467');
-const activeLease = '2026-10-20T13:00:00.000Z';
-
-const claimBy = (holder: string): Fact =>
-  makeFact({ kind: 'claim', holder, leaseEnd: activeLease });
-
-const submittedBy = (holder: string): Fact =>
-  makeFact({ kind: 'log', type: 'submitted', text: '', holder, at: '2026-10-20T11:30:00.000Z' });
-
-const accepted = makeFact({ kind: 'accept', at: '2026-10-20T11:45:00.000Z' });
-
-// A refusal that comes before the lock reports its own error, not `locked`.
-const lockRefused: Partial<CliSession> = {
-  lockStore: () =>
-    Promise.resolve({
-      ok: false,
-      reason: { kind: 'locked', message: 'The store is locked by process 42.' },
-    }),
-};
-
-const run = async (command: Command, args: string[], options: RunOptions = {}) => {
-  const fakeSession = makeSession({
-    tickets: options.tickets ?? [task],
-    facts: options.facts ?? [],
-    ...options.session,
-  });
-
-  const { effects } = makeEffects({
-    session: fakeSession,
-    ...(options.effects === undefined ? {} : { overrides: options.effects }),
-  });
-
-  const result = await command({ args, json: true, effects, session: fakeSession.session });
-
-  return { fakeSession, result };
-};
-
-const expectNothingWritten = (fakeSession: FakeSession): void => {
-  expect(fakeSession.appends).toEqual([]);
-  expect(fakeSession.writes).toEqual([]);
-  expect(fakeSession.creates).toEqual([]);
-  expect(fakeSession.lockHeld()).toBe(false);
-};
+import { taskClaim, taskRelease } from './taskClaim.ts';
+import {
+  task,
+  claimBy,
+  submittedBy,
+  accepted,
+  lockRefused,
+  run,
+  noSideEffects,
+  sideEffectsOf,
+  orphan,
+  parentOnly,
+  blockedOnly,
+} from './taskHarness.ts';
+import type { RunOptions } from './taskHarness.ts';
 
 it('claims an open task under the lock with a lease from now', async () => {
   const { fakeSession, result } = await run(taskClaim, [
@@ -128,7 +85,7 @@ it('checks the task as it is on disk after the lock is taken', async () => {
   });
 
   expect(failureOf(result).code).toBe('conflict');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('claims for one hour when no lease is given', async () => {
@@ -166,7 +123,7 @@ it('refuses a claim on a task another holder has and writes nothing', async () =
   });
 
   expect(failureOf(result).code).toBe('conflict');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses a claim on a task that is not open and writes nothing', async () => {
@@ -191,7 +148,7 @@ it('refuses a claim on a task that is not open and writes nothing', async () => 
     );
 
     expect(failureOf(result).code).toBe('conflict');
-    expectNothingWritten(fakeSession);
+    expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
   }
 });
 
@@ -204,7 +161,7 @@ it('refuses a claim with an invalid lease before it takes the lock', async () =>
     );
 
     expect(failureOf(result).code).toBe('invalidArguments');
-    expectNothingWritten(fakeSession);
+    expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
   }
 });
 
@@ -212,7 +169,7 @@ it('refuses a claim without a holder and writes nothing', async () => {
   const { fakeSession, result } = await run(taskClaim, ['demo-3467']);
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses a claim on an issue and writes nothing', async () => {
@@ -233,14 +190,14 @@ it('refuses a claim on an issue and writes nothing', async () => {
   });
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses a claim on an unknown task and writes nothing', async () => {
   const { fakeSession, result } = await run(taskClaim, ['demo-3468', '--holder', 'agent']);
 
   expect(failureOf(result).code).toBe('notFound');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('fails with locked when the store lock is held and writes nothing', async () => {
@@ -261,7 +218,7 @@ it('fails with locked when the store lock is held and writes nothing', async () 
     message: 'The store is locked by process 42.',
   });
 
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses a claim when the machine name is invalid and writes nothing', async () => {
@@ -271,7 +228,7 @@ it('refuses a claim when the machine name is invalid and writes nothing', async 
   });
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('releases the lock and fails when the cache refresh fails', async () => {
@@ -280,7 +237,7 @@ it('releases the lock and fails when the cache refresh fails', async () => {
   });
 
   expect(failureOf(result).code).toBe('storeError');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('reports a failed append as a store error and releases the lock', async () => {
@@ -316,121 +273,8 @@ it('refuses a release by another holder or of an open task and writes nothing', 
     });
 
     expect(failureOf(result).code).toBe('conflict');
-    expectNothingWritten(fakeSession);
+    expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
   }
-});
-
-it('logs to a done task without changing its state', async () => {
-  const { fakeSession, result } = await run(
-    taskLog,
-    ['demo-3467', '--type', 'discovered', '--text', 'A finding', '--holder', 'agent'],
-    { facts: [claimBy('agent'), submittedBy('agent'), accepted] },
-  );
-
-  expect(successOf(result).json).toMatchObject({ state: 'done' });
-
-  expect(fakeSession.appends.map(({ fact }) => fact)).toMatchObject([
-    { kind: 'log', type: 'discovered', text: 'A finding', holder: 'agent' },
-  ]);
-});
-
-it('refuses a log with a type it does not accept and writes nothing', async () => {
-  for (const type of ['submitted', 'note']) {
-    const { fakeSession, result } = await run(taskLog, [
-      'demo-3467',
-      '--type',
-      type,
-      '--text',
-      'A note',
-    ]);
-
-    expect(failureOf(result).code).toBe('invalidArguments');
-    expectNothingWritten(fakeSession);
-  }
-});
-
-it('refuses a log without text and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskLog, ['demo-3467', '--type', 'progress']);
-
-  expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
-});
-
-it('submits a task held by the same holder', async () => {
-  const { fakeSession, result } = await run(
-    taskSubmit,
-    ['demo-3467', '--holder', 'agent', '--text', 'Ready for review'],
-    { facts: [claimBy('agent')] },
-  );
-
-  expect(successOf(result).json).toMatchObject({ state: 'submitted' });
-
-  expect(fakeSession.appends.map(({ fact }) => fact)).toMatchObject([
-    { kind: 'log', type: 'submitted', text: 'Ready for review', holder: 'agent' },
-  ]);
-});
-
-it('refuses a submit by another holder and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
-    facts: [claimBy('other')],
-  });
-
-  expect(failureOf(result).code).toBe('conflict');
-  expectNothingWritten(fakeSession);
-});
-
-it('accepts a submitted task', async () => {
-  const { fakeSession, result } = await run(taskAccept, ['demo-3467'], {
-    facts: [claimBy('agent'), submittedBy('agent')],
-  });
-
-  expect(successOf(result).json).toMatchObject({ state: 'done' });
-  expect(fakeSession.appends.map(({ fact }) => fact.kind)).toEqual(['accept']);
-});
-
-it('refuses to accept a task that is not submitted and writes nothing', async () => {
-  for (const facts of [[], [claimBy('agent')]]) {
-    const { fakeSession, result } = await run(taskAccept, ['demo-3467'], { facts });
-
-    expect(failureOf(result).code).toBe('conflict');
-    expectNothingWritten(fakeSession);
-  }
-});
-
-it('refuses claim, release, submit, and accept on a task whose file has an error', async () => {
-  const broken = makeTicket('demo-3467', { error: 'Bad YAML.' });
-
-  const commands: [Command, string[]][] = [
-    [taskClaim, ['demo-3467', '--holder', 'agent']],
-    [taskRelease, ['demo-3467', '--holder', 'agent']],
-    [taskSubmit, ['demo-3467', '--holder', 'agent']],
-    [taskAccept, ['demo-3467']],
-  ];
-
-  for (const [command, args] of commands) {
-    const { fakeSession, result } = await run(command, args, {
-      tickets: [broken],
-      facts: [claimBy('agent'), submittedBy('agent')],
-    });
-
-    expect(failureOf(result).code).toBe('parseError');
-    expectNothingWritten(fakeSession);
-  }
-});
-
-it('logs to a task whose file has an error', async () => {
-  const broken = makeTicket('demo-3467', { error: 'Bad YAML.' });
-
-  const { fakeSession, result } = await run(
-    taskLog,
-    ['demo-3467', '--type', 'progress', '--text', 'A note'],
-    {
-      tickets: [broken],
-    },
-  );
-
-  successOf(result);
-  expect(fakeSession.appends).toHaveLength(1);
 });
 
 it('refuses a lease longer than 30 days before it takes the lock', async () => {
@@ -447,41 +291,6 @@ it('refuses a lease longer than 30 days before it takes the lock', async () => {
   expect(successOf(result).json).toMatchObject({ claim: { leaseEnd: '2026-11-19T12:00:00.000Z' } });
 });
 
-it('reports a fact the store refuses as invalid arguments', async () => {
-  const { result } = await run(taskLog, ['demo-3467', '--type', 'progress', '--text', 'A note'], {
-    session: {
-      overrides: {
-        appendFact: () =>
-          Promise.resolve({
-            ok: false,
-            reason: { kind: 'invalid', message: 'holder: Too small.' },
-          }),
-      },
-    },
-  });
-
-  expect(failureOf(result)).toEqual({ code: 'invalidArguments', message: 'holder: Too small.' });
-});
-
-const orphan = (): ReturnType<typeof makeTicket> => ({
-  ...task,
-  frontMatter: {
-    ...task.frontMatter,
-    parent: ticketIdOf('demo-4789'),
-    blockedBy: [ticketIdOf('demo-6789')],
-  },
-});
-
-const parentOnly = (): ReturnType<typeof makeTicket> => ({
-  ...task,
-  frontMatter: { ...task.frontMatter, parent: ticketIdOf('demo-4789') },
-});
-
-const blockedOnly = (): ReturnType<typeof makeTicket> => ({
-  ...task,
-  frontMatter: { ...task.frontMatter, blockedBy: [ticketIdOf('demo-6789')] },
-});
-
 it('refuses to claim a task whose parent does not exist and appends nothing', async () => {
   const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
     tickets: [parentOnly()],
@@ -491,7 +300,7 @@ it('refuses to claim a task whose parent does not exist and appends nothing', as
 
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('demo-4789');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses to claim a task whose parent file has an error and appends nothing', async () => {
@@ -507,7 +316,7 @@ it('refuses to claim a task whose parent file has an error and appends nothing',
 
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('demo-4789');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses to claim a task blocked by a ticket whose file has an error', async () => {
@@ -521,7 +330,7 @@ it('refuses to claim a task blocked by a ticket whose file has an error', async 
 
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('demo-6789');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses to claim a task blocked by a ticket that does not exist and appends nothing', async () => {
@@ -533,33 +342,7 @@ it('refuses to claim a task blocked by a ticket that does not exist and appends 
 
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('demo-6789');
-  expectNothingWritten(fakeSession);
-});
-
-it('refuses to submit a task whose parent does not exist and appends nothing', async () => {
-  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
-    tickets: [parentOnly()],
-    facts: [claimBy('agent')],
-  });
-
-  const failure = failureOf(result);
-
-  expect(failure.code).toBe('invalidArguments');
-  expect(failure.message).toContain('demo-4789');
-  expectNothingWritten(fakeSession);
-});
-
-it('refuses to submit a task blocked by a ticket that does not exist and appends nothing', async () => {
-  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
-    tickets: [blockedOnly()],
-    facts: [claimBy('agent')],
-  });
-
-  const failure = failureOf(result);
-
-  expect(failure.code).toBe('invalidArguments');
-  expect(failure.message).toContain('demo-6789');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('claims past a failed tree check with --force --reason and records the reason', async () => {
@@ -578,23 +361,6 @@ it('claims past a failed tree check with --force --reason and records the reason
   });
 });
 
-it('submits past a failed tree check with --force --reason and records the reason', async () => {
-  const { fakeSession, result } = await run(
-    taskSubmit,
-    ['demo-3467', '--holder', 'agent', '--force', '--reason', 'Blocker was deleted'],
-    { tickets: [orphan()], facts: [claimBy('agent')] },
-  );
-
-  successOf(result);
-  expect(fakeSession.appends).toHaveLength(1);
-
-  expect(fakeSession.appends[0]?.fact).toMatchObject({
-    kind: 'log',
-    type: 'submitted',
-    forced: 'Blocker was deleted',
-  });
-});
-
 it('refuses --force without --reason and changes nothing', async () => {
   const { fakeSession, result } = await run(
     taskClaim,
@@ -603,18 +369,7 @@ it('refuses --force without --reason and changes nothing', async () => {
   );
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
-});
-
-it('refuses --force with an empty --reason and changes nothing', async () => {
-  const { fakeSession, result } = await run(
-    taskSubmit,
-    ['demo-3467', '--holder', 'agent', '--force', '--reason', ''],
-    { tickets: [orphan()], facts: [claimBy('agent')] },
-  );
-
-  expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('refuses --reason without --force and changes nothing', async () => {
@@ -625,16 +380,5 @@ it('refuses --reason without --force and changes nothing', async () => {
   );
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expectNothingWritten(fakeSession);
-});
-
-it('still appends a log to a task whose parent does not exist', async () => {
-  const { fakeSession, result } = await run(
-    taskLog,
-    ['demo-3467', '--type', 'progress', '--text', 'Working on it'],
-    { tickets: [orphan()] },
-  );
-
-  successOf(result);
-  expect(fakeSession.appends).toHaveLength(1);
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
