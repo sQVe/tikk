@@ -114,7 +114,7 @@ it('dispatches every session command', async () => {
   const editRun = await run(['edit', 'demo-3467', '--hash', 'h', '--title', 'X', '--json']);
 
   expect(newRun.fakeSession.creates).toHaveLength(1);
-  expect(listRun.fakeSession.listOptions).toHaveLength(1);
+  expect(JSON.parse(listRun.stdout.join(''))).toHaveProperty('tickets');
   expect(editRun.fakeSession.writes).toHaveLength(1);
 });
 

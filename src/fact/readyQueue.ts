@@ -3,6 +3,7 @@ import { deriveTaskStateFromOwnFacts } from './taskState.ts';
 import type { TaskState, TaskStateName, TaskTicket } from './taskState.ts';
 
 export interface ReadyScope {
+  kind?: 'task' | 'slice';
   project?: string;
   parent?: string;
 }
@@ -42,6 +43,9 @@ const inScope = (ticket: TaskTicket, scope: ReadyScope): boolean => {
 
   return scope.parent === undefined || frontMatter.parent === scope.parent;
 };
+
+const isCandidateKind = (ticket: TaskTicket, scope: ReadyScope): boolean =>
+  ticket.frontMatter.kind === (scope.kind ?? 'task') && ticket.frontMatter.archived === undefined;
 
 const compareRank = (left: TaskTicket, right: TaskTicket): number => {
   const leftRank = left.frontMatter.rank;
@@ -87,12 +91,25 @@ const deriveStates = (tickets: TaskTicket[], facts: Fact[], now: Date): Map<stri
   return states;
 };
 
+// A slice has no claims, so its status is its state. A slice that is done comes from PR facts.
+const sliceState = (ticket: TaskTicket): TaskState | undefined => {
+  const { status } = ticket.frontMatter;
+
+  return status === 'open' ? { state: 'open', claim: null } : undefined;
+};
+
+const considerationOf = (
+  ticket: TaskTicket,
+  states: Map<string, TaskState>,
+): TaskState | undefined =>
+  ticket.frontMatter.kind === 'slice' ? sliceState(ticket) : states.get(ticket.id);
+
 const blockerState = (target: TaskTicket | undefined, states: Map<string, TaskState>): string => {
   if (target === undefined) {
     return 'missing';
   }
 
-  if (target.frontMatter.kind === 'issue') {
+  if (target.frontMatter.kind !== 'task') {
     return target.frontMatter.status;
   }
 
@@ -115,17 +132,11 @@ export const selectReady = <Ticket extends TaskTicket>(
   }[] = [];
 
   for (const ticket of tickets) {
-    const { frontMatter } = ticket;
-
-    if (frontMatter.kind !== 'task' || frontMatter.archived !== undefined) {
+    if (!isCandidateKind(ticket, scope) || !inScope(ticket, scope)) {
       continue;
     }
 
-    if (!inScope(ticket, scope)) {
-      continue;
-    }
-
-    const derived = states.get(ticket.id);
+    const derived = considerationOf(ticket, states);
 
     if (derived !== undefined && consideredStates.has(derived.state)) {
       considered.push({ ticket, state: derived.state, claim: derived.claim });

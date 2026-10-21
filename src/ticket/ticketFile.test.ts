@@ -67,7 +67,7 @@ const failures: [string, string, string][] = [
   ['invalid YAML', '---\nkind: [task\n---\nBody\n', 'invalidYaml'],
   [
     'an unknown key',
-    taskText.replace('status: open', 'status: open\nrelated: []'),
+    taskText.replace('status: open', 'status: open\nbogus: []'),
     'invalidFrontMatter',
   ],
   [
@@ -81,7 +81,7 @@ const failures: [string, string, string][] = [
     taskText.replace('status: open', 'status: open\nparent: tikk-l0l0'),
     'invalidFrontMatter',
   ],
-  ['an unsupported kind', taskText.replace('kind: task', 'kind: plan'), 'invalidFrontMatter'],
+  ['an unsupported kind', taskText.replace('kind: task', 'kind: epic'), 'invalidFrontMatter'],
   ['an empty front matter block', '---\n---\n', 'invalidFrontMatter'],
 ];
 
@@ -121,4 +121,55 @@ it('parses CRLF around the delimiters and keeps the body as written', () => {
   expect(parsed.ok).toBe(true);
   expect(parsed.ok && parsed.value.frontMatter.title).toBe('Fix the parser');
   expect(parsed.ok && parsed.value.body).toBe('Body line one.\r\n\r\nBody line two.\r\n');
+});
+
+const refusedFiles: [string, string][] = [
+  ['a task file with criteria', 'kind: task\ncriteria:\n  - id: a\n    check: c\n    expected: e'],
+  ['an issue file with covers', 'kind: issue\ncovers:\n  - a'],
+  [
+    'a slice file with duplicate criterion IDs',
+    'kind: slice\ncriteria:\n  - id: a\n    check: c\n    expected: e\n  - id: a\n    check: c\n    expected: e',
+  ],
+  [
+    'a plan file with an invalid criterion ID',
+    'kind: plan\ncriteria:\n  - id: Bad_Id\n    check: c\n    expected: e',
+  ],
+];
+
+for (const [name, lines] of refusedFiles) {
+  it(`fails to parse ${name}`, () => {
+    const parsed = parseTicketFile(`---\n${lines}\ntitle: T\nproject: tikk\nstatus: open\n---\n`);
+
+    expect(parsed.ok).toBe(false);
+  });
+}
+
+it('round trips criteria and covers', () => {
+  const text = `---
+kind: slice
+title: T
+project: tikk
+criteria:
+  - id: first-one
+    check: Run it.
+    expected: Ok.
+covers:
+  - first-one
+discoveredFrom:
+  - tikk-ab3d
+related:
+  - tikk-cd4e
+status: open
+---
+`;
+
+  const parsed = parseTicketFile(text);
+
+  expect(parsed.ok).toBe(true);
+
+  if (!parsed.ok) {
+    return;
+  }
+
+  expect(parseTicketFile(serializeTicketFile(parsed.value))).toEqual(parsed);
 });

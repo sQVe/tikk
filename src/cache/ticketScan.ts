@@ -159,6 +159,9 @@ const recordError = (
   );
 };
 
+const jsonOrNull = (value: unknown): string | null =>
+  value === undefined ? null : JSON.stringify(value);
+
 const recordTicket = (
   database: Database,
   entry: CacheFileEntry,
@@ -170,8 +173,8 @@ const recordTicket = (
   database.run(
     `INSERT INTO tickets (
       path, mtime_ms, size, hash, id, kind, title, project, parent, rank,
-      blocked_by, status, archived, body, error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      blocked_by, discovered_from, related, criteria, covers, status, archived, body, error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT (path) DO UPDATE SET
       mtime_ms = excluded.mtime_ms,
       size = excluded.size,
@@ -183,6 +186,10 @@ const recordTicket = (
       parent = excluded.parent,
       rank = excluded.rank,
       blocked_by = excluded.blocked_by,
+      discovered_from = excluded.discovered_from,
+      related = excluded.related,
+      criteria = excluded.criteria,
+      covers = excluded.covers,
       status = excluded.status,
       archived = excluded.archived,
       body = excluded.body,
@@ -199,6 +206,10 @@ const recordTicket = (
       frontMatter.parent ?? null,
       frontMatter.rank ?? null,
       JSON.stringify(frontMatter.blockedBy),
+      JSON.stringify(frontMatter.discoveredFrom),
+      JSON.stringify(frontMatter.related),
+      jsonOrNull(frontMatter.criteria),
+      jsonOrNull(frontMatter.covers),
       frontMatter.status,
       frontMatter.archived ?? null,
       body,
@@ -289,7 +300,8 @@ const markDuplicates = (database: Database): void => {
     database.run(
       `UPDATE tickets SET
         id = NULL, kind = NULL, title = NULL, project = NULL, parent = NULL, rank = NULL,
-        blocked_by = NULL, status = NULL, archived = NULL, body = NULL,
+        blocked_by = NULL, discovered_from = NULL, related = NULL,
+        criteria = NULL, covers = NULL, status = NULL, archived = NULL, body = NULL,
         mtime_ms = ?, hash = ?, error = ?
       WHERE path = ?`,
       [

@@ -13,7 +13,7 @@ export interface CacheOpenReason {
 
 type VersionCheck = 'current' | 'outdated' | 'busy';
 
-const cacheVersion = 3;
+const cacheVersion = 5;
 
 // Other tikk processes write the same cache, so a query waits for their lock instead of failing.
 const defaultBusyTimeoutMilliseconds = 5000;
@@ -44,6 +44,10 @@ const createTables = (database: Database): void => {
       parent TEXT,
       rank REAL,
       blocked_by TEXT,
+      discovered_from TEXT,
+      related TEXT,
+      criteria TEXT,
+      covers TEXT,
       status TEXT,
       archived TEXT,
       body TEXT,
@@ -52,6 +56,7 @@ const createTables = (database: Database): void => {
   );
 
   database.run('CREATE INDEX tickets_id ON tickets (id)');
+  database.run('CREATE INDEX tickets_parent ON tickets (parent)');
 
   database.run(
     `CREATE TABLE facts (
@@ -66,7 +71,7 @@ const createTables = (database: Database): void => {
     )`,
   );
 
-  database.run('CREATE INDEX facts_ticket ON facts (ticket)');
+  database.run('CREATE INDEX facts_ticket ON facts (ticket, kind, at)');
 
   database.run(
     `CREATE TABLE fact_errors (
@@ -101,7 +106,7 @@ const isIntact = (database: Database): boolean =>
 const requiredColumns = new Map([
   [
     'tickets',
-    'path,mtime_ms,size,hash,id,kind,title,project,parent,rank,blocked_by,status,archived,body,error',
+    'path,mtime_ms,size,hash,id,kind,title,project,parent,rank,blocked_by,discovered_from,related,criteria,covers,status,archived,body,error',
   ],
   ['facts', 'path,line,ticket,kind,at,log_type,json'],
   ['fact_errors', 'path,line,message'],

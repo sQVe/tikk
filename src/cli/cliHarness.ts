@@ -2,7 +2,7 @@ import { parseFactLine } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
-import { parseProjectName, parseTicketId } from '../ticket/ticket.ts';
+import { parseProjectName, parseTicketFile, parseTicketId } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
 import type { CliEffects, CliFailure, CliSession, CliTicket, CommandResult } from './cliEffects.ts';
 
@@ -25,6 +25,7 @@ export interface SessionOptions {
   facts?: Fact[];
   errors?: { path: string; message: string }[];
   created?: CliTicket;
+  readBack?: boolean;
   overrides?: Partial<CliSession>;
 }
 
@@ -84,11 +85,34 @@ export const makeTicket = (
     title: 'A title',
     project: projectNameOf('demo'),
     blockedBy: [],
+    discoveredFrom: [],
+    related: [],
     status: 'open',
   },
   body: 'A body\n',
   ...overrides,
 });
+
+export const makeKindTicket = (
+  id: string,
+  kind: CliTicket['frontMatter']['kind'],
+  status: CliTicket['frontMatter']['status'] = 'open',
+): CliTicket => {
+  const base = makeTicket(id);
+
+  return makeTicket(id, { frontMatter: { ...base.frontMatter, kind, status } });
+};
+
+const readBack = (text: string): CliTicket => {
+  const parsed = parseTicketFile(text);
+
+  invariant(parsed.ok, 'The created text should parse.');
+
+  return makeTicket('demo-3467', {
+    frontMatter: parsed.value.frontMatter,
+    body: parsed.value.body,
+  });
+};
 
 export const makeFact = (fields: Record<string, unknown>): Fact => {
   const parsed = parseFactLine(
@@ -106,6 +130,18 @@ export const makeFact = (fields: Record<string, unknown>): Fact => {
   return parsed.value;
 };
 
+// A write that parses replaces the ticket at its path on disk, so a refresh shows it.
+const applyWrite = (disk: Map<TicketId, CliTicket>, path: string, text: string): void => {
+  const parsed = parseTicketFile(text);
+  const ticket = [...disk.values()].find((candidate) => candidate.path === path);
+
+  if (!parsed.ok || ticket === undefined) {
+    return;
+  }
+
+  disk.set(ticket.id, { ...ticket, hash: 'new-hash', ...parsed.value });
+};
+
 export const makeSession = (options: SessionOptions = {}): FakeSession => {
   // Reads see the cache. A write changes the disk, and only a refresh copies the disk to the cache.
   const disk = new Map((options.tickets ?? []).map((ticket) => [ticket.id, ticket]));
@@ -118,6 +154,21 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
   const listOptions: { includeArchived: boolean }[] = [];
   let isLocked = false;
   let isDisposed = false;
+
+  const takeLock: CliSession['lockStore'] = () => {
+    isLocked = true;
+
+    return Promise.resolve({
+      ok: true,
+      value: {
+        release: () => {
+          isLocked = false;
+
+          return Promise.resolve();
+        },
+      },
+    });
+  };
 
   const session: CliSession = {
     refresh: () => {
@@ -156,6 +207,8 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
         (ticket) => listing.includeArchived || ticket.frontMatter.archived === undefined,
       );
     },
+    mayHaveArchiveWork: () => true,
+    listTicketOutlines: () => [...tickets.values()].filter((ticket) => ticket.error === null),
     listErrors: () => options.errors ?? [],
     listFacts: (ticketIds) =>
       Promise.resolve({
@@ -167,20 +220,9 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
         ok: true,
         value: facts.filter((fact) => ticketIds === undefined || ticketIds.includes(fact.ticket)),
       }),
-    lockStore: () => {
-      isLocked = true;
-
-      return Promise.resolve({
-        ok: true,
-        value: {
-          release: () => {
-            isLocked = false;
-
-            return Promise.resolve();
-          },
-        },
-      });
-    },
+    listArchiveFacts: () => Promise.resolve({ ok: true, value: [...facts] }),
+    lockStore: takeLock,
+    tryLockStore: takeLock,
     appendFact: (machine, fact) => {
       appends.push({ machine, fact });
       diskFacts.push(fact);
@@ -193,17 +235,19 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     createTicketFile: (project, title, text) => {
       creates.push({ project, title, text, underLock: isLocked });
 
-      const created = options.created ?? makeTicket('demo-3467');
+      const created = options.readBack === true ? readBack(text) : options.created;
+      const stored = created ?? makeTicket('demo-3467');
 
-      disk.set(created.id, created);
+      disk.set(stored.id, stored);
 
       return Promise.resolve({
         ok: true,
-        value: { id: created.id, path: created.path, hash: created.hash },
+        value: { id: stored.id, path: stored.path, hash: stored.hash },
       });
     },
     writeTicketFile: (path, expectedHash, text) => {
       writes.push({ path, expectedHash, text, underLock: isLocked });
+      applyWrite(disk, path, text);
 
       return Promise.resolve({ ok: true, value: { hash: 'new-hash' } });
     },

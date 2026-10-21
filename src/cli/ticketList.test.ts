@@ -17,6 +17,8 @@ const other = makeTicket('other-3467', {
     title: 'Other title',
     project: projectNameOf('other'),
     blockedBy: [],
+    discoveredFrom: [],
+    related: [],
     status: 'draft',
   },
 });
@@ -27,6 +29,8 @@ const archived = makeTicket('demo-3468', {
     title: 'Old',
     project: projectNameOf('demo'),
     blockedBy: [],
+    discoveredFrom: [],
+    related: [],
     status: 'open',
     archived: '2026-01-01',
   },

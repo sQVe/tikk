@@ -4,9 +4,16 @@ import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
+import { mayHaveArchiveWork } from './archiveQueries.ts';
 import { openDatabase } from './cacheSchema.ts';
 import type { CacheOpenReason } from './cacheSchema.ts';
-import { hasValidFactErrorRows, listFactErrors, listFacts, listStateFacts } from './factQueries.ts';
+import {
+  hasValidFactErrorRows,
+  listArchiveFacts,
+  listFactErrors,
+  listFacts,
+  listStateFacts,
+} from './factQueries.ts';
 import type { FactDamage } from './factQueries.ts';
 import { hasValidFactCursors, rebuildFacts, refreshFacts } from './factScan.ts';
 import {
@@ -14,6 +21,7 @@ import {
   getTicket,
   hasValidRows,
   listErrors,
+  listTicketOutlines,
   listTickets,
 } from './ticketQueries.ts';
 import type {
@@ -21,6 +29,7 @@ import type {
   CachedTicket,
   ListTicketsOptions,
   TicketNotFound,
+  TicketOutline,
 } from './ticketQueries.ts';
 import { hasValidScanRows, refresh } from './ticketScan.ts';
 import type { CacheFileReason, CacheFiles } from './ticketScan.ts';
@@ -34,6 +43,7 @@ export type {
   CacheFiles,
   ListTicketsOptions,
   TicketNotFound,
+  TicketOutline,
 };
 
 const hasValidTickets = (database: Database): boolean =>
@@ -114,6 +124,14 @@ export class TicketCache implements Disposable {
     return listTickets(this.#database, options);
   }
 
+  listTicketOutlines(): TicketOutline[] {
+    return listTicketOutlines(this.#database);
+  }
+
+  mayHaveArchiveWork(now: Date): boolean {
+    return mayHaveArchiveWork(this.#database, now);
+  }
+
   listFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
     return listFacts(this.#database, ticketIds);
   }
@@ -121,6 +139,10 @@ export class TicketCache implements Disposable {
   // The facts that decide a task's state, in order. This skips notes, which are most of a history.
   listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
     return listStateFacts(this.#database, ticketIds);
+  }
+
+  listArchiveFacts(): Result<Fact[], FactDamage> {
+    return listArchiveFacts(this.#database);
   }
 
   // Replaces every fact row from the files in one transaction.

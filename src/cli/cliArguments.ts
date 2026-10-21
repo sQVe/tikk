@@ -6,7 +6,7 @@ import type { Result } from '../result.ts';
 import type { CliEffects, CliFailure } from './cliEffects.ts';
 
 export interface ParsedArguments {
-  values: Record<string, string | boolean | undefined>;
+  values: Record<string, string | boolean | string[] | undefined>;
   positionals: string[];
 }
 
@@ -41,6 +41,12 @@ export const stringValue = (
   const value = values[name];
 
   return typeof value === 'string' ? value : undefined;
+};
+
+export const listValue = (values: ParsedArguments['values'], name: string): string[] => {
+  const value = values[name];
+
+  return Array.isArray(value) ? value : [];
 };
 
 export const readBodyFile = async (

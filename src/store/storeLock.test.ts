@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 
-import { acquireStoreLock } from './store.ts';
+import { acquireStoreLock, tryStoreLock } from './store.ts';
 import type { StoreLockFunctions } from './store.ts';
 
 interface Harness {
@@ -446,4 +446,36 @@ it('reports locked without publishing a lock when a sleep ends after the deadlin
 
   expect(result).toMatchObject({ ok: false, reason: { kind: 'locked' } });
   expect(files.has(lockPath)).toBe(false);
+});
+
+it('reports locked at once without a sleep when a live process holds the lock', async () => {
+  const { functions, files, sleeps } = harness([999]);
+
+  files.set(lockPath, '999\n');
+
+  const result = await tryStoreLock(functions, store);
+
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(!result.ok && result.reason.message).toContain('999');
+  expect(sleeps).toEqual([]);
+  expect(files.get(lockPath)).toBe('999\n');
+});
+
+it('clears a stale lock and takes it in one attempt without a sleep', async () => {
+  const { functions, files, sleeps } = harness([]);
+
+  files.set(lockPath, '999\n');
+
+  const result = await tryStoreLock(functions, store);
+
+  expect(result.ok).toBe(true);
+  expect(sleeps).toEqual([]);
+  expect(files.get(lockPath)).toBe('100\n');
+});
+
+it('takes a free lock in one attempt', async () => {
+  const { functions, files } = harness([]);
+
+  expect((await tryStoreLock(functions, store)).ok).toBe(true);
+  expect(files.get(lockPath)).toBe('100\n');
 });

@@ -37,6 +37,33 @@ it('leaves out an archived ticket unless includeArchived is true', async () => {
   expect(all).toEqual(['tikk-3a4b', 'tikk-3a4c']);
 });
 
+it('outlines archived tickets with their parent and leaves out a file with an error', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'Live' }));
+
+  fake.set(
+    ticketPath('tikk-3a4c'),
+    ticketText({ title: 'Old', archived: '2026-01-02', parent: 'tikk-3a4b' }),
+  );
+
+  fake.set(ticketPath('tikk-3a4d'), ticketText({ title: 'Broken later' }));
+  await cache.refresh(fake.files);
+  fake.set(ticketPath('tikk-3a4d'), '---\nkind: [\n---\n');
+  await cache.refresh(fake.files);
+
+  const outlines: unknown = cache.listTicketOutlines();
+
+  expect(outlines).toEqual([
+    { id: 'tikk-3a4b', frontMatter: { kind: 'task', status: 'open' } },
+    {
+      id: 'tikk-3a4c',
+      frontMatter: { kind: 'task', status: 'open', parent: 'tikk-3a4b', archived: '2026-01-02' },
+    },
+  ]);
+});
+
 it('sorts tickets by project, then ID, and reports path, hash, and error', async () => {
   using cache = openTestCache(databasePath);
   const fake = createFakeFiles();
@@ -122,6 +149,44 @@ it('returns parent, rank, and blockedBy of a ticket', async () => {
     parent: 'tikk-3a4c',
     rank: 2.5,
     blockedBy: ['tikk-3a4d'],
+  });
+});
+
+it('returns the criteria and covers of a slice', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+
+  const sliceText = [
+    '---',
+    'kind: slice',
+    'title: Slice',
+    'project: tikk',
+    'status: open',
+    'criteria:',
+    '  - id: refuse-parent',
+    '    check: Test in ticketNew.test.ts',
+    '    expected: The plan is refused.',
+    'covers: [plan-criterion]',
+    '---',
+    'Body.\n',
+  ].join('\n');
+
+  fake.set(ticketPath('tikk-3a4b'), sliceText);
+  await cache.refresh(fake.files);
+
+  const id = parseTicketId('tikk-3a4b');
+
+  if (!id.ok) {
+    throw new Error('bad id');
+  }
+
+  const found = cache.getTicket(id.value);
+
+  expect(found.ok && found.value.frontMatter).toMatchObject({
+    criteria: [
+      { id: 'refuse-parent', check: 'Test in ticketNew.test.ts', expected: 'The plan is refused.' },
+    ],
+    covers: ['plan-criterion'],
   });
 });
 

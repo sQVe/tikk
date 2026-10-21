@@ -1,10 +1,13 @@
 import packageJson from '../../package.json' with { type: 'json' };
+import { sweepArchive } from './archiveSweep.ts';
 import { taskAccept, taskClaim, taskLog, taskRelease, taskSubmit } from './claimCommands.ts';
 import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
 import { needsCommand } from './needsCommand.ts';
 import { readyCommand } from './readyCommand.ts';
+import { ticketArchive, ticketUnarchive } from './ticketArchive.ts';
 import { ticketCancel } from './ticketCancel.ts';
+import { ticketClose } from './ticketClose.ts';
 import { ticketEdit } from './ticketEdit.ts';
 import { ticketList } from './ticketList.ts';
 import { ticketNew } from './ticketNew.ts';
@@ -30,12 +33,15 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['submit', taskSubmit],
   ['accept', taskAccept],
   ['cancel', ticketCancel],
+  ['close', ticketClose],
   ['ready', readyCommand],
   ['needs', needsCommand],
+  ['archive', ticketArchive],
+  ['unarchive', ticketUnarchive],
 ]);
 
 const usage =
-  'Usage: tikk <init|new|show|ls|edit|claim|release|log|submit|accept|cancel|ready|needs> [arguments] [--json]';
+  'Usage: tikk <init|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|archive|unarchive> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,
@@ -71,6 +77,8 @@ const runCommand = async (
   if (!refreshed.ok) {
     return { ok: false, reason: { code: 'storeError', message: refreshed.reason.message } };
   }
+
+  await sweepArchive(effects, session);
 
   return await run({ args, json, effects, session });
 };

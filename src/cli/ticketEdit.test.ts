@@ -4,6 +4,7 @@ import {
   failed,
   failureOf,
   makeFact,
+  makeKindTicket,
   makeEffects,
   makeSession,
   makeTicket,
@@ -337,4 +338,136 @@ it('prints the derived state of a done task in the text after an edit', async ()
   const output = successOf(await result);
 
   expect(output.text).toContain('demo-3467  done');
+});
+
+it('turns an issue into a slice under a plan and keeps its ID and path', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+  const plan = makeKindTicket('demo-3468', 'plan');
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468'],
+    true,
+    { tickets: [issue, plan] },
+  );
+
+  expect(successOf(await result).json).toMatchObject({ id: 'demo-3467', path: issue.path });
+  expect(fakeSession.writes).toHaveLength(1);
+  expect(fakeSession.writes[0]?.path).toBe(issue.path);
+  expect(fakeSession.writes[0]?.text).toContain('kind: slice');
+  expect(fakeSession.writes[0]?.text).toContain('parent: demo-3468');
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('turns an issue into a plan', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'plan'], true, {
+    tickets: [issue],
+  });
+
+  successOf(await result);
+  expect(fakeSession.writes[0]?.text).toContain('kind: plan');
+});
+
+it('turns an issue into a slice without a parent', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'slice'], true, {
+    tickets: [issue],
+  });
+
+  successOf(await result);
+  expect(fakeSession.writes[0]?.text).toContain('kind: slice');
+});
+
+it('refuses --kind on a task and writes nothing', async () => {
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'slice'], true);
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('refuses --kind on a slice and writes nothing', async () => {
+  const slice = makeKindTicket('demo-3467', 'slice');
+
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'plan'], true, {
+    tickets: [slice],
+  });
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('refuses a kind other than slice or plan', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'task'], true, {
+    tickets: [issue],
+  });
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('refuses --parent without --kind slice', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+  const plan = makeKindTicket('demo-3468', 'plan');
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'plan', '--parent', 'demo-3468'],
+    true,
+    { tickets: [issue, plan] },
+  );
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('refuses a parent that is not a plan and writes nothing', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+  const other = makeKindTicket('demo-3468', 'issue');
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468'],
+    true,
+    { tickets: [issue, other] },
+  );
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('appends a status fact when --status changes the status', async () => {
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--status', 'draft'], true);
+
+  successOf(await result);
+  expect(fakeSession.appends).toHaveLength(1);
+
+  expect(fakeSession.appends[0]?.fact).toMatchObject({
+    kind: 'status',
+    ticket: 'demo-3467',
+    status: 'draft',
+  });
+});
+
+it('appends no status fact when the status stays the same', async () => {
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--status', 'open'], true);
+
+  successOf(await result);
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('refuses --parent without --kind and writes nothing', async () => {
+  const plan = makeKindTicket('demo-3468', 'plan');
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--parent', 'demo-3468'],
+    true,
+    {
+      tickets: [target, plan],
+    },
+  );
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
 });

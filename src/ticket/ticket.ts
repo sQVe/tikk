@@ -12,3 +12,10 @@ export {
 
 export { ticketFrontMatterSchema, type TicketFrontMatter } from './ticketSchema.ts';
 export { createTicketSlug } from './ticketSlug.ts';
+
+export {
+  checkTicketTree,
+  collectTicketTree,
+  groupTicketChildren,
+  type TicketLookup,
+} from './ticketTree.ts';

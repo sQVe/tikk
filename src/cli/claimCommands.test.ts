@@ -219,6 +219,8 @@ it('refuses a claim on an issue and writes nothing', async () => {
       title: 'An issue',
       project: projectNameOf('demo'),
       blockedBy: [],
+      discoveredFrom: [],
+      related: [],
       status: 'open',
     },
   });

@@ -45,11 +45,24 @@ const acceptSchema = z.strictObject({
   holder: z.string().min(1).optional(),
 });
 
+const statusSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('status'),
+  status: z.enum(['draft', 'open', 'canceled', 'closed']),
+});
+
+const unarchiveSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('unarchive'),
+});
+
 const factSchema = z.discriminatedUnion('kind', [
   claimSchema,
   releaseSchema,
   logSchema,
   acceptSchema,
+  statusSchema,
+  unarchiveSchema,
 ]);
 
 export type Fact = z.output<typeof factSchema>;
