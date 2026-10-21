@@ -19,3 +19,8 @@ for the same finish.
 and names what blocks each slice it skipped. `ready --kind slice` does the same for every slice.
 `ready --parent <slice>` still returns that slice's tasks. A canceled or closed plan or slice no
 longer blocks a ticket that depends on it.
+
+`tikk claim` and `tikk submit` now check the task's parent and links like `tikk close` does, and
+refuse a task that points at a ticket that does not exist. `claim`, `submit`, and `close` accept
+`--force --reason <text>` to skip that check. The reason is recorded on the fact they append.
+`--force` needs `--reason`, and `--reason` needs `--force`.

@@ -20,6 +20,8 @@ interface StatusWrite {
   text: string;
   // The status fact to append after the write. Absent when the status does not change.
   status: Status | undefined;
+  // The reason given with --force, recorded on the status fact.
+  forced?: string | undefined;
   ticket: CliTicket;
 }
 
@@ -83,6 +85,7 @@ export const writeTicketWithStatus = async (
     at: input.effects.now().toISOString(),
     machine: machine.value,
     status,
+    ...(write.forced === undefined ? {} : { forced: write.forced }),
   };
 
   const appended = await input.session.appendFact(machine.value, fact);

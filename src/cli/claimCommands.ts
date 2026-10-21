@@ -3,11 +3,18 @@ import type { ParseArgsOptionsConfig } from 'node:util';
 import { deriveTaskState } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
-import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
+import {
+  forceOptions,
+  invalidArguments,
+  parseCommandArguments,
+  readForce,
+  stringValue,
+} from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
 import { conflict, withLockedTask } from './taskLock.ts';
 import type { LockedTask } from './taskLock.ts';
+import { checkSessionTree } from './ticketStatus.ts';
 import { storeFailure, taskOutput } from './ticketView.ts';
 
 interface Target {
@@ -18,14 +25,16 @@ interface Target {
 type LogType = 'progress' | 'question' | 'answer' | 'discovered';
 
 const claimUsage =
-  'Usage: tikk claim <id> --holder <h> [--lease <duration>] [--session <s>] [--session-log <path>] [--json]';
+  'Usage: tikk claim <id> --holder <h> [--lease <duration>] [--session <s>] [--session-log <path>] [--force --reason <text>] [--json]';
 
 const releaseUsage = 'Usage: tikk release <id> --holder <h> [--json]';
 
 const logUsage =
   'Usage: tikk log <id> --type <progress|question|answer|discovered> --text <t> [--holder <h>] [--json]';
 
-const submitUsage = 'Usage: tikk submit <id> --holder <h> [--text <t>] [--json]';
+const submitUsage =
+  'Usage: tikk submit <id> --holder <h> [--text <t>] [--force --reason <text>] [--json]';
+
 const acceptUsage = 'Usage: tikk accept <id> [--json]';
 const leasePattern = /^([1-9][0-9]*)([smh])$/;
 const maximumLeaseDays = 30;
@@ -138,6 +147,18 @@ const requireHolder = (locked: LockedTask, holder: string): Result<undefined, Cl
   return { ok: true, value: undefined };
 };
 
+const checkTree = (
+  input: CommandInput,
+  locked: LockedTask,
+  forced: string | undefined,
+): Result<undefined, CliFailure> => {
+  if (forced !== undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  return checkSessionTree(input.session, locked.task.frontMatter);
+};
+
 const requireClaimable = (locked: LockedTask, holder: string): Result<undefined, CliFailure> => {
   const { state } = deriveTaskState(locked.task, locked.facts, locked.now);
 
@@ -160,6 +181,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
       lease: { type: 'string' },
       session: { type: 'string' },
       'session-log': { type: 'string' },
+      ...forceOptions,
     },
     claimUsage,
   );
@@ -187,6 +209,12 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
     return machine;
   }
 
+  const forced = readForce(values);
+
+  if (!forced.ok) {
+    return forced;
+  }
+
   const session = stringValue(values, 'session');
   const sessionLog = stringValue(values, 'session-log');
 
@@ -195,6 +223,12 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
 
     if (!allowed.ok) {
       return allowed;
+    }
+
+    const tree = checkTree(input, locked, forced.value);
+
+    if (!tree.ok) {
+      return tree;
     }
 
     const leaseEnd = new Date(locked.now.getTime() + lease.value).toISOString();
@@ -207,6 +241,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
       machine: machine.value,
       holder: holder.value,
       leaseEnd,
+      ...(forced.value === undefined ? {} : { forced: forced.value }),
       ...(session === undefined ? {} : { session }),
       ...(sessionLog === undefined ? {} : { sessionLog }),
     });
@@ -304,7 +339,7 @@ export const taskLog = async (input: CommandInput): Promise<CommandResult> => {
 export const taskSubmit = async (input: CommandInput): Promise<CommandResult> => {
   const target = readTarget(
     input.args,
-    { holder: { type: 'string' }, text: { type: 'string' } },
+    { holder: { type: 'string' }, text: { type: 'string' }, ...forceOptions },
     submitUsage,
   );
 
@@ -317,6 +352,12 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
 
   if (!holder.ok) {
     return holder;
+  }
+
+  const forced = readForce(values);
+
+  if (!forced.ok) {
+    return forced;
   }
 
   const machine = await resolveMachine(input);
@@ -332,6 +373,12 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
       return allowed;
     }
 
+    const tree = checkTree(input, locked, forced.value);
+
+    if (!tree.ok) {
+      return tree;
+    }
+
     return appendAndShow(input, locked, {
       version: 1,
       kind: 'log',
@@ -341,6 +388,7 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
       type: 'submitted',
       text: stringValue(values, 'text') ?? '',
       holder: holder.value,
+      ...(forced.value === undefined ? {} : { forced: forced.value }),
     });
   });
 };

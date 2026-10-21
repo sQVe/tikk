@@ -61,3 +61,30 @@ export const readBodyFile = async (
 
   return { ok: true, value: text };
 };
+
+export const forceOptions = {
+  force: { type: 'boolean' },
+  reason: { type: 'string' },
+} as const;
+
+// The reason an override gives for skipping a strict check, or undefined when no override is set.
+export const readForce = (
+  values: ParsedArguments['values'],
+): Result<string | undefined, CliFailure> => {
+  const force = values['force'] === true;
+  const reason = stringValue(values, 'reason');
+
+  if (!force && reason === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (!force) {
+    return invalidArguments('--reason works only with --force.');
+  }
+
+  if (reason === undefined || reason.trim() === '') {
+    return invalidArguments('--force needs --reason <text> that says why.');
+  }
+
+  return { ok: true, value: reason };
+};

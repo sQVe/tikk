@@ -11,6 +11,7 @@ import {
   makeSession,
   makeTicket,
   projectNameOf,
+  ticketIdOf,
   successOf,
 } from './cliHarness.ts';
 import type { FakeSession } from './cliHarness.ts';
@@ -458,4 +459,150 @@ it('reports a fact the store refuses as invalid arguments', async () => {
   });
 
   expect(failureOf(result)).toEqual({ code: 'invalidArguments', message: 'holder: Too small.' });
+});
+
+const orphan = (): ReturnType<typeof makeTicket> => ({
+  ...task,
+  frontMatter: {
+    ...task.frontMatter,
+    parent: ticketIdOf('demo-4789'),
+    blockedBy: [ticketIdOf('demo-6789')],
+  },
+});
+
+const parentOnly = (): ReturnType<typeof makeTicket> => ({
+  ...task,
+  frontMatter: { ...task.frontMatter, parent: ticketIdOf('demo-4789') },
+});
+
+const blockedOnly = (): ReturnType<typeof makeTicket> => ({
+  ...task,
+  frontMatter: { ...task.frontMatter, blockedBy: [ticketIdOf('demo-6789')] },
+});
+
+it('refuses to claim a task whose parent does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+    tickets: [parentOnly()],
+  });
+
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-4789');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses to claim a task blocked by a ticket that does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+    tickets: [blockedOnly()],
+  });
+
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-6789');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses to submit a task whose parent does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
+    tickets: [parentOnly()],
+    facts: [claimBy('agent')],
+  });
+
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-4789');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses to submit a task blocked by a ticket that does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
+    tickets: [blockedOnly()],
+    facts: [claimBy('agent')],
+  });
+
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-6789');
+  expectNothingWritten(fakeSession);
+});
+
+it('claims past a failed tree check with --force --reason and records the reason', async () => {
+  const { fakeSession, result } = await run(
+    taskClaim,
+    ['demo-3467', '--holder', 'agent', '--force', '--reason', 'Parent was deleted'],
+    { tickets: [orphan()] },
+  );
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
+
+  expect(fakeSession.appends[0]?.fact).toMatchObject({
+    kind: 'claim',
+    forced: 'Parent was deleted',
+  });
+});
+
+it('submits past a failed tree check with --force --reason and records the reason', async () => {
+  const { fakeSession, result } = await run(
+    taskSubmit,
+    ['demo-3467', '--holder', 'agent', '--force', '--reason', 'Blocker was deleted'],
+    { tickets: [orphan()], facts: [claimBy('agent')] },
+  );
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
+
+  expect(fakeSession.appends[0]?.fact).toMatchObject({
+    kind: 'log',
+    type: 'submitted',
+    forced: 'Blocker was deleted',
+  });
+});
+
+it('refuses --force without --reason and changes nothing', async () => {
+  const { fakeSession, result } = await run(
+    taskClaim,
+    ['demo-3467', '--holder', 'agent', '--force'],
+    { tickets: [orphan()] },
+  );
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses --force with an empty --reason and changes nothing', async () => {
+  const { fakeSession, result } = await run(
+    taskSubmit,
+    ['demo-3467', '--holder', 'agent', '--force', '--reason', ''],
+    { tickets: [orphan()], facts: [claimBy('agent')] },
+  );
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses --reason without --force and changes nothing', async () => {
+  const { fakeSession, result } = await run(
+    taskClaim,
+    ['demo-3467', '--holder', 'agent', '--reason', 'Because'],
+    { tickets: [task] },
+  );
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expectNothingWritten(fakeSession);
+});
+
+it('still appends a log to a task whose parent does not exist', async () => {
+  const { fakeSession, result } = await run(
+    taskLog,
+    ['demo-3467', '--type', 'progress', '--text', 'Working on it'],
+    { tickets: [orphan()] },
+  );
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
 });

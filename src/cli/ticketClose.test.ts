@@ -194,3 +194,40 @@ it('reports a storeError when the refresh under the lock fails', async () => {
   expect(failureOf(result).code).toBe('storeError');
   expect(fakeSession.writes).toEqual([]);
 });
+
+it('closes past a failed tree check with --force --reason and records the reason', async () => {
+  const blocked = {
+    ...issue,
+    frontMatter: { ...issue.frontMatter, blockedBy: [ticketIdOf('demo-6789')] },
+  };
+
+  const { fakeSession, result } = await close(
+    ['demo-3467', '--force', '--reason', 'Blocker deleted'],
+    { tickets: [blocked] },
+  );
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
+
+  expect(fakeSession.appends[0]?.fact).toMatchObject({
+    kind: 'status',
+    status: 'closed',
+    forced: 'Blocker deleted',
+  });
+});
+
+it('refuses --force without --reason and changes nothing', async () => {
+  const { fakeSession, result } = await close(['demo-3467', '--force']);
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('refuses --reason without --force and changes nothing', async () => {
+  const { fakeSession, result } = await close(['demo-3467', '--reason', 'Because']);
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+});

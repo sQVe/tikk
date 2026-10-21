@@ -1,11 +1,20 @@
 import { serializeTicketFile } from '../ticket/ticket.ts';
-import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
+import {
+  forceOptions,
+  invalidArguments,
+  parseCommandArguments,
+  readForce,
+} from './cliArguments.ts';
 import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { conflict } from './taskLock.ts';
 import { checkSessionTree, withLockedTicket, writeTicketWithStatus } from './ticketStatus.ts';
 import { showAfterRefresh, showOutput } from './ticketView.ts';
 
-const closeLocked = async (input: CommandInput, ticket: CliTicket): Promise<CommandResult> => {
+const closeLocked = async (
+  input: CommandInput,
+  ticket: CliTicket,
+  forced: string | undefined,
+): Promise<CommandResult> => {
   const { frontMatter } = ticket;
 
   if (frontMatter.kind !== 'issue') {
@@ -22,9 +31,9 @@ const closeLocked = async (input: CommandInput, ticket: CliTicket): Promise<Comm
     return conflict(`Issue ${ticket.id} is canceled, so it cannot be closed.`);
   }
 
-  const tree = checkSessionTree(input.session, frontMatter);
+  const tree = forced === undefined ? checkSessionTree(input.session, frontMatter) : undefined;
 
-  if (!tree.ok) {
+  if (tree !== undefined && !tree.ok) {
     return tree;
   }
 
@@ -35,6 +44,7 @@ const closeLocked = async (input: CommandInput, ticket: CliTicket): Promise<Comm
     expectedHash: ticket.hash,
     text,
     status: 'closed',
+    forced,
     ticket,
   });
 
@@ -46,7 +56,7 @@ const closeLocked = async (input: CommandInput, ticket: CliTicket): Promise<Comm
 };
 
 export const ticketClose = async (input: CommandInput): Promise<CommandResult> => {
-  const parsed = parseCommandArguments(input.args, {});
+  const parsed = parseCommandArguments(input.args, forceOptions);
 
   if (!parsed.ok) {
     return parsed;
@@ -55,8 +65,14 @@ export const ticketClose = async (input: CommandInput): Promise<CommandResult> =
   const [rawId, ...extra] = parsed.value.positionals;
 
   if (rawId === undefined || extra.length > 0) {
-    return invalidArguments('Usage: tikk close <id> [--json]');
+    return invalidArguments('Usage: tikk close <id> [--force --reason <text>] [--json]');
   }
 
-  return withLockedTicket(input, rawId, (ticket) => closeLocked(input, ticket));
+  const forced = readForce(parsed.value.values);
+
+  if (!forced.ok) {
+    return forced;
+  }
+
+  return withLockedTicket(input, rawId, (ticket) => closeLocked(input, ticket, forced.value));
 };
