@@ -9,6 +9,9 @@ import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 export interface SyncClashFunctions extends SyncCommitFunctions {
   readdir: (directory: string) => Promise<string[]>;
   rename: (from: string, to: string) => Promise<void>;
+  // Fails with EEXIST when the new path exists.
+  link: (existingPath: string, newPath: string) => Promise<void>;
+  unlink: (path: string) => Promise<void>;
   randomIdSuffix: () => string;
   appendAlias: (alias: AliasRecord) => Promise<Result<{ path: string }, { message: string }>>;
   // The alias facts this machine has written.
@@ -380,12 +383,6 @@ const commitClashes = async (
 
 // Puts every renamed file back, so a failed sync leaves the clash for the next one. The alias
 // facts stay, since facts are append-only, and the next sync reuses them.
-const pathExists = (functions: SyncClashFunctions, path: string): Promise<boolean> =>
-  functions.stat(path).then(
-    () => true,
-    () => false,
-  );
-
 // A file written to the old path since the rename is kept, so both files stay and the next sync
 // finds the clash again.
 const undoMoves = async (
@@ -395,11 +392,17 @@ const undoMoves = async (
 ): Promise<void> => {
   await Promise.all(
     moves.map(async (move) => {
-      if (await pathExists(functions, join(root, move.from))) {
-        return;
-      }
+      const to = join(root, move.to);
 
-      await functions.rename(join(root, move.to), join(root, move.from)).catch(() => undefined);
+      // `link` fails when the old path exists, so a save there is never replaced.
+      const restored = await functions.link(to, join(root, move.from)).then(
+        () => true,
+        () => false,
+      );
+
+      if (restored) {
+        await functions.unlink(to).catch(() => undefined);
+      }
     }),
   );
 };

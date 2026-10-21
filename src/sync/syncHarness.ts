@@ -14,6 +14,7 @@ export interface FakeSync {
   gitCalls: GitCall[];
   blobs: string[];
   renames: [string, string][];
+  disk: Map<string, { text: string; mtimeMs: number }>;
   aliasWrites: () => number;
   commands: () => string[];
   lockCalls: () => number;
@@ -28,6 +29,8 @@ export interface FakeSyncOptions {
   // Entries per directory path; a directory not listed here uses `folder`.
   folders?: Record<string, string[]>;
   lockFails?: boolean;
+  // Runs before each `link` call, so a test can write a file at the target.
+  beforeLink?: (path: string, disk: Map<string, { text: string; mtimeMs: number }>) => void;
   aliases?: { from: string; to: string; path: string }[];
   now?: number;
 }
@@ -67,6 +70,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   };
 
   const renames: [string, string][] = [];
+  const disk = new Map(Object.entries(options.files ?? {}));
   let aliasWrites = 0;
   let locked = false;
   let lockCount = 0;
@@ -118,12 +122,12 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       });
     },
     stat: (path) => {
-      const file = options.files?.[path];
+      const file = disk.get(path);
 
       return file === undefined ? missingFile() : Promise.resolve({ mtimeMs: file.mtimeMs });
     },
     readFile: (path) => {
-      const file = options.files?.[path];
+      const file = disk.get(path);
 
       // A fact file or config the test does not list reads as empty.
       if (file === undefined && !path.includes('/tickets/')) {
@@ -147,6 +151,31 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     rename: (from, to) => {
       renames.push([from, to]);
 
+      const file = disk.get(from);
+
+      if (file !== undefined) {
+        disk.set(to, file);
+        disk.delete(from);
+      }
+
+      return Promise.resolve();
+    },
+    link: (existing, path) => {
+      options.beforeLink?.(path, disk);
+
+      const file = disk.get(existing);
+
+      if (disk.has(path) || file === undefined) {
+        return Promise.reject(Object.assign(new Error('exists'), { code: 'EEXIST' }));
+      }
+
+      disk.set(path, file);
+
+      return Promise.resolve();
+    },
+    unlink: (path) => {
+      disk.delete(path);
+
       return Promise.resolve();
     },
     randomIdSuffix: () => 'zzzz',
@@ -167,6 +196,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     gitCalls,
     blobs,
     renames,
+    disk,
     aliasWrites: () => aliasWrites,
     commands: () => gitCalls.map((call) => subcommandOf(call.args)),
     lockCalls: () => lockCount,

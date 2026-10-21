@@ -176,6 +176,28 @@ const withoutUnplacedAliases = (text: string, headNames: string[]): string => {
   return kept.join('\n');
 };
 
+// Fact files are append-only, so the `HEAD` bytes are a prefix of the file and are kept as they
+// are. Only the lines after them can wait.
+const filterFactText = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+  text: string,
+  headNames: string[],
+): Promise<string> => {
+  const head = await functions.runGit(['-C', root, 'show', `HEAD:${path}`]);
+
+  if (!head.ok) {
+    return withoutUnplacedAliases(text, headNames);
+  }
+
+  if (!text.startsWith(head.value)) {
+    return text;
+  }
+
+  return head.value + withoutUnplacedAliases(text.slice(head.value.length), headNames);
+};
+
 const listHeadTicketNames = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -272,7 +294,10 @@ const stageCandidates = async (
       continue;
     }
 
-    const text = isFactPath(path) ? withoutUnplacedAliases(checked, headNames) : checked;
+    const text = isFactPath(path)
+      ? // oxlint-disable-next-line eslint/no-await-in-loop -- Runs with the one-at-a-time staging below.
+        await filterFactText(functions, root, path, checked, headNames)
+      : checked;
 
     if (text === '' && checked !== '') {
       continue;

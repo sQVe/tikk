@@ -102,21 +102,6 @@ it('commits a tracked rename from HEAD together with its alias fact in one commi
   expect(fake.blobs).toEqual(['alias line\n']);
 });
 
-it('puts the files back and fails when the clash commit fails', async () => {
-  const fake = twoTickets({
-    git: (args) => (args.includes('commit') ? gitFailure('hook refused') : undefined),
-  });
-
-  const result = await resolveIdClashes(fake.functions, root);
-
-  expect(result.ok).toBe(false);
-
-  expect(fake.renames).toEqual([
-    ['/store/tickets/demo/demo-aaaa-b.md', '/store/tickets/demo/demo-zzzz-b.md'],
-    ['/store/tickets/demo/demo-zzzz-b.md', '/store/tickets/demo/demo-aaaa-b.md'],
-  ]);
-});
-
 it('reuses the new ID of an earlier alias and writes no second alias fact', async () => {
   const fake = twoTickets({
     aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/2026-10.jsonl' }],
@@ -155,17 +140,57 @@ it('leaves a file no commit added out of the clash commit', async () => {
   expect(stagedEntries(fake)).toEqual(['--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl']);
 });
 
+const oldPath = '/store/tickets/demo/demo-aaaa-b.md';
+const newPath = '/store/tickets/demo/demo-zzzz-b.md';
+
+const withTicketBytes = (extra: Parameters<typeof makeSync>[0]) =>
+  twoTickets({
+    ...extra,
+    files: { [oldPath]: { text: 'renamed ticket bytes', mtimeMs: 0 } },
+  });
+
 it('keeps an editor save at the old path when the clash commit fails', async () => {
-  const fake = twoTickets({
-    git: (args) => (args.includes('commit') ? gitFailure('hook refused') : undefined),
-    files: { '/store/tickets/demo/demo-aaaa-b.md': { text: 'saved by the editor', mtimeMs: 0 } },
+  const fake: ReturnType<typeof makeSync> = withTicketBytes({
+    git: (args) => {
+      if (!args.includes('commit')) {
+        return undefined;
+      }
+
+      fake.disk.set(oldPath, { text: 'saved by the editor', mtimeMs: 0 });
+
+      return gitFailure('hook refused');
+    },
   });
 
   const result = await resolveIdClashes(fake.functions, root);
 
   expect(result.ok).toBe(false);
+  expect(fake.disk.get(oldPath)?.text).toBe('saved by the editor');
+  expect(fake.disk.get(newPath)?.text).toBe('renamed ticket bytes');
+});
 
-  expect(fake.renames).toEqual([
-    ['/store/tickets/demo/demo-aaaa-b.md', '/store/tickets/demo/demo-zzzz-b.md'],
-  ]);
+it('keeps a save that appears at the old path between the rollback check and the restore', async () => {
+  const fake = withTicketBytes({
+    git: (args) => (args.includes('commit') ? gitFailure('hook refused') : undefined),
+    beforeLink: (path, disk) => {
+      disk.set(path, { text: 'saved late', mtimeMs: 0 });
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(oldPath)?.text).toBe('saved late');
+  expect(fake.disk.get(newPath)?.text).toBe('renamed ticket bytes');
+});
+
+it('puts the renamed ticket back at the old path when nothing was saved there', async () => {
+  const fake = withTicketBytes({
+    git: (args) => (args.includes('commit') ? gitFailure('hook refused') : undefined),
+  });
+
+  await resolveIdClashes(fake.functions, root);
+
+  expect(fake.disk.get(oldPath)?.text).toBe('renamed ticket bytes');
+  expect(fake.disk.has(newPath)).toBe(false);
 });

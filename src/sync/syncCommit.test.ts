@@ -147,3 +147,38 @@ it('builds the index from HEAD, so staged state from an earlier sync is dropped'
     commands.findIndex((command) => command.startsWith('update-index')),
   );
 });
+
+it('keeps committed alias lines whose ticket is gone from HEAD when a line is appended', async () => {
+  const factPath = 'facts/laptop/2026-10.jsonl';
+  const aliasLine = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
+  const newLine = '{"version":1,"kind":"log"}\n';
+
+  const fake = makeSync({
+    git: (args) => {
+      if (args.includes('show')) {
+        return gitOutput(aliasLine);
+      }
+
+      return listing([], [factPath])(args);
+    },
+    files: { [`/store/${factPath}`]: { text: aliasLine + newLine, mtimeMs: 0 } },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([aliasLine + newLine]);
+});
+
+it('stages a fact file unfiltered when it does not start with its HEAD bytes', async () => {
+  const factPath = 'facts/laptop/2026-10.jsonl';
+  const aliasLine = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
+
+  const fake = makeSync({
+    git: (args) => (args.includes('show') ? gitOutput('other\n') : listing([], [factPath])(args)),
+    files: { [`/store/${factPath}`]: { text: aliasLine, mtimeMs: 0 } },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([aliasLine]);
+});
