@@ -60,6 +60,15 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       return Promise.resolve(options.git?.(args) ?? gitOutput(''));
     },
+    commitArguments: async (root) => {
+      const email = await functions.runGit(['-C', root, 'config', 'user.email']);
+      const configured = email.ok && email.value.trim() !== '';
+      const unsigned = ['-c', 'commit.gpgsign=false'];
+
+      return configured
+        ? unsigned
+        : [...unsigned, '-c', 'user.name=tikk', '-c', 'user.email=tikk@localhost'];
+    },
     lockStore: () => {
       lockCount += 1;
 

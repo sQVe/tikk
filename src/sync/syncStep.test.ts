@@ -107,7 +107,13 @@ it('aborts a conflicted merge, skips the push, and names each file', async () =>
 
 it('reports merged false and still pushes when git refuses the merge before it starts', async () => {
   const fake = makeSync({
-    git: (args) => (args.includes('merge') ? gitFailure('would be overwritten') : undefined),
+    git: (args) => {
+      if (args.includes('MERGE_HEAD')) {
+        return gitFailure('no merge');
+      }
+
+      return args.includes('merge') ? gitFailure('would be overwritten') : undefined;
+    },
   });
 
   const result = await syncStore(fake.functions, root, plain);

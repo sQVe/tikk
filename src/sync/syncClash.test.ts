@@ -86,11 +86,11 @@ it('commits a settled renamed ticket that no commit added with its alias fact', 
 
   expect(addedPathsOf(fake)).toEqual(['facts/fake/2026-10.jsonl', 'tickets/demo/demo-zzzz-b.md']);
 
-  expect(result.ok && result.value.untracked).toEqual([
+  expect(result.ok && result.value.moves).toEqual([
     {
       from: 'tickets/demo/demo-aaaa-b.md',
       to: 'tickets/demo/demo-zzzz-b.md',
-      settled: true,
+      committed: true,
     },
   ]);
 });
@@ -101,5 +101,5 @@ it('leaves an unsettled renamed ticket out of the commit and reports it under it
   const result = await resolveIdClashes(fake.functions, root);
 
   expect(addedPathsOf(fake)).toEqual(['facts/fake/2026-10.jsonl']);
-  expect(result.ok && result.value.untracked.map((entry) => entry.settled)).toEqual([false]);
+  expect(result.ok && result.value.moves.map((entry) => entry.committed)).toEqual([false]);
 });

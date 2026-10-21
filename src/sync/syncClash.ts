@@ -1,7 +1,6 @@
 import { dirname, join } from 'node:path';
 
 import type { Result } from '../result.ts';
-import { commitArguments } from '../store/store.ts';
 import { parseProjectName, parseTicketFileName, parseTicketId } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
 import { isSettledTicket } from './syncCommit.ts';
@@ -41,20 +40,20 @@ interface DatedFile {
 interface MovedPath {
   from: string;
   to: string;
-  settled: boolean;
+  // True when the ticket goes into the alias commit, so nothing is pending for it.
+  committed: boolean;
 }
 
 interface ProjectRenames {
   aliases: SyncAlias[];
   // Paths to commit with the alias facts: the alias fact files and settled renamed tickets.
   commitPaths: string[];
-  // Renamed tickets that no commit added yet.
-  untracked: MovedPath[];
+  moves: MovedPath[];
 }
 
 export interface ClashResolution {
   aliases: SyncAlias[];
-  untracked: MovedPath[];
+  moves: MovedPath[];
 }
 
 const maxIdAttempts = 100;
@@ -225,7 +224,7 @@ const commitAliases = async (
     return failed(added.reason.message);
   }
 
-  const options = await commitArguments(functions.runGit, root);
+  const options = await functions.commitArguments(root);
 
   const committed = await functions.runGit([
     ...options,
@@ -256,7 +255,7 @@ const placeUntracked = async (
     renames.commitPaths.push(alias.path);
   }
 
-  renames.untracked.push({ from, to: alias.path, settled });
+  renames.moves.push({ from, to: alias.path, committed: settled });
 };
 
 const renameClashes = async (
@@ -267,7 +266,7 @@ const renameClashes = async (
   const files = await listProjectFiles(functions, root, project);
   const taken = new Set<string>(files.map((file) => file.id));
   const clashing = await newerClashingFiles(functions, root, project, files);
-  const renames: ProjectRenames = { aliases: [], commitPaths: [], untracked: [] };
+  const renames: ProjectRenames = { aliases: [], commitPaths: [], moves: [] };
 
   for (const { file, addedAt: addedTime } of clashing) {
     const to = freeId(functions, project, taken);
@@ -292,6 +291,10 @@ const renameClashes = async (
     if (addedTime === undefined) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- Same reason as the rename.
       await placeUntracked(functions, root, file, renamed.value.alias, renames);
+    } else {
+      const from = join(dirname(renamed.value.alias.path), file.fileName);
+
+      renames.moves.push({ from, to: renamed.value.alias.path, committed: false });
     }
   }
 
@@ -306,7 +309,7 @@ export const resolveIdClashes = async (
 ): Promise<Result<ClashResolution, SyncReason>> => {
   const names = await listNames(functions, join(root, 'tickets'));
   const projects = names.map((name) => parseProjectName(name)).filter((parsed) => parsed.ok);
-  const resolution: ClashResolution = { aliases: [], untracked: [] };
+  const resolution: ClashResolution = { aliases: [], moves: [] };
   const commitPaths = new Set<string>();
 
   for (const project of projects) {
@@ -319,7 +322,7 @@ export const resolveIdClashes = async (
     }
 
     resolution.aliases.push(...renames.value.aliases);
-    resolution.untracked.push(...renames.value.untracked);
+    resolution.moves.push(...renames.value.moves);
 
     for (const path of renames.value.commitPaths) {
       commitPaths.add(path);

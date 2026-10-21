@@ -1,5 +1,4 @@
 import type { Result } from '../result.ts';
-import { commitArguments } from '../store/store.ts';
 import { resolveIdClashes } from './syncClash.ts';
 import type { SyncAlias, SyncClashFunctions } from './syncClash.ts';
 import { commitStore } from './syncCommit.ts';
@@ -38,7 +37,7 @@ interface LockedSteps {
 const networkTimeoutMilliseconds = 10_000;
 const remoteBranch = 'origin/main';
 
-const networkSignal = (): AbortSignal => AbortSignal.timeout(networkTimeoutMilliseconds);
+export const networkSignal = (): AbortSignal => AbortSignal.timeout(networkTimeoutMilliseconds);
 
 const conflictReason = (root: string, files: string[]): SyncReason => ({
   kind: 'conflict',
@@ -63,7 +62,7 @@ const mergeRemote = async (
     return { ok: true, value: false };
   }
 
-  const commitOptions = await commitArguments(functions.runGit, root);
+  const commitOptions = await functions.commitArguments(root);
   const unrelated = options.allowUnrelatedHistories ? ['--allow-unrelated-histories'] : [];
 
   const merged = await functions.runGit([
@@ -84,15 +83,30 @@ const mergeRemote = async (
   const unmerged = await functions.runGit(['-C', root, 'diff', '--name-only', '--diff-filter=U']);
   const files = unmerged.ok ? unmerged.value.split('\n').filter((file) => file !== '') : [];
 
+  if (files.length > 0) {
+    await functions.runGit(['-C', root, 'merge', '--abort']);
+
+    return { ok: false, reason: conflictReason(root, files) };
+  }
+
+  const inProgress = await functions.runGit([
+    '-C',
+    root,
+    'rev-parse',
+    '-q',
+    '--verify',
+    'MERGE_HEAD',
+  ]);
+
   // Git refuses a merge that would overwrite a pending file before it starts, so nothing is left
   // to abort.
-  if (files.length === 0) {
+  if (!inProgress.ok) {
     return { ok: true, value: false };
   }
 
   await functions.runGit(['-C', root, 'merge', '--abort']);
 
-  return { ok: false, reason: conflictReason(root, files) };
+  return { ok: false, reason: { kind: 'failed', message: merged.reason.message } };
 };
 
 const runLockedSteps = async (
@@ -127,7 +141,7 @@ const runLockedSteps = async (
     return clashes;
   }
 
-  const moved = new Map(clashes.value.untracked.map((entry) => [entry.from, entry]));
+  const moved = new Map(clashes.value.moves.map((entry) => [entry.from, entry]));
 
   const pending = commit.value.pending.flatMap((path) => {
     const entry = moved.get(path);
@@ -136,7 +150,7 @@ const runLockedSteps = async (
       return [path];
     }
 
-    return entry.settled ? [] : [entry.to];
+    return entry.committed ? [] : [entry.to];
   });
 
   return {

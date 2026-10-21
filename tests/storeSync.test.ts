@@ -495,3 +495,61 @@ it('an unsettled ticket renamed by a clash is pending under its new path', async
   expect(report.pending).toEqual([alias?.path ?? '']);
   expect(await remoteTree(remotePath)).not.toContain('-new.md');
 });
+
+it('a merge that fails for another reason than a conflict is aborted and not pushed', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+  await createSettledTask(first, 'First task');
+  await first.runChecked(['sync']);
+  await createSettledTask(second, 'Second task');
+
+  const hook = join(second.storePath, '.git', 'hooks', 'pre-merge-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+  await writeFile(hook, '#!/bin/sh\necho hook refused >&2\nexit 1\n');
+  await chmod(hook, 0o755);
+
+  const before = await gitOutput(remotePath, ['rev-parse', 'main']);
+  const result = await second.run(['sync']);
+  const parsed = JSON.parse(result.stdout) as { error: { code: string } };
+
+  expect(result.exitCode).not.toBe(0);
+  expect(parsed.error.code).toBe('storeError');
+  expect(existsSync(join(second.storePath, '.git', 'MERGE_HEAD'))).toBe(false);
+  expect(await gitOutput(remotePath, ['rev-parse', 'main'])).toBe(before);
+});
+
+it('a clash that renames a tracked ticket with a pending edit reports the new path as pending', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+  await writeHandTicket(first, 'demo-aaaa-a.md');
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeHandTicket(second, 'demo-aaaa-b.md');
+  await gitOutput(second.storePath, ['add', '-A']);
+
+  await gitOutput(second.storePath, [
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '--quiet',
+    '-m',
+    'local',
+  ]);
+
+  const path = join(second.storePath, 'tickets', 'demo', 'demo-aaaa-b.md');
+
+  await writeFile(path, `${await readFile(path, 'utf8')}\nedited\n`);
+
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  expect(alias?.path).toContain('-b.md');
+  expect(report.pending).toEqual([alias?.path ?? '']);
+});

@@ -26,6 +26,7 @@ import {
   acquireStoreLock,
   tryStoreLock,
   appendFact,
+  commitArguments,
   createTicketFile,
   initStore,
   listFactFiles,
@@ -292,6 +293,7 @@ const initLocalStore = async (): Promise<
 
 const syncFunctions: SyncFunctions = {
   runGit: runSyncGit,
+  commitArguments: (root) => commitArguments(runSyncGit, root),
   lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
   stat: (path) => stat(path),
   readFile: (path) => readFile(path, 'utf8'),

@@ -1,6 +1,6 @@
 import type { Result } from '../result.ts';
 import type { SyncReason } from './syncCommit.ts';
-import { listRemoteMain, pushNewStore, syncStore } from './syncStep.ts';
+import { listRemoteMain, networkSignal, pushNewStore, syncStore } from './syncStep.ts';
 import type { SyncFunctions } from './syncStep.ts';
 
 export interface RemoteInitFunctions extends SyncFunctions {
@@ -70,7 +70,10 @@ const startFromEmptyFolder = async (
   }
 
   if (heads.value.trim() !== '') {
-    const cloned = await functions.runGit(['clone', '--quiet', '--branch', 'main', url, root]);
+    const cloned = await functions.runGit(
+      ['clone', '--quiet', '--branch', 'main', url, root],
+      networkSignal(),
+    );
 
     return cloned.ok
       ? { ok: true, value: { store: root, created: true, remote: url } }

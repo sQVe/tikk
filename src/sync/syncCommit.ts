@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 
 import type { Result } from '../result.ts';
-import { commitArguments } from '../store/store.ts';
 import { parseTicketFile } from '../ticket/ticket.ts';
 
 export interface SyncReason {
@@ -16,6 +15,8 @@ type SyncGit = (
 
 export interface SyncCommitFunctions {
   runGit: SyncGit;
+  // The arguments that go before `commit` or `merge`.
+  commitArguments: (root: string) => Promise<string[]>;
   stat: (path: string) => Promise<{ mtimeMs: number }>;
   readFile: (path: string) => Promise<string>;
   now: () => number;
@@ -164,7 +165,7 @@ const commitStaged = async (
     return { ok: false, reason: { kind: 'failed', message: added.reason.message } };
   }
 
-  const commitOptions = await commitArguments(functions.runGit, root);
+  const commitOptions = await functions.commitArguments(root);
 
   const committed = await functions.runGit([
     ...commitOptions,

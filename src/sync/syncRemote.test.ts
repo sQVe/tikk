@@ -135,3 +135,16 @@ it('returns the conflict when the first merge with the remote conflicts', async 
   expect(!result.ok && result.reason.kind).toBe('conflict');
   expect(!result.ok && result.reason.message).toContain('tickets/demo/a.md');
 });
+
+it('clones with the network timeout signal', async () => {
+  const fake = makeSync({
+    folder: 'missing',
+    git: (args) => (args.includes('ls-remote') ? gitOutput(remoteMain) : undefined),
+  });
+
+  await initRemoteStore(fake.functions, root, url);
+
+  const clone = fake.gitCalls.find((call) => call.args.includes('clone'));
+
+  expect(clone?.signal).toBe(true);
+});
