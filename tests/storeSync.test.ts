@@ -681,6 +681,18 @@ it('a failed clash commit and a sync within two seconds keep both tickets and on
   expect(tree.match(/-newer\.md/g)).toHaveLength(1);
   expect(tree).not.toContain('demo-aaaa-newer.md');
   expect(aliasLines).toHaveLength(1);
+
+  const adding = (
+    await gitOutput(first.storePath, ['log', '--format=%H', '-S"kind":"alias"', '--', 'facts'])
+  )
+    .trim()
+    .split('\n');
+
+  expect(adding).toHaveLength(1);
+
+  expect(
+    await gitOutput(first.storePath, ['show', '--name-status', '--format=', adding[0] ?? '']),
+  ).toContain('-newer.md');
 });
 
 it('a sync after a failed commit commits an edit, a deletion, and a new ticket', async () => {
@@ -719,4 +731,21 @@ it('a sync after a failed commit commits an edit, a deletion, and a new ticket',
   expect(tree).toContain(relative(first.storePath, created.path));
   expect(tree).not.toContain(relative(first.storePath, deleted.path));
   expect(shown).toContain('An edit.');
+});
+
+it('tikk sync commits and pushes a store that has no commit yet', async () => {
+  const { first, remotePath } = clonePair();
+
+  await mkdir(first.storePath, { recursive: true });
+  await gitOutput(first.storePath, ['init', '--quiet']);
+  await gitOutput(first.storePath, ['remote', 'add', 'origin', remotePath]);
+  await writeFile(join(first.storePath, 'tikk.json'), '{"version":1}\n');
+  await writeHandTicket(first, 'demo-aaaa-old.md');
+
+  const report = await first.runJson<SyncReport>(['sync']);
+  const tree = await remoteTree(remotePath);
+
+  expect(report.committed).toBe(true);
+  expect(report.pushed).toBe(true);
+  expect(tree).toContain('tickets/demo/demo-aaaa-old.md');
 });

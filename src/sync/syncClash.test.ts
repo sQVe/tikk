@@ -118,7 +118,9 @@ it('puts the files back and fails when the clash commit fails', async () => {
 });
 
 it('reuses the new ID of an earlier alias and writes no second alias fact', async () => {
-  const fake = twoTickets({ aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq' }] });
+  const fake = twoTickets({
+    aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/2026-10.jsonl' }],
+  });
 
   const result = await resolveIdClashes(fake.functions, root);
 
@@ -132,7 +134,7 @@ it('does not reuse an alias whose new ID a file already uses', async () => {
     ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-qqqq-c.md'],
     {
       files: { [factPath]: { text: 'alias line\n', mtimeMs: 0 } },
-      aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq' }],
+      aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/2026-10.jsonl' }],
     },
   );
 
@@ -151,4 +153,19 @@ it('leaves a file no commit added out of the clash commit', async () => {
 
   expect(result.ok && result.value.moves.map((move) => move.tracked)).toEqual([false]);
   expect(stagedEntries(fake)).toEqual(['--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl']);
+});
+
+it('keeps an editor save at the old path when the clash commit fails', async () => {
+  const fake = twoTickets({
+    git: (args) => (args.includes('commit') ? gitFailure('hook refused') : undefined),
+    files: { '/store/tickets/demo/demo-aaaa-b.md': { text: 'saved by the editor', mtimeMs: 0 } },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+
+  expect(fake.renames).toEqual([
+    ['/store/tickets/demo/demo-aaaa-b.md', '/store/tickets/demo/demo-zzzz-b.md'],
+  ]);
 });

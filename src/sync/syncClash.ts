@@ -12,7 +12,7 @@ export interface SyncClashFunctions extends SyncCommitFunctions {
   randomIdSuffix: () => string;
   appendAlias: (alias: AliasRecord) => Promise<Result<{ path: string }, { message: string }>>;
   // The alias facts this machine has written.
-  listAliases: () => Promise<{ from: string; to: string }[]>;
+  listAliases: () => Promise<{ from: string; to: string; path: string }[]>;
 }
 
 interface AliasRecord {
@@ -188,7 +188,7 @@ const reusableId = async (
   project: ProjectName,
   file: ProjectFile,
   taken: Set<string>,
-): Promise<TicketId | undefined> => {
+): Promise<{ id: TicketId; path: string } | undefined> => {
   const aliases = await functions.listAliases();
 
   for (const alias of aliases) {
@@ -196,7 +196,7 @@ const reusableId = async (
     const isOwnAlias = alias.from === file.id && alias.to.startsWith(`${project}-`);
 
     if (isOwnAlias && parsed.ok && !taken.has(parsed.value)) {
-      return parsed.value;
+      return { id: parsed.value, path: alias.path };
     }
   }
 
@@ -212,7 +212,7 @@ const renameFile = async (
   taken: Set<string>,
 ): Promise<Result<{ alias: SyncAlias; factPath: string | undefined }, SyncReason>> => {
   const reused = await reusableId(functions, project, file, taken);
-  const to = reused ?? freeId(functions, project, taken);
+  const to = reused?.id ?? freeId(functions, project, taken);
 
   if (to === undefined) {
     return failed(`No free ticket ID found for project "${project}".`);
@@ -220,7 +220,7 @@ const renameFile = async (
 
   taken.add(to);
 
-  let factPath: string | undefined;
+  let factPath = reused?.path;
 
   if (reused === undefined) {
     const at = new Date(functions.now()).toISOString();
@@ -380,15 +380,27 @@ const commitClashes = async (
 
 // Puts every renamed file back, so a failed sync leaves the clash for the next one. The alias
 // facts stay, since facts are append-only, and the next sync reuses them.
+const pathExists = (functions: SyncClashFunctions, path: string): Promise<boolean> =>
+  functions.stat(path).then(
+    () => true,
+    () => false,
+  );
+
+// A file written to the old path since the rename is kept, so both files stay and the next sync
+// finds the clash again.
 const undoMoves = async (
   functions: SyncClashFunctions,
   root: string,
   moves: MovedPath[],
 ): Promise<void> => {
   await Promise.all(
-    moves.map((move) =>
-      functions.rename(join(root, move.to), join(root, move.from)).catch(() => undefined),
-    ),
+    moves.map(async (move) => {
+      if (await pathExists(functions, join(root, move.from))) {
+        return;
+      }
+
+      await functions.rename(join(root, move.to), join(root, move.from)).catch(() => undefined);
+    }),
   );
 };
 

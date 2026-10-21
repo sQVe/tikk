@@ -28,7 +28,7 @@ export interface FakeSyncOptions {
   // Entries per directory path; a directory not listed here uses `folder`.
   folders?: Record<string, string[]>;
   lockFails?: boolean;
-  aliases?: { from: string; to: string }[];
+  aliases?: { from: string; to: string; path: string }[];
   now?: number;
 }
 

@@ -31,6 +31,7 @@ export interface SyncCommit {
 
 const storePathspecs = ['facts', 'tickets', 'tikk.json', '.gitattributes'];
 const settleMilliseconds = 2000;
+const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 const failedReason = (message: string): { ok: false; reason: SyncReason } => ({
   ok: false,
@@ -102,7 +103,8 @@ export const resetIndex = async (
   functions: SyncCommitFunctions,
   root: string,
 ): Promise<Result<undefined, SyncReason>> => {
-  const reset = await functions.runGit(['-C', root, 'read-tree', 'HEAD']);
+  const head = await functions.runGit(['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD']);
+  const reset = await functions.runGit(['-C', root, 'read-tree', head.ok ? 'HEAD' : '--empty']);
 
   return reset.ok ? { ok: true, value: undefined } : failedReason(reset.reason.message);
 };
@@ -149,6 +151,51 @@ export const stageRemoval = async (
   return removed.ok ? { ok: true, value: undefined } : failedReason(removed.reason.message);
 };
 
+const isFactPath = (path: string): boolean => path.startsWith('facts/');
+
+// A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
+// waits for the clash commit. Other lines and the committed bytes stay as they are.
+const withoutUnplacedAliases = (text: string, headNames: string[]): string => {
+  const kept = text.split('\n').filter((line) => {
+    try {
+      const fact: unknown = JSON.parse(line);
+
+      if (typeof fact !== 'object' || fact === null) {
+        return true;
+      }
+
+      const ticket = 'ticket' in fact ? fact.ticket : undefined;
+      const isAlias = 'kind' in fact && fact.kind === 'alias' && typeof ticket === 'string';
+
+      return !isAlias || headNames.some((name) => name.startsWith(`${ticket}-`));
+    } catch {
+      return true;
+    }
+  });
+
+  return kept.join('\n');
+};
+
+const listHeadTicketNames = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<string[]> => {
+  const listed = await functions.runGit([
+    '-C',
+    root,
+    'ls-tree',
+    '-r',
+    '--name-only',
+    'HEAD',
+    '--',
+    'tickets',
+  ]);
+
+  const paths = listed.ok ? listed.value.split('\n') : [];
+
+  return paths.map((path) => path.split('/').at(-1) ?? '');
+};
+
 // Returns the text to commit, or `undefined` when the file waits for a later sync.
 const checkChanged = async (
   functions: SyncCommitFunctions,
@@ -170,7 +217,11 @@ const indexDiffers = async (
   root: string,
 ): Promise<Result<boolean, SyncReason>> => {
   const index = await functions.runGit(['-C', root, 'write-tree']);
-  const head = await functions.runGit(['-C', root, 'rev-parse', 'HEAD^{tree}']);
+  const hasHead = await functions.runGit(['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD']);
+
+  const head = hasHead.ok
+    ? await functions.runGit(['-C', root, 'rev-parse', 'HEAD^{tree}'])
+    : { ok: true as const, value: emptyTree };
 
   if (!index.ok) {
     return failedReason(index.reason.message);
@@ -210,13 +261,20 @@ const stageCandidates = async (
 ): Promise<Result<string[], SyncReason>> => {
   const texts = await Promise.all(candidates.map((path) => checkChanged(functions, root, path)));
   const pending: string[] = [];
+  const headNames = await listHeadTicketNames(functions, root);
 
-  for (const [index, text] of texts.entries()) {
+  for (const [index, checked] of texts.entries()) {
     const path = candidates[index] ?? '';
 
-    if (text === undefined) {
+    if (checked === undefined) {
       pending.push(path);
 
+      continue;
+    }
+
+    const text = isFactPath(path) ? withoutUnplacedAliases(checked, headNames) : checked;
+
+    if (text === '' && checked !== '') {
       continue;
     }
 

@@ -322,22 +322,27 @@ const listAliases: SyncFunctions['listAliases'] = async () => {
   const directory = join(storeRoot, 'facts', machine.value);
   const names = await readdir(directory).catch(() => []);
 
-  const texts = await Promise.all(
-    names
-      .filter((name) => name.endsWith('.jsonl'))
-      .map((name) => readFile(join(directory, name), 'utf8').catch(() => '')),
+  const jsonlNames = names.filter((name) => name.endsWith('.jsonl'));
+
+  const perFile = await Promise.all(
+    jsonlNames.map(async (name) => {
+      const text = await readFile(join(directory, name), 'utf8').catch(() => '');
+      const path = join('facts', machine.value, name);
+
+      return text
+        .split('\n')
+        .filter((line) => line !== '')
+        .flatMap((line) => {
+          const parsed = parseFactLine(line);
+
+          return parsed.ok && parsed.value.kind === 'alias'
+            ? [{ from: parsed.value.from, to: parsed.value.ticket, path }]
+            : [];
+        });
+    }),
   );
 
-  const facts = texts
-    .flatMap((text) => text.split('\n'))
-    .filter((line) => line !== '')
-    .map((line) => parseFactLine(line));
-
-  return facts.flatMap((parsed) =>
-    parsed.ok && parsed.value.kind === 'alias'
-      ? [{ from: parsed.value.from, to: parsed.value.ticket }]
-      : [],
-  );
+  return perFile.flat();
 };
 
 const syncFunctions: SyncFunctions = {

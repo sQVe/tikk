@@ -69,7 +69,7 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
     ].toSorted(),
   );
 
-  expect(fake.commands()[0]).toBe('read-tree HEAD');
+  expect(fake.commands()).toContain('read-tree HEAD');
 });
 
 it('makes no commit when only pending tickets changed', async () => {
