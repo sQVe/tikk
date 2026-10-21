@@ -147,7 +147,6 @@ const datedGroup = (
     })),
   );
 
-// Returns the files that use an ID already used by an older file.
 const newerClashingFiles = async (
   functions: SyncClashFunctions,
   root: string,
@@ -206,7 +205,7 @@ const reusableId = async (
   return undefined;
 };
 
-// Moves the file and writes the alias fact. The fact path is `undefined` for a reused alias.
+// The fact path is `undefined` for a reused alias.
 const renameFile = async (
   functions: SyncClashFunctions,
   root: string,

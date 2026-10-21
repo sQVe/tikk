@@ -15,9 +15,7 @@ type SyncGit = (
 
 export interface SyncCommitFunctions {
   runGit: SyncGit;
-  // The arguments that go before `commit` or `merge`.
   commitArguments: (root: string) => Promise<string[]>;
-  // Stores the text as a Git blob and returns its hash.
   writeBlob: (root: string, text: string) => Promise<Result<string, { message: string }>>;
   stat: (path: string) => Promise<{ mtimeMs: number }>;
   readFile: (path: string) => Promise<string>;
