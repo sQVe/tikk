@@ -45,12 +45,13 @@ const appendStatusFacts = async (
   }
 };
 
-// A write that fails or finds the file changed leaves that ticket for a later sweep.
+// A write that fails or finds the file changed leaves that ticket for a later sweep. The IDs come
+// from outlines of the same refresh, which leave out files with an error.
 const writeArchived = async (session: CliSession, due: ArchiveDue): Promise<void> => {
   const writes = due.archive.map(async (id) => {
     const found = session.getTicket(id);
 
-    if (found.ok && found.value.error === null) {
+    if (found.ok) {
       const ticket = found.value;
       const frontMatter = { ...ticket.frontMatter, archived: due.date };
       const text = serializeTicketFile({ frontMatter, body: ticket.body });
@@ -71,7 +72,7 @@ const sweepLocked = async (effects: CliEffects, session: CliSession): Promise<vo
 
   const due = await findDue(effects, session);
 
-  if (due === undefined || !hasWork(due)) {
+  if (due === undefined) {
     return;
   }
 

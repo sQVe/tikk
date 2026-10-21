@@ -237,3 +237,76 @@ it('loads no tickets or facts when the cache says no archive work is possible', 
   expect(fakeSession.writes).toEqual([]);
   expect(listed.tickets.map((ticket) => ticket.id)).toEqual(['demo-3467']);
 });
+
+it('runs the command when the archive facts cannot be read', async () => {
+  const fakeSession = makeSession({
+    tickets: [plan],
+    overrides: { listArchiveFacts: () => failed('The facts are damaged.') },
+  });
+
+  const listed = await runLs(fakeSession);
+
+  expect(fakeSession.writes).toEqual([]);
+  expect(listed.tickets.map((ticket) => ticket.id)).toEqual(['demo-3467']);
+});
+
+it('takes no store lock when nothing is due', async () => {
+  const lockAttempts: string[] = [];
+
+  const fakeSession = makeSession({
+    tickets: [plan, slice, task],
+    facts: [statusFact('demo-3467', 'canceled', '2026-10-07T12:00:00.000Z')],
+    overrides: {
+      tryLockStore: () => {
+        lockAttempts.push('tryLockStore');
+
+        return Promise.resolve({ ok: false, reason: { kind: 'locked', message: 'Locked.' } });
+      },
+    },
+  });
+
+  await runLs(fakeSession);
+
+  expect(lockAttempts).toEqual([]);
+});
+
+it('writes nothing when the refresh under the lock fails', async () => {
+  const fakeSession = makeSession({
+    tickets: [plan],
+    facts: [statusFact('demo-3467', 'canceled', '2026-10-06T12:00:00.000Z')],
+  });
+
+  const refresh = fakeSession.session.refresh;
+  let refreshes = 0;
+
+  fakeSession.session.refresh = () => {
+    refreshes += 1;
+
+    return refreshes === 1 ? refresh() : failed('The cache failed.');
+  };
+
+  const listed = await runLs(fakeSession);
+
+  expect(fakeSession.writes).toEqual([]);
+  expect(listed.tickets.map((ticket) => ticket.id)).toEqual(['demo-3467']);
+});
+
+it('runs the command when the archive facts cannot be read under the lock', async () => {
+  const fakeSession = makeSession({
+    tickets: [plan],
+    facts: [statusFact('demo-3467', 'canceled', '2026-10-06T12:00:00.000Z')],
+  });
+
+  const listArchiveFacts = fakeSession.session.listArchiveFacts;
+  let reads = 0;
+
+  fakeSession.session.listArchiveFacts = () => {
+    reads += 1;
+
+    return reads === 1 ? listArchiveFacts() : failed('The facts are damaged.');
+  };
+
+  await runLs(fakeSession);
+
+  expect(fakeSession.writes).toEqual([]);
+});

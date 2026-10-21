@@ -3,7 +3,14 @@ import { expect, it } from 'bun:test';
 import { parseTicketFile } from '../ticket/ticket.ts';
 import { runCli } from './cli.ts';
 import type { CliTicket } from './cliEffects.ts';
-import { makeEffects, makeFact, makeSession, makeTicket, ticketIdOf } from './cliHarness.ts';
+import {
+  failed,
+  makeEffects,
+  makeFact,
+  makeSession,
+  makeTicket,
+  ticketIdOf,
+} from './cliHarness.ts';
 import type { FakeSession } from './cliHarness.ts';
 
 type Kind = CliTicket['frontMatter']['kind'];
@@ -207,5 +214,54 @@ for (const [kind, code] of failureCases) {
     expect(result.json).toMatchObject({ error: { code } });
     expect(attempted).toEqual([livePlan.path, firstSlice.path]);
     expect(fakeSession.appends).toEqual([]);
+  });
+}
+
+it('reports a storeError when an unarchive fact cannot be appended', async () => {
+  const fakeSession = makeSession({
+    tickets: [archivedPlan],
+    facts: [canceledLongAgo],
+    overrides: {
+      appendFact: () =>
+        Promise.resolve({ ok: false, reason: { kind: 'failed', message: 'Disk full.' } }),
+    },
+  });
+
+  const result = await run(fakeSession, ['unarchive', 'demo-3467']);
+
+  expect(result.json).toMatchObject({ error: { code: 'storeError' } });
+});
+
+it('refuses an unarchive without a machine name and writes nothing', async () => {
+  const fakeSession = makeSession({ tickets: [archivedPlan], facts: [canceledLongAgo] });
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    overrides: { resolveMachine: () => failed('No machine.') },
+  });
+
+  const output: string[] = [];
+
+  await runCli(['unarchive', 'demo-3467', '--json'], effects, {
+    stdout: (text) => output.push(text),
+    stderr: (text) => output.push(text),
+  });
+
+  expect(JSON.parse(output.join(''))).toMatchObject({ error: { code: 'invalidArguments' } });
+  expect(fakeSession.writes).toEqual([]);
+});
+
+const refusedArchiveArguments: string[][] = [
+  ['archive', 'demo-3467', 'demo-4789'],
+  ['archive', 'demo-3467', '--bogus'],
+];
+
+for (const argv of refusedArchiveArguments) {
+  it(`refuses ${argv.join(' ')} and writes nothing`, async () => {
+    const fakeSession = makeSession({ tickets: [ticketOf('demo-3467', 'plan', 'open')] });
+    const result = await run(fakeSession, argv);
+
+    expect(result.json).toMatchObject({ error: { code: 'invalidArguments' } });
+    expect(fakeSession.writes).toEqual([]);
   });
 }

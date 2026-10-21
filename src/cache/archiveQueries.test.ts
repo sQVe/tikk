@@ -184,6 +184,16 @@ it('answers yes for a due tree with a ticket unarchived before the finish', asyn
   expect(await answersFor(planWithSlice, facts)).toEqual({ precheck: true, rules: true });
 });
 
+it('answers yes for a due root when only another ticket was unarchived after the finish', async () => {
+  const openIssue = { id: 'tikk-3a4d', kind: 'issue', status: 'open' };
+  const facts = [canceledAt(fifteenDaysAgo), unarchivedAt('tikk-3a4d', tenDaysAgo)];
+
+  expect(await answersFor([canceledPlan, openIssue], facts)).toEqual({
+    precheck: true,
+    rules: true,
+  });
+});
+
 it('answers no for a store with no finished root', async () => {
   const tickets = [
     { id: 'tikk-3a4b', kind: 'plan', status: 'open' },

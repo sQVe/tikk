@@ -148,6 +148,20 @@ it('lists broken tasks only inside the requested parent', async () => {
   ]);
 });
 
+it('lists neither a broken slice nor a broken archived task among the unreadable tasks', async () => {
+  const brokenSlice = { ...makeKindTicket('demo-3467', 'slice'), error: 'Bad.' };
+  const archived = taskWith('demo-3468', { archived: '2026-10-01' });
+  const output = successOf(await ready([], [brokenSlice, { ...archived, error: 'Bad.' }]));
+
+  expect(output.json).toEqual({ candidates: [], skipped: [] });
+});
+
+it('lists tasks for --kind task', async () => {
+  const output = successOf(await ready(['--kind', 'task'], [taskWith('demo-3467', {})]));
+
+  expect(output.json).toMatchObject({ candidates: [{ id: 'demo-3467' }] });
+});
+
 const sliceWith = (id: string, fields: Partial<CliTicket['frontMatter']>): CliTicket => {
   const base = makeKindTicket(id, 'slice');
 

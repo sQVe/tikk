@@ -126,3 +126,51 @@ it('visits each ticket once when hand edits make a parent cycle', () => {
 
   expect(archivedOf(tickets, [canceledFact(fifteenDaysAgo)])).toEqual(['demo-3467', 'demo-4789']);
 });
+
+it('leaves a canceled slice of an open plan to its plan', () => {
+  const tickets = [
+    ticketOf('demo-3467', { status: 'open' }),
+    ticketOf('demo-4789', { kind: 'slice', status: 'canceled', parent: idOf('demo-3467') }),
+  ];
+
+  const facts = [factOf('demo-4789', fifteenDaysAgo, { kind: 'status', status: 'canceled' })];
+
+  expect(dueOf(tickets, facts)).toEqual({ date: '2026-10-20', archive: [], statusFacts: [] });
+});
+
+it('treats an accept fact as a finish only for an open task', () => {
+  const tickets = [
+    ticketOf('demo-3467', { kind: 'task', status: 'draft' }),
+    ticketOf('demo-4789', { kind: 'issue', status: 'open' }),
+  ];
+
+  const facts = [
+    factOf('demo-3467', fifteenDaysAgo, { kind: 'accept' }),
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'accept' }),
+  ];
+
+  expect(dueOf(tickets, facts)).toEqual({ date: '2026-10-20', archive: [], statusFacts: [] });
+});
+
+it('archives a descendant whose newer facts are not unarchive facts', () => {
+  const tickets = [
+    ticketOf('demo-3467'),
+    ticketOf('demo-4789', { kind: 'slice', status: 'open', parent: idOf('demo-3467') }),
+  ];
+
+  const facts = [
+    canceledFact(fifteenDaysAgo),
+    factOf('demo-4789', '2026-10-10T12:00:00.000Z', { kind: 'status', status: 'open' }),
+  ];
+
+  expect(archivedOf(tickets, facts)).toEqual(['demo-3467', 'demo-4789']);
+});
+
+it('archives a ticket unarchived at the same moment the root finished', () => {
+  const facts = [
+    canceledFact(fifteenDaysAgo),
+    factOf('demo-3467', fifteenDaysAgo, { kind: 'unarchive' }),
+  ];
+
+  expect(archivedOf([ticketOf('demo-3467')], facts)).toEqual(['demo-3467']);
+});

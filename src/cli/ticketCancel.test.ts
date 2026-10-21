@@ -2,6 +2,7 @@ import { expect, it } from 'bun:test';
 
 import { parseTicketFile } from '../ticket/ticket.ts';
 import {
+  failed,
   failureOf,
   makeEffects,
   makeFact,
@@ -191,4 +192,27 @@ it('refuses a missing ID before it takes the lock', async () => {
   });
 
   expect(failureOf(result).code).toBe('invalidArguments');
+});
+
+it('reports a storeError when the facts of a task cannot be read', async () => {
+  const { fakeSession, result } = await cancel(['demo-3467'], {
+    overrides: { listStateFacts: () => failed('The facts are damaged.') },
+  });
+
+  expect(failureOf(result).code).toBe('storeError');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('reports a plan that changed on disk', async () => {
+  const plan = makeKindTicket('demo-3467', 'plan');
+
+  const { result } = await cancel(['demo-3467'], {
+    tickets: [plan],
+    overrides: {
+      writeTicketFile: () =>
+        Promise.resolve({ ok: false, reason: { kind: 'changedOnDisk', message: 'Changed.' } }),
+    },
+  });
+
+  expect(failureOf(result).code).toBe('changedOnDisk');
 });

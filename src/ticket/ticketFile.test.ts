@@ -173,3 +173,14 @@ status: open
 
   expect(parseTicketFile(serializeTicketFile(parsed.value))).toEqual(parsed);
 });
+
+it('parses a plan with two criteria that have different IDs', () => {
+  const parsed = parseTicketFile(
+    '---\nkind: plan\ntitle: T\nproject: tikk\nstatus: open\ncriteria:\n  - id: a\n    check: c\n    expected: e\n  - id: b\n    check: c\n    expected: e\n---\n',
+  );
+
+  expect(parsed.ok && parsed.value.frontMatter.criteria?.map((criterion) => criterion.id)).toEqual([
+    'a',
+    'b',
+  ]);
+});

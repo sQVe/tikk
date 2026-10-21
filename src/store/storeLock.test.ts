@@ -479,3 +479,44 @@ it('takes a free lock in one attempt', async () => {
   expect((await tryStoreLock(functions, store)).ok).toBe(true);
   expect(files.get(lockPath)).toBe('100\n');
 });
+
+it('takes the lock in one attempt when it disappears before the PID is read', async () => {
+  const { functions, files, sleeps } = harness([999]);
+  const readFile = functions.readFile;
+  let removed = false;
+
+  files.set(lockPath, '999\n');
+
+  functions.readFile = async (path) => {
+    if (path === lockPath && !removed) {
+      removed = true;
+      files.delete(lockPath);
+    }
+
+    return readFile(path);
+  };
+
+  expect((await tryStoreLock(functions, store)).ok).toBe(true);
+  expect(sleeps).toEqual([]);
+  expect(files.get(lockPath)).toBe('100\n');
+});
+
+it('reports locked after one retry when a stale lock keeps coming back', async () => {
+  const { functions, files, sleeps } = harness([]);
+  const unlink = functions.unlink;
+
+  files.set(lockPath, '999\n');
+
+  functions.unlink = async (path) => {
+    await unlink(path);
+
+    if (path === lockPath) {
+      files.set(lockPath, '999\n');
+    }
+  };
+
+  const result = await tryStoreLock(functions, store);
+
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(sleeps).toEqual([]);
+});

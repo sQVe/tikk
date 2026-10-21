@@ -29,7 +29,7 @@ interface Attempt {
   breaker: string;
   deadline: number;
   waitMilliseconds: number;
-  // Attempts allowed after the deadline when the last one cleared a stale lock.
+  // Attempts at once after one that cleared a stale lock, before the deadline decides.
   vacatedRetries: number;
 }
 
@@ -230,7 +230,7 @@ const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLock
 
   const vacated = vacancy.value;
 
-  if (vacated && functions.now() >= deadline && attempt.vacatedRetries > 0) {
+  if (vacated && attempt.vacatedRetries > 0) {
     return tryAcquire({ ...attempt, vacatedRetries: attempt.vacatedRetries - 1 });
   }
 

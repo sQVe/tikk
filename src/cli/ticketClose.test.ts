@@ -159,3 +159,38 @@ it('requires exactly one ID', async () => {
 
   expect(failureOf(result).code).toBe('invalidArguments');
 });
+
+it('shows the closed issue after it closes it', async () => {
+  const { result } = await close(['demo-3467']);
+
+  expect(successOf(result).json).toMatchObject({ id: 'demo-3467', status: 'closed' });
+});
+
+const refusedCloseArguments: string[][] = [
+  ['demo-3467', 'demo-3468'],
+  ['demo-3467', '--bogus'],
+];
+
+for (const args of refusedCloseArguments) {
+  it(`refuses close ${args.join(' ')} and writes nothing`, async () => {
+    const { fakeSession, result } = await close(args);
+
+    expect(failureOf(result).code).toBe('invalidArguments');
+    expect(fakeSession.writes).toEqual([]);
+  });
+}
+
+it('returns notFound for an unknown issue', async () => {
+  const { result } = await close(['demo-3468']);
+
+  expect(failureOf(result).code).toBe('notFound');
+});
+
+it('reports a storeError when the refresh under the lock fails', async () => {
+  const { fakeSession, result } = await close(['demo-3467'], {
+    overrides: { refresh: () => failed('The cache failed.') },
+  });
+
+  expect(failureOf(result).code).toBe('storeError');
+  expect(fakeSession.writes).toEqual([]);
+});
