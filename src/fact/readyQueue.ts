@@ -1,6 +1,6 @@
 import type { Fact } from './factLine.ts';
-import { deriveTaskState } from './taskState.ts';
-import type { TaskStateName, TaskTicket } from './taskState.ts';
+import { deriveTaskStateFromOwnFacts } from './taskState.ts';
+import type { TaskState, TaskStateName, TaskTicket } from './taskState.ts';
 
 export interface ReadyScope {
   project?: string;
@@ -58,7 +58,36 @@ const compareRank = (left: TaskTicket, right: TaskTicket): number => {
   return left.id < right.id ? -1 : Number(left.id > right.id);
 };
 
-const blockerState = (target: TaskTicket | undefined, facts: Fact[], now: Date): string => {
+const groupByTicket = (facts: Fact[]): Map<string, Fact[]> => {
+  const grouped = new Map<string, Fact[]>();
+
+  for (const fact of facts) {
+    const own = grouped.get(fact.ticket);
+
+    if (own === undefined) {
+      grouped.set(fact.ticket, [fact]);
+    } else {
+      own.push(fact);
+    }
+  }
+
+  return grouped;
+};
+
+const deriveStates = (tickets: TaskTicket[], facts: Fact[], now: Date): Map<string, TaskState> => {
+  const grouped = groupByTicket(facts);
+  const states = new Map<string, TaskState>();
+
+  for (const ticket of tickets) {
+    if (ticket.frontMatter.kind === 'task') {
+      states.set(ticket.id, deriveTaskStateFromOwnFacts(ticket, grouped.get(ticket.id) ?? [], now));
+    }
+  }
+
+  return states;
+};
+
+const blockerState = (target: TaskTicket | undefined, states: Map<string, TaskState>): string => {
   if (target === undefined) {
     return 'missing';
   }
@@ -67,7 +96,7 @@ const blockerState = (target: TaskTicket | undefined, facts: Fact[], now: Date):
     return target.frontMatter.status;
   }
 
-  return deriveTaskState(target, facts, now).state;
+  return states.get(target.id)?.state ?? 'missing';
 };
 
 export const selectReady = <Ticket extends TaskTicket>(
@@ -77,11 +106,12 @@ export const selectReady = <Ticket extends TaskTicket>(
   scope: ReadyScope,
 ): ReadySelection<Ticket> => {
   const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+  const states = deriveStates(tickets, facts, now);
 
   const considered: {
     ticket: Ticket;
     state: TaskStateName;
-    claim: ReturnType<typeof deriveTaskState>['claim'];
+    claim: TaskState['claim'];
   }[] = [];
 
   for (const ticket of tickets) {
@@ -95,10 +125,10 @@ export const selectReady = <Ticket extends TaskTicket>(
       continue;
     }
 
-    const { state, claim } = deriveTaskState(ticket, facts, now);
+    const derived = states.get(ticket.id);
 
-    if (consideredStates.has(state)) {
-      considered.push({ ticket, state, claim });
+    if (derived !== undefined && consideredStates.has(derived.state)) {
+      considered.push({ ticket, state: derived.state, claim: derived.claim });
     }
   }
 
@@ -122,7 +152,7 @@ export const selectReady = <Ticket extends TaskTicket>(
     }
 
     const blockers = ticket.frontMatter.blockedBy
-      .map((id) => ({ id, state: blockerState(byId.get(id), facts, now) }))
+      .map((id) => ({ id, state: blockerState(byId.get(id), states) }))
       .filter((blocker) => !clearingStates.has(blocker.state));
 
     if (blockers.length > 0) {

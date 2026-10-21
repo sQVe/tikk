@@ -16,7 +16,7 @@ import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
-import type { TicketCache } from './cache/cache.ts';
+import type { CacheFiles, TicketCache } from './cache/cache.ts';
 import { runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
 import { resolveMachine, resolveProject } from './project.ts';
@@ -43,6 +43,7 @@ import type {
   StoreLockFunctions,
   TicketFileFunctions,
 } from './store/store.ts';
+import type { TicketId } from './ticket/ticket.ts';
 
 const homeDirectory = homedir();
 const storeRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
@@ -149,29 +150,56 @@ const readConfigFile = async (path: string): Promise<ConfigRead> => {
   }
 };
 
-const sessionFor = (store: Store, cache: TicketCache): CliSession => ({
-  refresh: () =>
-    cache.refresh({
-      listTicketFiles: () => listTicketFiles(ticketFiles, store),
-      readTicketFile: (path) => readTicketFile(ticketFiles, path),
-      listFactFiles: () => listFactFiles(factFiles, store),
-      readFactFile: (path, fromByte) => readFactFile(factFiles, path, fromByte),
-    }),
-  getTicket: (id) => cache.getTicket(id),
-  findTicketPath: (id) => cache.findTicketPath(id),
-  listTickets: (options) => cache.listTickets(options),
-  listErrors: () => cache.listErrors(),
-  listFacts: (ticketIds) => cache.listFacts(ticketIds),
-  lockStore: () => acquireStoreLock(storeLock, store),
-  appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
-  createTicketFile: (project, title, text) =>
-    createTicketFile(ticketFiles, store, project, title, text),
-  writeTicketFile: (path, expectedHash, text) =>
-    writeTicketFile(ticketFiles, path, expectedHash, text),
-  [Symbol.dispose]: () => {
-    cache[Symbol.dispose]();
-  },
-});
+// A stored fact that does not decode means the cache is damaged. The fact tables are cleared and
+// indexed again from the files once. A second failure is reported, not retried.
+const listStateFactsRecovering = async (
+  cache: TicketCache,
+  files: CacheFiles,
+  ticketIds?: TicketId[],
+): ReturnType<CliSession['listStateFacts']> => {
+  const first = cache.listStateFacts(ticketIds);
+
+  if (first.ok) {
+    return first;
+  }
+
+  const refreshed = await cache.rebuildFacts(files);
+
+  if (!refreshed.ok) {
+    return refreshed;
+  }
+
+  const second = cache.listStateFacts(ticketIds);
+
+  return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
+};
+
+const sessionFor = (store: Store, cache: TicketCache): CliSession => {
+  const files: CacheFiles = {
+    listTicketFiles: () => listTicketFiles(ticketFiles, store),
+    readTicketFile: (path) => readTicketFile(ticketFiles, path),
+    listFactFiles: () => listFactFiles(factFiles, store),
+    readFactFile: (path, fromByte) => readFactFile(factFiles, path, fromByte),
+  };
+
+  return {
+    refresh: () => cache.refresh(files),
+    getTicket: (id) => cache.getTicket(id),
+    findTicketPath: (id) => cache.findTicketPath(id),
+    listTickets: (options) => cache.listTickets(options),
+    listErrors: () => cache.listErrors(),
+    listStateFacts: (ticketIds) => listStateFactsRecovering(cache, files, ticketIds),
+    lockStore: () => acquireStoreLock(storeLock, store),
+    appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
+    createTicketFile: (project, title, text) =>
+      createTicketFile(ticketFiles, store, project, title, text),
+    writeTicketFile: (path, expectedHash, text) =>
+      writeTicketFile(ticketFiles, path, expectedHash, text),
+    [Symbol.dispose]: () => {
+      cache[Symbol.dispose]();
+    },
+  };
+};
 
 const openSession: CliEffects['openSession'] = async () => {
   const store = await openStore(storeRoot, storeFiles);

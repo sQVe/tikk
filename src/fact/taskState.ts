@@ -34,14 +34,16 @@ const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number
 
 const stateOnly = (state: TaskStateName): TaskState => ({ state, claim: null });
 
-export const deriveTaskState = (ticket: TaskTicket, facts: Fact[], now: Date): TaskState => {
+export const deriveTaskStateFromOwnFacts = (
+  ticket: TaskTicket,
+  own: Fact[],
+  now: Date,
+): TaskState => {
   const { status } = ticket.frontMatter;
 
   if (status === 'canceled' || status === 'draft') {
     return stateOnly(status);
   }
-
-  const own = facts.filter((fact) => fact.ticket === ticket.id);
 
   if (own.some((fact) => fact.kind === 'accept')) {
     return stateOnly('done');
@@ -79,3 +81,10 @@ export const deriveTaskState = (ticket: TaskTicket, facts: Fact[], now: Date): T
 
   return stateOnly('open');
 };
+
+export const deriveTaskState = (ticket: TaskTicket, facts: Fact[], now: Date): TaskState =>
+  deriveTaskStateFromOwnFacts(
+    ticket,
+    facts.filter((fact) => fact.ticket === ticket.id),
+    now,
+  );

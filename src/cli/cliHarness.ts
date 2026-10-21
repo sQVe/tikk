@@ -10,12 +10,14 @@ interface FakeWrite {
   path: string;
   expectedHash: string;
   text: string;
+  underLock: boolean;
 }
 
 interface FakeCreate {
   project: string;
   title: string;
   text: string;
+  underLock: boolean;
 }
 
 export interface SessionOptions {
@@ -32,11 +34,8 @@ export interface FakeSession {
   creates: FakeCreate[];
   appends: { machine: string; fact: Fact }[];
   listOptions: { includeArchived: boolean }[];
-  refreshes: () => number;
-  locks: () => number;
-  releases: () => number;
-  refreshesUnderLock: () => number;
-  writesUnderLock: () => number;
+  lockHeld: () => boolean;
+  changeOnDisk: (ticket: CliTicket) => void;
   disposed: () => boolean;
 }
 
@@ -108,33 +107,27 @@ export const makeFact = (fields: Record<string, unknown>): Fact => {
 };
 
 export const makeSession = (options: SessionOptions = {}): FakeSession => {
-  const tickets = new Map((options.tickets ?? []).map((ticket) => [ticket.id, ticket]));
+  // Reads see the cache. A write changes the disk, and only a refresh copies the disk to the cache.
+  const disk = new Map((options.tickets ?? []).map((ticket) => [ticket.id, ticket]));
+  const diskFacts = [...(options.facts ?? [])];
+  const tickets = new Map(disk);
+  const facts = [...diskFacts];
   const writes: FakeWrite[] = [];
   const creates: FakeCreate[] = [];
-  const facts = [...(options.facts ?? [])];
   const appends: { machine: string; fact: Fact }[] = [];
   const listOptions: { includeArchived: boolean }[] = [];
-  let refreshCount = 0;
-  let lockCount = 0;
-  let releaseCount = 0;
-  let lockedRefreshCount = 0;
-  let lockedWriteCount = 0;
-
-  const countLockedWrite = (): void => {
-    if (lockCount > releaseCount) {
-      lockedWriteCount += 1;
-    }
-  };
-
+  let isLocked = false;
   let isDisposed = false;
 
   const session: CliSession = {
     refresh: () => {
-      refreshCount += 1;
+      tickets.clear();
 
-      if (lockCount > releaseCount) {
-        lockedRefreshCount += 1;
+      for (const [id, ticket] of disk) {
+        tickets.set(id, ticket);
       }
+
+      facts.splice(0, facts.length, ...diskFacts);
 
       return Promise.resolve({ ok: true, value: undefined });
     },
@@ -164,16 +157,19 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       );
     },
     listErrors: () => options.errors ?? [],
-    listFacts: (ticketIds) =>
-      facts.filter((fact) => ticketIds === undefined || ticketIds.includes(fact.ticket)),
+    listStateFacts: (ticketIds) =>
+      Promise.resolve({
+        ok: true,
+        value: facts.filter((fact) => ticketIds === undefined || ticketIds.includes(fact.ticket)),
+      }),
     lockStore: () => {
-      lockCount += 1;
+      isLocked = true;
 
       return Promise.resolve({
         ok: true,
         value: {
           release: () => {
-            releaseCount += 1;
+            isLocked = false;
 
             return Promise.resolve();
           },
@@ -182,7 +178,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     },
     appendFact: (machine, fact) => {
       appends.push({ machine, fact });
-      facts.push(fact);
+      diskFacts.push(fact);
 
       return Promise.resolve({
         ok: true,
@@ -190,12 +186,11 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       });
     },
     createTicketFile: (project, title, text) => {
-      creates.push({ project, title, text });
-      countLockedWrite();
+      creates.push({ project, title, text, underLock: isLocked });
 
       const created = options.created ?? makeTicket('demo-3467');
 
-      tickets.set(created.id, created);
+      disk.set(created.id, created);
 
       return Promise.resolve({
         ok: true,
@@ -203,8 +198,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       });
     },
     writeTicketFile: (path, expectedHash, text) => {
-      writes.push({ path, expectedHash, text });
-      countLockedWrite();
+      writes.push({ path, expectedHash, text, underLock: isLocked });
 
       return Promise.resolve({ ok: true, value: { hash: 'new-hash' } });
     },
@@ -220,11 +214,10 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     creates,
     appends,
     listOptions,
-    refreshes: () => refreshCount,
-    locks: () => lockCount,
-    releases: () => releaseCount,
-    refreshesUnderLock: () => lockedRefreshCount,
-    writesUnderLock: () => lockedWriteCount,
+    lockHeld: () => isLocked,
+    changeOnDisk: (ticket) => {
+      disk.set(ticket.id, ticket);
+    },
     disposed: () => isDisposed,
   };
 };

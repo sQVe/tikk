@@ -5,7 +5,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
+import type { TicketId } from '../ticket/ticket.ts';
 import { openCache } from './cache.ts';
 import type { CacheFiles, TicketCache } from './cache.ts';
 
@@ -186,6 +188,14 @@ export const openTestCache = (databasePath: string): TicketCache => {
   invariant(opened.ok, 'The test cache must open.');
 
   return opened.value;
+};
+
+export const factsOf = (cache: TicketCache, ticketIds?: TicketId[]): Fact[] => {
+  const listed = cache.listFacts(ticketIds);
+
+  invariant(listed.ok, 'The test facts must decode.');
+
+  return listed.value;
 };
 
 export const runSql = (databasePath: string, sql: string): void => {

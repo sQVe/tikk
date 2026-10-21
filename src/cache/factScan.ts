@@ -71,6 +71,19 @@ const writeIfUnchanged = (
     })
     .immediate();
 
+export const hasValidFactCursors = (database: Database): boolean =>
+  z
+    .array(storedFileSchema)
+    .safeParse(
+      database.query('SELECT path, size, mtime_ms, bytes_read, lines_read FROM fact_files').all(),
+    ).success;
+
+const clearFacts = (database: Database): void => {
+  database.run('DELETE FROM facts');
+  database.run('DELETE FROM fact_errors');
+  database.run('DELETE FROM fact_files');
+};
+
 const loadStoredFiles = (database: Database): Map<string, StoredFile> => {
   const rows = z
     .array(storedFileSchema)
@@ -107,8 +120,17 @@ const recordLines = (database: Database, path: string, firstLine: number, text: 
       const fact = parsed.value;
 
       database.run(
-        'INSERT OR REPLACE INTO facts (path, line, ticket, kind, at, json) VALUES (?, ?, ?, ?, ?, ?)',
-        [path, line, fact.ticket, fact.kind, fact.at, lineText],
+        `INSERT OR REPLACE INTO facts (path, line, ticket, kind, at, log_type, json)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          path,
+          line,
+          fact.ticket,
+          fact.kind,
+          fact.at,
+          fact.kind === 'log' ? fact.type : null,
+          lineText,
+        ],
       );
     } else {
       database.run('INSERT OR REPLACE INTO fact_errors (path, line, message) VALUES (?, ?, ?)', [
@@ -220,6 +242,82 @@ const refreshFactsOnce = async (
   }
 
   return { ok: true, value: pass };
+};
+
+const cursorSnapshot = (database: Database): string =>
+  JSON.stringify(
+    database
+      .query('SELECT path, size, mtime_ms, bytes_read, lines_read FROM fact_files ORDER BY path')
+      .all(),
+  );
+
+// Reads every fact file first, then replaces all fact rows in one write transaction, so another
+// process sees either the old rows or the full new ones, never empty tables. The rows are
+// published only if no process indexed a fact file since the read began. Otherwise the new lines
+// would be erased, so it reads again.
+const rebuildFactsOnce = async (
+  database: Database,
+  files: FactCacheFiles,
+): Promise<Result<Pass, FactFileReason>> => {
+  const basis = cursorSnapshot(database);
+  const listed = await files.listFactFiles();
+
+  if (!listed.ok) {
+    return listed;
+  }
+
+  const contents: { entry: FactFileEntry; bytes: Uint8Array }[] = [];
+
+  for (const entry of listed.value.toSorted((left, right) => left.path.localeCompare(right.path))) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Reads run one at a time to bound open files.
+    const read = await files.readFactFile(entry.path, 0);
+
+    if (read.ok) {
+      contents.push({ entry, bytes: read.value });
+    } else if (read.reason.kind !== 'notFound') {
+      return read;
+    }
+  }
+
+  const published = database
+    .transaction(() => {
+      if (cursorSnapshot(database) !== basis) {
+        return false;
+      }
+
+      clearFacts(database);
+
+      for (const { entry, bytes } of contents) {
+        applyBytes(database, entry, undefined, bytes);
+      }
+
+      return true;
+    })
+    .immediate();
+
+  return { ok: true, value: published ? 'applied' : 'conflict' };
+};
+
+export const rebuildFacts = async (
+  database: Database,
+  files: FactCacheFiles,
+): Promise<Result<undefined, FactFileReason>> => {
+  for (let attempt = 0; attempt < maximumPasses; attempt += 1) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each pass depends on the rows the last one left.
+    const pass = await rebuildFactsOnce(database, files);
+
+    if (!pass.ok) {
+      return pass;
+    }
+
+    if (pass.value === 'applied') {
+      return { ok: true, value: undefined };
+    }
+  }
+
+  const message = `The fact cache kept changing in another process after ${maximumPasses} rebuilds.`;
+
+  return { ok: false, reason: { kind: 'failed', message } };
 };
 
 // A refresh that skipped a moved row did not see the newest lines, so it reads again instead of

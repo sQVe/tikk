@@ -1,20 +1,8 @@
-import { deriveTaskState } from '../fact/fact.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
-import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { findTicket, taskView, ticketText, ticketView } from './ticketView.ts';
+import type { CommandInput, CommandResult } from './cliEffects.ts';
+import { findTicket, showOutput } from './ticketView.ts';
 
-const showView = ({ effects, session }: CommandInput, ticket: CliTicket): unknown => {
-  if (ticket.frontMatter.kind !== 'task') {
-    return ticketView(ticket, true);
-  }
-
-  const facts = session.listFacts([ticket.id]);
-  const { state, claim } = deriveTaskState(ticket, facts, effects.now());
-
-  return taskView(ticket, state, claim);
-};
-
-export const ticketShow = (input: CommandInput): CommandResult => {
+export const ticketShow = async (input: CommandInput): Promise<CommandResult> => {
   const parsed = parseCommandArguments(input.args, {});
 
   if (!parsed.ok) {
@@ -33,8 +21,5 @@ export const ticketShow = (input: CommandInput): CommandResult => {
     return ticket;
   }
 
-  return {
-    ok: true,
-    value: { json: showView(input, ticket.value), text: ticketText(ticket.value) },
-  };
+  return showOutput(input.session, input.effects.now(), ticket.value);
 };

@@ -185,8 +185,8 @@ it('creates the ticket file under the store lock', async () => {
 
   successOf(await result);
 
-  expect(fakeSession.writesUnderLock()).toBe(1);
-  expect(fakeSession.releases()).toBe(fakeSession.locks());
+  expect(fakeSession.creates.map((created) => created.underLock)).toEqual([true]);
+  expect(fakeSession.lockHeld()).toBe(false);
 });
 
 it('fails with locked and creates nothing when the store lock is held', async () => {

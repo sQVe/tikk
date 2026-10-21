@@ -6,6 +6,7 @@ import {
   createDatabaseFixture,
   createFakeFiles,
   factPath,
+  factsOf,
   factText,
   makeGate,
   openTestCache,
@@ -50,7 +51,7 @@ it('indexes an appended line on the next refresh and keeps the earlier facts', a
   fake.setFactFile(path, factText('me-3a4b', claim) + first);
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b', 'me-3a4c']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b', 'me-3a4c']);
 
   expect(fake.factReads().map((read) => read.fromByte)).toEqual([
     0,
@@ -69,7 +70,7 @@ it('removes the facts of a deleted fact file', async () => {
   fake.removeFactFile(factPath('laptop'));
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4c']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4c']);
 });
 
 it('skips an incomplete last line until it ends in a newline', async () => {
@@ -82,13 +83,13 @@ it('skips an incomplete last line until it ends in a newline', async () => {
   fake.setFactFile(path, factText('me-3a4b') + cut);
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b']);
   expect(cache.listErrors()).toEqual([]);
 
   fake.setFactFile(path, factText('me-3a4b') + whole);
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b', 'me-3a4c']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b', 'me-3a4c']);
   expect(cache.listErrors()).toEqual([]);
 });
 
@@ -105,7 +106,7 @@ it('reports a bad line as path:line:message and indexes the other lines', async 
   expect(errors).toHaveLength(1);
   expect(errors[0]?.path).toBe(`${path}:2`);
   expect(errors[0]?.message).toContain('not valid JSON');
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b', 'me-3a4c']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b', 'me-3a4c']);
 });
 
 it('rereads a fact file that shrank', async () => {
@@ -119,7 +120,7 @@ it('rereads a fact file that shrank', async () => {
   fake.setFactFile(path, factText('me-3a4d'));
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4d']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4d']);
 });
 
 it('orders facts by time, then file path, then line', async () => {
@@ -133,7 +134,7 @@ it('orders facts by time, then file path, then line', async () => {
   fake.setFactFile(factPath('c'), factText('me-3a4d', { kind: 'accept' }, second));
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4c', 'me-3a4b', 'me-3a4d']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4c', 'me-3a4b', 'me-3a4d']);
 });
 
 it('lists only the facts of the given tickets', async () => {
@@ -143,8 +144,8 @@ it('lists only the facts of the given tickets', async () => {
   fake.setFactFile(factPath(), factText('me-3a4b') + factText('me-3a4c'));
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts([idOf('me-3a4c')]))).toEqual(['me-3a4c']);
-  expect(cache.listFacts([])).toEqual([]);
+  expect(ticketsOf(factsOf(cache, [idOf('me-3a4c')]))).toEqual(['me-3a4c']);
+  expect(factsOf(cache, [])).toEqual([]);
 });
 
 it('rebuilds a cache with an old version and indexes the facts again', async () => {
@@ -162,11 +163,11 @@ it('rebuilds a cache with an old version and indexes the facts again', async () 
 
   using cache = openTestCache(databasePath);
 
-  expect(cache.listFacts()).toEqual([]);
+  expect(factsOf(cache)).toEqual([]);
 
   await cache.refresh(fake.files);
 
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b']);
 });
 
 it('keeps facts that a newer refresh indexed when an older refresh saw no fact file', async () => {
@@ -192,7 +193,7 @@ it('keeps facts that a newer refresh indexed when an older refresh saw no fact f
   gate.open();
   await olderRefresh;
 
-  expect(ticketsOf(newer.listFacts())).toEqual(['me-3a4b']);
+  expect(ticketsOf(factsOf(newer))).toEqual(['me-3a4b']);
 });
 
 it('skips the lines an older refresh read when a newer refresh indexed the file first', async () => {
@@ -227,7 +228,7 @@ it('skips the lines an older refresh read when a newer refresh indexed the file 
 
   await newer.refresh(fake.files);
 
-  expect(ticketsOf(newer.listFacts())).toEqual(['me-3a4b', 'me-3a4c']);
+  expect(ticketsOf(factsOf(newer))).toEqual(['me-3a4b', 'me-3a4c']);
   expect(fake.factReads().length).toBe(readsBefore);
 });
 
@@ -247,7 +248,7 @@ it('fails the refresh and keeps the cached facts when a fact file read fails', a
   });
 
   expect(refreshed.ok).toBe(false);
-  expect(ticketsOf(cache.listFacts())).toEqual(['me-3a4b']);
+  expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b']);
 });
 
 it('fails the refresh when the fact file row keeps changing under every read', async () => {
@@ -299,5 +300,5 @@ it('reads again and removes a deleted file whose row another refresh changed mea
   const refreshed = await olderRefresh;
 
   expect(refreshed.ok).toBe(true);
-  expect(older.listFacts()).toEqual([]);
+  expect(factsOf(older)).toEqual([]);
 });

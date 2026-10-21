@@ -16,6 +16,10 @@ import {
   runSql,
 } from './cacheHarness.ts';
 
+interface LockHolder {
+  release: () => Promise<void>;
+}
+
 let databasePath = '';
 let cleanup = async () => {};
 
@@ -212,70 +216,102 @@ it('returns a failure that names the path when one leftover file cannot be remov
   }
 });
 
-it('waits for a write by another process instead of rebuilding the database', async () => {
-  const before = await listIds();
+const holderScript = `const { Database } = require('bun:sqlite');
+const database = new Database(process.argv[1]);
+database.run('BEGIN EXCLUSIVE');
+console.log('locked');
+for await (const line of console) break;
+database.run('ROLLBACK');`;
 
-  const holder = Bun.spawn(
-    [
-      'bun',
-      '-e',
-      `const { Database } = require('bun:sqlite');
-      const database = new Database(${JSON.stringify(databasePath)});
-      database.run('BEGIN EXCLUSIVE');
-      console.log('locked');
-      await Bun.sleep(300);
-      database.run('ROLLBACK');`,
-    ],
-    { stdout: 'pipe', stderr: 'inherit' },
-  );
+// The holder keeps its write lock until told to release, so no test depends on a timer.
+const holdWriteLock = async (): Promise<LockHolder> => {
+  const holder = Bun.spawn(['bun', '-e', holderScript, databasePath], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
 
   const reader = holder.stdout.getReader();
 
   await reader.read();
+  reader.releaseLock();
 
-  const opened = openCache(databasePath);
-  const ids = opened.ok ? idsOf(opened.value.listTickets({ includeArchived: true })) : [];
+  return {
+    release: async () => {
+      await holder.stdin.write('release\n');
+      await holder.stdin.end();
+      await holder.exited;
+    },
+  };
+};
 
-  if (opened.ok) {
-    opened.value[Symbol.dispose]();
+// SQLite blocks the thread that opens the database while another process holds the write lock, so
+// a worker thread opens it and the main thread reports from outside the blocked call. SQLite offers
+// no signal for "now waiting", so the main thread signals only after the worker has entered the
+// open call and a delay has passed. The delay only makes the test wait longer before the release.
+const openerWorkerScript = `import { parentPort } from 'node:worker_threads';
+import { openCache } from ${JSON.stringify(join(import.meta.dir, 'cache.ts'))};
+const databasePath = process.argv[2];
+parentPort.postMessage('entering');
+const opened = openCache(databasePath);
+const ids = opened.ok ? opened.value.listTickets({ includeArchived: true }).map((ticket) => ticket.id) : null;
+parentPort.postMessage(JSON.stringify(ids));`;
+
+const openerScript = `import { Worker } from 'node:worker_threads';
+const worker = new Worker(process.argv[1], { argv: [process.argv[2]] });
+worker.on('message', async (message) => {
+  if (message === 'entering') {
+    await Bun.sleep(300);
+    console.log('waiting');
+  } else {
+    console.log(message);
+    process.exit(0);
+  }
+});`;
+
+it('waits for a write by another process instead of rebuilding the database', async () => {
+  const before = await listIds();
+  const holder = await holdWriteLock();
+
+  const workerPath = join(dirname(databasePath), 'openerWorker.ts');
+
+  await writeFile(workerPath, openerWorkerScript);
+
+  const opener = Bun.spawn(['bun', '-e', openerScript, workerPath, databasePath], {
+    stdout: 'pipe',
+    stderr: 'inherit',
+  });
+
+  const reader = opener.stdout.getReader();
+  const decoder = new TextDecoder();
+  let output = decoder.decode((await reader.read()).value);
+
+  await holder.release();
+
+  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+    output += decoder.decode(chunk.value);
   }
 
-  reader.releaseLock();
-  await holder.exited;
+  await opener.exited;
 
-  expect(ids).toEqual(before);
+  const lines = output.trim().split('\n');
+
+  expect(lines[0]).toBe('waiting');
+  expect(JSON.parse(lines[1] ?? 'null')).toEqual(before);
 });
 
 it('fails without replacing the database when another process holds it past the timeout', async () => {
   await listIds();
   runSql(databasePath, 'CREATE TABLE marker (value INTEGER)');
 
-  const holder = Bun.spawn(
-    [
-      'bun',
-      '-e',
-      `const { Database } = require('bun:sqlite');
-      const database = new Database(${JSON.stringify(databasePath)});
-      database.run('BEGIN EXCLUSIVE');
-      console.log('locked');
-      await Bun.sleep(1000);
-      database.run('ROLLBACK');`,
-    ],
-    { stdout: 'pipe', stderr: 'inherit' },
-  );
-
-  const reader = holder.stdout.getReader();
-
-  await reader.read();
-
+  const holder = await holdWriteLock();
   const opened = openCache(databasePath, 50);
 
   if (opened.ok) {
     opened.value[Symbol.dispose]();
   }
 
-  reader.releaseLock();
-  await holder.exited;
+  await holder.release();
 
   const database = new Database(databasePath);
   const marker = database.query("SELECT name FROM sqlite_master WHERE name = 'marker'").get();

@@ -132,6 +132,6 @@ export const ticketNew = async (input: CommandInput): Promise<CommandResult> => 
       return storeFailure(created.reason.message);
     }
 
-    return showAfterRefresh(session, created.value.id);
+    return showAfterRefresh(session, input.effects.now(), created.value.id);
   });
 };

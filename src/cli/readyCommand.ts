@@ -15,6 +15,26 @@ const skippedView = (item: Skipped): Record<string, unknown> => ({
   ...(item.leaseEnd === undefined ? {} : { leaseEnd: item.leaseEnd }),
 });
 
+const isUnreadableTask = (ticket: CliTicket, project?: string, parent?: string): boolean => {
+  const { frontMatter } = ticket;
+
+  if (ticket.error === null || frontMatter.kind !== 'task' || frontMatter.archived !== undefined) {
+    return false;
+  }
+
+  const inProject = project === undefined || frontMatter.project === project;
+  const inParent = parent === undefined || frontMatter.parent === parent;
+
+  return inProject && inParent;
+};
+
+const parseErrorView = (ticket: CliTicket): Record<string, unknown> => ({
+  id: ticket.id,
+  title: ticket.frontMatter.title,
+  reason: 'parseError',
+  path: ticket.path,
+});
+
 const skippedDetails = (item: Skipped): string => {
   if (item.blockers !== undefined) {
     return item.blockers.map((blocker) => `${blocker.id} (${blocker.state})`).join(', ');
@@ -27,7 +47,7 @@ const skippedDetails = (item: Skipped): string => {
   return '';
 };
 
-const readyText = (selection: Selection): string => {
+const readyText = (selection: Selection, unreadable: CliTicket[]): string => {
   const candidateLines = selection.candidates.map(
     ({ ticket, state }) => `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
   );
@@ -38,10 +58,18 @@ const readyText = (selection: Selection): string => {
     return `${line.trimEnd()}\n`;
   });
 
-  return [...candidateLines, ...skippedLines].join('');
+  const unreadableLines = unreadable.map(
+    (ticket) => `skipped: ${ticket.id}  parseError  ${ticket.path}\n`,
+  );
+
+  return [...candidateLines, ...skippedLines, ...unreadableLines].join('');
 };
 
-export const readyCommand = ({ args, effects, session }: CommandInput): CommandResult => {
+export const readyCommand = async ({
+  args,
+  effects,
+  session,
+}: CommandInput): Promise<CommandResult> => {
   const parsed = parseCommandArguments(args, {
     project: { type: 'string' },
     parent: { type: 'string' },
@@ -59,9 +87,19 @@ export const readyCommand = ({ args, effects, session }: CommandInput): CommandR
   const parent = stringValue(parsed.value.values, 'parent');
 
   // Archived tickets stay in the list so a blocker that was archived is not reported as missing.
-  const tickets = session.listTickets({ includeArchived: true });
+  const listed = session.listTickets({ includeArchived: true });
 
-  const selection = selectReady(tickets, session.listFacts(), effects.now(), {
+  // A ticket whose file does not parse cannot be claimed, so it is never a candidate.
+  const unreadable = listed.filter((ticket) => isUnreadableTask(ticket, project, parent));
+  const tickets = listed.filter((ticket) => ticket.error === null);
+
+  const facts = await session.listStateFacts();
+
+  if (!facts.ok) {
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+  }
+
+  const selection = selectReady(tickets, facts.value, effects.now(), {
     ...(project === undefined ? {} : { project }),
     ...(parent === undefined ? {} : { parent }),
   });
@@ -74,8 +112,11 @@ export const readyCommand = ({ args, effects, session }: CommandInput): CommandR
   return {
     ok: true,
     value: {
-      json: { candidates, skipped: selection.skipped.map(skippedView) },
-      text: readyText(selection),
+      json: {
+        candidates,
+        skipped: [...selection.skipped.map(skippedView), ...unreadable.map(parseErrorView)],
+      },
+      text: readyText(selection, unreadable),
     },
   };
 };

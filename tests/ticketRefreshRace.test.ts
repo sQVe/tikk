@@ -5,6 +5,7 @@ import {
   createDatabaseFixture,
   createFakeFiles,
   factPath,
+  factsOf,
   factText,
   makeGate,
   openTestCache,
@@ -32,7 +33,7 @@ const claimAgainst = async (claimant: TicketCache, files: CacheFiles) => {
       getTicket: (id) => claimant.getTicket(id),
       findTicketPath: (id) => claimant.findTicketPath(id),
       listErrors: () => claimant.listErrors(),
-      listFacts: (ticketIds) => claimant.listFacts(ticketIds),
+      listStateFacts: (ticketIds) => Promise.resolve(claimant.listStateFacts(ticketIds)),
     },
   });
 
@@ -92,7 +93,7 @@ it('refuses a claim on a task canceled while an older refresh was reading it', a
       getTicket: (id) => claimant.getTicket(id),
       findTicketPath: (id) => claimant.findTicketPath(id),
       listErrors: () => claimant.listErrors(),
-      listFacts: (ticketIds) => claimant.listFacts(ticketIds),
+      listStateFacts: (ticketIds) => Promise.resolve(claimant.listStateFacts(ticketIds)),
     },
   });
 
@@ -209,7 +210,7 @@ it('refuses a claim on a task another holder claimed when an older fact refresh 
     },
   });
 
-  expect(claimant.listFacts().map((fact) => fact.kind)).toEqual(['log', 'log', 'claim']);
+  expect(factsOf(claimant).map((fact) => fact.kind)).toEqual(['log', 'log', 'claim']);
   expect(result).toMatchObject({ ok: false, reason: { code: 'conflict' } });
   expect(appends).toEqual([]);
 });

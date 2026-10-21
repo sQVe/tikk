@@ -284,17 +284,25 @@ it('keeps the breaker of a live owner that pauses longer than 5 seconds', async 
   const { functions: first, files, advance } = harness([100, 200]);
   const second: StoreLockFunctions = { ...first, pid: 200 };
   const unlink = first.unlink;
+  const sharedNow = first.now;
+  let pausedMilliseconds = 0;
   let secondResult: Awaited<ReturnType<typeof acquireStoreLock>> | undefined;
   let breakerDuringPause: string | undefined;
 
   files.set(lockPath, '999\n');
 
+  // The first acquirer is paused, so the time that passes meanwhile does not count against it.
+  first.now = () => sharedNow() - pausedMilliseconds;
+
   // The first acquirer holds the breaker and has read the stale PID when it pauses.
   first.unlink = async (path) => {
     if (path === lockPath && secondResult === undefined) {
+      const pausedAt = sharedNow();
+
       advance(6000);
       secondResult = await acquireStoreLock(second, store);
       breakerDuringPause = files.get(breakerPath);
+      pausedMilliseconds = sharedNow() - pausedAt;
     }
 
     await unlink(path);
@@ -375,4 +383,67 @@ it('fails and keeps the lock when it cannot read the PID of the lock', async () 
   });
 
   expect(files.get(lockPath)).toBe('999\n');
+});
+
+it('reports locked without another attempt when the holder vanishes after the deadline', async () => {
+  const { functions, files, advance } = harness([999]);
+  const readFile = functions.readFile;
+
+  files.set(lockPath, '999\n');
+
+  functions.readFile = async (path) => {
+    if (path === lockPath) {
+      advance(5001);
+      files.delete(lockPath);
+    }
+
+    return readFile(path);
+  };
+
+  const result = await acquireStoreLock(functions, store);
+
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(files.has(lockPath)).toBe(false);
+});
+
+it('reports locked without another attempt when it clears a stale lock after the deadline', async () => {
+  const { functions, files, advance } = harness([]);
+  const readFile = functions.readFile;
+  let advanced = false;
+
+  files.set(lockPath, '999\n');
+
+  functions.readFile = async (path) => {
+    const text = await readFile(path);
+
+    if (path === lockPath && !advanced) {
+      advanced = true;
+      advance(5001);
+    }
+
+    return text;
+  };
+
+  const result = await acquireStoreLock(functions, store);
+
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(files.has(lockPath)).toBe(false);
+});
+
+it('reports locked without publishing a lock when a sleep ends after the deadline', async () => {
+  const { functions, files, advance } = harness([999]);
+  const sleep = functions.sleep;
+
+  files.set(lockPath, '999\n');
+
+  functions.sleep = async (milliseconds) => {
+    await sleep(milliseconds);
+    advance(5001);
+    files.delete(lockPath);
+  };
+
+  const result = await acquireStoreLock(functions, store);
+
+  expect(result).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(files.has(lockPath)).toBe(false);
 });

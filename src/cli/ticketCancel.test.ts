@@ -39,8 +39,31 @@ it('writes status canceled with the expected hash under the lock', async () => {
   expect(write?.expectedHash).toBe(task.hash);
   expect(written.ok && written.value.frontMatter.status).toBe('canceled');
   expect(written.ok && written.value.body).toBe(task.body);
-  expect(fakeSession.refreshesUnderLock()).toBe(1);
-  expect(fakeSession.releases()).toBe(1);
+  expect(write?.underLock).toBe(true);
+  expect(fakeSession.lockHeld()).toBe(false);
+});
+
+it('cancels the ticket as it is on disk after the lock is taken', async () => {
+  const fakeSession = makeSession({ tickets: [task] });
+  const { effects } = makeEffects({ session: fakeSession });
+  const lockStore = fakeSession.session.lockStore;
+
+  fakeSession.session.lockStore = async () => {
+    fakeSession.changeOnDisk(makeTicket('demo-3467', { hash: 'hash-changed' }));
+
+    return lockStore();
+  };
+
+  const result = await ticketCancel({
+    args: ['demo-3467'],
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  successOf(result);
+  expect(fakeSession.writes.map((write) => write.expectedHash)).toEqual(['hash-changed']);
+  expect(fakeSession.lockHeld()).toBe(false);
 });
 
 it('succeeds without a write when the task is already canceled', async () => {
@@ -65,7 +88,7 @@ it('refuses to cancel a done task and writes nothing', async () => {
   expect(failureOf(result).code).toBe('conflict');
   expect(fakeSession.writes).toEqual([]);
   expect(fakeSession.appends).toEqual([]);
-  expect(fakeSession.releases()).toBe(1);
+  expect(fakeSession.lockHeld()).toBe(false);
 });
 
 it('refuses to cancel an issue and writes nothing', async () => {
@@ -105,8 +128,15 @@ it('reports a file that changed on disk', async () => {
 });
 
 it('refuses a missing ID before it takes the lock', async () => {
-  const { fakeSession, result } = await cancel([]);
+  const { result } = await cancel([], {
+    overrides: {
+      lockStore: () =>
+        Promise.resolve({
+          ok: false,
+          reason: { kind: 'locked', message: 'The store is locked by process 42.' },
+        }),
+    },
+  });
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expect(fakeSession.locks()).toBe(0);
 });

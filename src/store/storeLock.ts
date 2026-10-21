@@ -177,6 +177,11 @@ const clearStaleLock = async (
   return released.ok ? { ok: true, value: 'cleared' } : released;
 };
 
+const lockedResult = (message: string): Result<never, StoreLockReason> => ({
+  ok: false,
+  reason: { kind: 'locked', message },
+});
+
 const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLockReason>> => {
   const { functions, path, breaker, deadline, waitMilliseconds } = attempt;
 
@@ -196,29 +201,38 @@ const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLock
     return holder;
   }
 
-  if (holder.value === 'gone') {
-    return tryAcquire(attempt);
-  }
+  const holderPid = holder.value === 'gone' ? undefined : holder.value;
+  let vacated = holder.value === 'gone';
 
-  if (isStale(functions, holder.value)) {
-    const cleared = await clearStaleLock(functions, { path, breaker }, holder.value);
+  if (!vacated && isStale(functions, holderPid)) {
+    const cleared = await clearStaleLock(functions, { path, breaker }, holderPid);
 
     if (!cleared.ok) {
       return cleared;
     }
 
-    if (cleared.value === 'cleared') {
-      return tryAcquire(attempt);
-    }
+    vacated = cleared.value === 'cleared';
   }
 
   if (functions.now() >= deadline) {
-    const message = `The store is locked by process ${holder.value}.`;
+    const message = vacated
+      ? 'The store lock kept changing until the timeout.'
+      : `The store is locked by process ${holder.value}.`;
 
-    return { ok: false, reason: { kind: 'locked', message } };
+    return lockedResult(message);
+  }
+
+  // The lock may be free now, so try again at once.
+  if (vacated) {
+    return tryAcquire(attempt);
   }
 
   await functions.sleep(waitMilliseconds);
+
+  // The sleep may end after the deadline, and a lock published then would outlive the timeout.
+  if (functions.now() >= deadline) {
+    return lockedResult(`The store is locked by process ${holder.value}.`);
+  }
 
   const nextWait = Math.min(maximumWaitMilliseconds, waitMilliseconds + minimumWaitMilliseconds);
 

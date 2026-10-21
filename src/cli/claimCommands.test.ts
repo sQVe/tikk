@@ -2,7 +2,7 @@ import { expect, it } from 'bun:test';
 
 import type { Fact } from '../fact/fact.ts';
 import { taskAccept, taskClaim, taskLog, taskRelease, taskSubmit } from './claimCommands.ts';
-import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
+import type { CliEffects, CliSession, CommandInput, CommandResult } from './cliEffects.ts';
 import {
   failed,
   failureOf,
@@ -35,6 +35,15 @@ const submittedBy = (holder: string): Fact =>
 
 const accepted = makeFact({ kind: 'accept', at: '2026-10-20T11:45:00.000Z' });
 
+// A refusal that comes before the lock reports its own error, not `locked`.
+const lockRefused: Partial<CliSession> = {
+  lockStore: () =>
+    Promise.resolve({
+      ok: false,
+      reason: { kind: 'locked', message: 'The store is locked by process 42.' },
+    }),
+};
+
 const run = async (command: Command, args: string[], options: RunOptions = {}) => {
   const fakeSession = makeSession({
     tickets: options.tickets ?? [task],
@@ -54,7 +63,7 @@ const run = async (command: Command, args: string[], options: RunOptions = {}) =
 
 const expectNothingWritten = (fakeSession: FakeSession): void => {
   expect(fakeSession.appends).toEqual([]);
-  expect(fakeSession.releases()).toBe(fakeSession.locks());
+  expect(fakeSession.lockHeld()).toBe(false);
 };
 
 it('claims an open task under the lock with a lease from now', async () => {
@@ -90,8 +99,33 @@ it('claims an open task under the lock with a lease from now', async () => {
     },
   ]);
 
-  expect(fakeSession.refreshesUnderLock()).toBe(1);
-  expect(fakeSession.releases()).toBe(1);
+  expect(fakeSession.lockHeld()).toBe(false);
+});
+
+it('checks the task as it is on disk after the lock is taken', async () => {
+  const fakeSession = makeSession({ tickets: [task] });
+  const { effects } = makeEffects({ session: fakeSession });
+  const lockStore = fakeSession.session.lockStore;
+
+  const canceled = makeTicket('demo-3467', {
+    frontMatter: { ...task.frontMatter, status: 'canceled' },
+  });
+
+  fakeSession.session.lockStore = async () => {
+    fakeSession.changeOnDisk(canceled);
+
+    return lockStore();
+  };
+
+  const result = await taskClaim({
+    args: ['demo-3467', '--holder', 'agent'],
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  expect(failureOf(result).code).toBe('conflict');
+  expectNothingWritten(fakeSession);
 });
 
 it('claims for one hour when no lease is given', async () => {
@@ -160,15 +194,13 @@ it('refuses a claim on a task that is not open and writes nothing', async () => 
 
 it('refuses a claim with an invalid lease before it takes the lock', async () => {
   for (const lease of ['0s', '10', '5d', '-1m']) {
-    const { fakeSession, result } = await run(taskClaim, [
-      'demo-3467',
-      '--holder',
-      'agent',
-      `--lease=${lease}`,
-    ]);
+    const { fakeSession, result } = await run(
+      taskClaim,
+      ['demo-3467', '--holder', 'agent', `--lease=${lease}`],
+      { session: { overrides: lockRefused } },
+    );
 
     expect(failureOf(result).code).toBe('invalidArguments');
-    expect(fakeSession.locks()).toBe(0);
     expectNothingWritten(fakeSession);
   }
 });
@@ -230,10 +262,10 @@ it('fails with locked when the store lock is held and writes nothing', async () 
 it('refuses a claim when the machine name is invalid and writes nothing', async () => {
   const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
     effects: { resolveMachine: () => failed('The host name "Bad Host" is not valid.') },
+    session: { overrides: lockRefused },
   });
 
   expect(failureOf(result).code).toBe('invalidArguments');
-  expect(fakeSession.locks()).toBe(0);
   expectNothingWritten(fakeSession);
 });
 
@@ -244,7 +276,6 @@ it('releases the lock and fails when the cache refresh fails', async () => {
 
   expect(failureOf(result).code).toBe('storeError');
   expectNothingWritten(fakeSession);
-  expect(fakeSession.locks()).toBe(1);
 });
 
 it('reports a failed append as a store error and releases the lock', async () => {
@@ -258,7 +289,7 @@ it('reports a failed append as a store error and releases the lock', async () =>
   });
 
   expect(failureOf(result).code).toBe('storeError');
-  expect(fakeSession.releases()).toBe(1);
+  expect(fakeSession.lockHeld()).toBe(false);
 });
 
 it('releases a task held by the same holder', async () => {
@@ -399,16 +430,11 @@ it('logs to a task whose file has an error', async () => {
 
 it('refuses a lease longer than 30 days before it takes the lock', async () => {
   for (const lease of ['721h', '999999999999999999h']) {
-    const { fakeSession, result } = await run(taskClaim, [
-      'demo-3467',
-      '--holder',
-      'agent',
-      '--lease',
-      lease,
-    ]);
+    const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent', '--lease', lease], {
+      session: { overrides: lockRefused },
+    });
 
     expect(failureOf(result).code).toBe('invalidArguments');
-    expect(fakeSession.locks()).toBe(0);
   }
 
   const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent', '--lease', '720h']);

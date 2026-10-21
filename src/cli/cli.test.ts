@@ -77,13 +77,12 @@ it('runs init without opening a session', async () => {
 });
 
 it('writes text output to stdout and exits 0', async () => {
-  const { exitCode, stdout, stderr, fakeSession } = await run(['show', 'demo-3467']);
+  const { exitCode, stdout, stderr } = await run(['show', 'demo-3467']);
 
   expect(exitCode).toBe(0);
   expect(stdout.join('')).toContain('demo-3467');
   expect(stdout.join('')).toEndWith('\n');
   expect(stderr).toEqual([]);
-  expect(fakeSession.refreshes()).toBe(1);
 });
 
 it('writes json output with a trailing newline', async () => {
@@ -138,7 +137,7 @@ it('writes the failure as json with its code', async () => {
 });
 
 it('passes a session failure through with its code', async () => {
-  const { exitCode, stdout, fakeSession } = await run(
+  const { exitCode, stdout } = await run(
     ['show', 'demo-3467', '--json'],
     {},
     {
@@ -157,7 +156,6 @@ it('passes a session failure through with its code', async () => {
   expect(exitCode).toBe(1);
   expect(error.code).toBe('notInitialized');
   expect(error.message).toContain('/store');
-  expect(fakeSession.refreshes()).toBe(0);
 });
 
 it('returns a storeError and closes the session when the refresh fails', async () => {

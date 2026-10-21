@@ -1,34 +1,28 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const entryPath = join(import.meta.dir, '..', 'src', 'index.ts');
+import { invariant } from '../src/invariant.ts';
+import { createCliFixture } from './cliFixture.ts';
+import type { CliFixture } from './cliFixture.ts';
+
 const idAlphabet = '346789abcdefghijkmnpqrtwxyz';
 const ticketCount = 2000;
+const factsPerTask = 10;
 const runsPerCommand = 3;
 const limitMilliseconds = 200;
 
-let home = '';
-let work = '';
+let fixture: CliFixture | undefined;
 
-const run = async (args: string[]): Promise<number> => {
-  const child = Bun.spawn(['bun', 'run', entryPath, ...args, '--json'], {
-    cwd: work,
-    env: { ...process.env, HOME: home, TIKK_HOME: join(home, 'store') },
-    stdin: 'ignore',
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
+const cli = (): CliFixture => {
+  invariant(fixture !== undefined, 'The CLI fixture should be set up.');
 
-  return child.exited;
+  return fixture;
 };
 
 const timeRun = async (args: string[]): Promise<number> => {
   const start = performance.now();
-  const exitCode = await run(args);
 
-  expect(exitCode).toBe(0);
+  await cli().runChecked(args);
 
   return performance.now() - start;
 };
@@ -59,7 +53,7 @@ const ticketText = (index: number): string => {
 };
 
 const writeTickets = async (): Promise<void> => {
-  const folder = join(home, 'store', 'tickets', 'bench');
+  const folder = join(cli().storePath, 'tickets', 'bench');
 
   const writes = Array.from({ length: ticketCount }, (_, index) =>
     Bun.write(join(folder, `${ticketIdAt(index)}-task-${index}.md`), ticketText(index)),
@@ -68,22 +62,60 @@ const writeTickets = async (): Promise<void> => {
   await Promise.all(writes);
 };
 
+// Each task has an old claim and its release, then progress notes. Every task stays open, so the
+// ready rule reads the whole history.
+const factFields = (index: number, step: number): Record<string, unknown> => {
+  if (step === 0) {
+    return { kind: 'claim', holder: 'old', leaseEnd: '2026-10-01T01:00:00.000Z' };
+  }
+
+  if (step === 1) {
+    return { kind: 'release', holder: 'old' };
+  }
+
+  return { kind: 'log', type: 'progress', text: `Note ${step} of task ${index}` };
+};
+
+const writeFacts = async (): Promise<void> => {
+  const lines: string[] = [];
+
+  for (let index = 0; index < ticketCount; index += 1) {
+    for (let step = 0; step < factsPerTask; step += 1) {
+      const at = new Date(Date.UTC(2026, 9, 1, 0, 0, 0, index * factsPerTask + step)).toISOString();
+
+      lines.push(
+        JSON.stringify({
+          version: 1,
+          ticket: ticketIdAt(index),
+          at,
+          machine: 'bench',
+          ...factFields(index, step),
+        }),
+      );
+    }
+  }
+
+  await Bun.write(
+    join(cli().storePath, 'facts', 'bench', '2026-10.jsonl'),
+    `${lines.join('\n')}\n`,
+  );
+};
+
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'tikk-bench-'));
-  work = join(home, 'work');
-  await Bun.write(join(work, '.keep'), '');
+  fixture = await createCliFixture('tikk-bench-');
 });
 
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+  await fixture?.cleanup();
 });
 
 it(
   'answers ready and claim in under 200 ms on a store of 2,000 tickets',
   async () => {
-    expect(await run(['init'])).toBe(0);
+    await cli().runChecked(['init']);
     await writeTickets();
-    expect(await run(['ls'])).toBe(0);
+    await writeFacts();
+    await cli().runChecked(['ls']);
 
     const readyTimes: number[] = [];
     const claimTimes: number[] = [];

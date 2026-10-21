@@ -1,12 +1,10 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { appendFile, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-interface RunResult {
-  exitCode: number;
-  stdout: string;
-}
+import { invariant } from '../src/invariant.ts';
+import { createCliFixture } from './cliFixture.ts';
+import type { CliFixture, CliRun } from './cliFixture.ts';
 
 interface ShownTask {
   id: string;
@@ -26,34 +24,19 @@ interface ReadyListing {
   }[];
 }
 
-const entryPath = join(import.meta.dir, '..', 'src', 'index.ts');
+let fixture: CliFixture | undefined;
 
-let home = '';
-let work = '';
+const cli = (): CliFixture => {
+  invariant(fixture !== undefined, 'The CLI fixture should be set up.');
 
-const run = async (args: string[]): Promise<RunResult> => {
-  const child = Bun.spawn(['bun', 'run', entryPath, ...args, '--json'], {
-    cwd: work,
-    env: { ...process.env, HOME: home, TIKK_HOME: join(home, 'store') },
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-
-  const [stdout, exitCode] = await Promise.all([child.stdout.text(), child.exited]);
-
-  return { exitCode, stdout };
+  return fixture;
 };
 
-const runJson = async <Shape>(args: string[]): Promise<Shape> => {
-  const result = await run(args);
+const run = (args: string[]): Promise<CliRun> => cli().run(args);
 
-  expect(result.exitCode).toBe(0);
+const runJson = <Shape>(args: string[]): Promise<Shape> => cli().runJson<Shape>(args);
 
-  return JSON.parse(result.stdout) as Shape;
-};
-
-const errorCodeOf = (result: RunResult): unknown => {
+const errorCodeOf = (result: CliRun): unknown => {
   const parsed: unknown = JSON.parse(result.stdout);
 
   return (parsed as { error: { code: string } }).error.code;
@@ -69,14 +52,12 @@ const stateOf = async (id: string): Promise<string> => {
 };
 
 beforeEach(async () => {
-  home = await mkdtemp(join(tmpdir(), 'tikk-claim-'));
-  work = join(home, 'work');
-  await Bun.write(join(work, '.keep'), '');
-  await run(['init']);
+  fixture = await createCliFixture('tikk-claim-');
+  await fixture.runChecked(['init']);
 });
 
 afterEach(async () => {
-  await rm(home, { recursive: true, force: true });
+  await fixture?.cleanup();
 });
 
 it('lets exactly one of two concurrent claims on a task succeed', async () => {
@@ -100,16 +81,29 @@ it('lets exactly one of two concurrent claims on a task succeed', async () => {
 it('lets another holder claim a task after its lease ends', async () => {
   const task = await createTask('Short lease');
 
-  await runJson(['claim', task.id, '--holder', 'first', '--lease', '1s']);
-  const blocked = await run(['claim', task.id, '--holder', 'second']);
+  // A claim whose lease ended long ago, written as another machine would write it.
+  const expired = {
+    version: 1,
+    kind: 'claim',
+    ticket: task.id,
+    at: '2020-01-01T00:00:00.000Z',
+    machine: 'other',
+    holder: 'first',
+    leaseEnd: '2020-01-01T01:00:00.000Z',
+  };
 
-  await Bun.sleep(1100);
+  const factFile = join(cli().storePath, 'facts', 'other', '2020-01.jsonl');
+
+  await Bun.write(factFile, `${JSON.stringify(expired)}\n`);
 
   const claimed = await runJson<ShownTask>(['claim', task.id, '--holder', 'second']);
 
-  expect(errorCodeOf(blocked)).toBe('conflict');
   expect(claimed.state).toBe('active');
   expect(claimed.claim?.holder).toBe('second');
+
+  const blocked = await run(['claim', task.id, '--holder', 'third']);
+
+  expect(errorCodeOf(blocked)).toBe('conflict');
 });
 
 it('skips a task blocked by an open task and names the blocker', async () => {
@@ -194,7 +188,7 @@ it('logs to a task in any state', async () => {
 });
 
 const readFactFiles = async (): Promise<Record<string, string>> => {
-  const root = join(home, 'store', 'facts');
+  const root = join(cli().storePath, 'facts');
   const files: Record<string, string> = {};
 
   for await (const path of new Bun.Glob('**/*.jsonl').scan({ cwd: root, onlyFiles: true })) {
@@ -270,7 +264,7 @@ it('keeps a claim that follows an unfinished fact line, and reports the broken l
   await runJson(['log', task.id, '--type', 'progress', '--text', 'First note']);
 
   const [factFile] = Object.keys(await readFactFiles());
-  const factPath = join(home, 'store', 'facts', factFile ?? '');
+  const factPath = join(cli().storePath, 'facts', factFile ?? '');
 
   await appendFile(factPath, '{"version":1,"kind":"cla');
   await runJson(['claim', task.id, '--holder', 'first']);
@@ -287,10 +281,10 @@ it('clears a lock left by a process that has exited', async () => {
   const child = Bun.spawn(['bun', '-e', '0'], { stdout: 'ignore', stderr: 'ignore' });
 
   await child.exited;
-  await Bun.write(join(home, 'store', '.git', 'tikk.lock'), `${child.pid}\n`);
+  await Bun.write(join(cli().storePath, '.git', 'tikk.lock'), `${child.pid}\n`);
 
   const claimed = await run(['claim', task.id, '--holder', 'first']);
 
   expect(claimed.exitCode).toBe(0);
-  expect(await Bun.file(join(home, 'store', '.git', 'tikk.lock')).exists()).toBe(false);
+  expect(await Bun.file(join(cli().storePath, '.git', 'tikk.lock')).exists()).toBe(false);
 });

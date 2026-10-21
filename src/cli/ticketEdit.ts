@@ -46,7 +46,7 @@ const editInEditor = async (input: CommandInput, rawId: string): Promise<Command
     return storeFailure(edited.reason.message);
   }
 
-  return showAfterRefresh(input.session, id.value);
+  return showAfterRefresh(input.session, input.effects.now(), id.value);
 };
 
 const buildFrontMatter = (
@@ -99,7 +99,7 @@ const applyEdit = async (
     return { ok: false, reason: { code, message: written.reason.message } };
   }
 
-  return showAfterRefresh(input.session, ticket.id);
+  return showAfterRefresh(input.session, input.effects.now(), ticket.id);
 };
 
 const readFieldEdit = (

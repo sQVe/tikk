@@ -52,9 +52,13 @@ const loadTask = async (
     return fileErrorFailure(task);
   }
 
-  const facts = input.session.listFacts([task.id]);
+  const facts = await input.session.listStateFacts([task.id]);
 
-  return { ok: true, value: { task, facts, now: input.effects.now() } };
+  if (!facts.ok) {
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+  }
+
+  return { ok: true, value: { task, facts: facts.value, now: input.effects.now() } };
 };
 
 // Every write runs under the store lock. The work refreshes the cache after it takes the lock, so

@@ -3,6 +3,7 @@ import { expect, it } from 'bun:test';
 import {
   failed,
   failureOf,
+  makeFact,
   makeEffects,
   makeSession,
   makeTicket,
@@ -47,7 +48,6 @@ it('writes a changed title and status with the expected hash, then shows the tic
   expect(fakeSession.writes[0]?.text).toContain('title: New');
   expect(fakeSession.writes[0]?.text).toContain('status: draft');
   expect(fakeSession.writes[0]?.text).toEndWith('A body\n');
-  expect(fakeSession.refreshes()).toBe(2);
 });
 
 it('keeps the title and status that are not given', async () => {
@@ -176,14 +176,31 @@ it('maps other write failures to storeError', async () => {
   }
 });
 
-it('opens the editor on the ticket path without --json and shows the result', async () => {
-  const { fakeSession, fakeEffects, result } = edit(['demo-3467'], false);
-  const output = successOf(await result);
+it('opens the editor on the ticket path without --json and shows the edited file', async () => {
+  const fakeSession = makeSession({ tickets: [target] });
 
-  expect(fakeEffects.editorPaths).toEqual([target.path]);
-  expect(output.json).toMatchObject({ id: 'demo-3467' });
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    overrides: {
+      runEditor: () => {
+        fakeSession.changeOnDisk(makeTicket('demo-3467', { hash: 'hash-edited' }));
+
+        return Promise.resolve({ ok: true, value: undefined });
+      },
+    },
+  });
+
+  const output = successOf(
+    await ticketEdit({
+      args: ['demo-3467'],
+      json: false,
+      effects: fakeEffects.effects,
+      session: fakeSession.session,
+    }),
+  );
+
+  expect(output.json).toMatchObject({ id: 'demo-3467', hash: 'hash-edited' });
   expect(fakeSession.writes).toEqual([]);
-  expect(fakeSession.refreshes()).toBe(1);
 });
 
 it('does not open the editor for an unknown ticket', async () => {
@@ -261,9 +278,36 @@ it('writes a JSON edit under the store lock after a refresh', async () => {
 
   successOf(await result);
 
-  expect(fakeSession.writesUnderLock()).toBe(1);
-  expect(fakeSession.refreshesUnderLock()).toBe(2);
-  expect(fakeSession.releases()).toBe(fakeSession.locks());
+  expect(fakeSession.writes.map((write) => write.underLock)).toEqual([true]);
+  expect(fakeSession.lockHeld()).toBe(false);
+});
+
+it('edits the ticket as it is on disk after the lock is taken, then shows the written file', async () => {
+  const fakeSession = makeSession({ tickets: [target] });
+  const fakeEffects = makeEffects({ session: fakeSession });
+  const lockStore = fakeSession.session.lockStore;
+  const changed = makeTicket('demo-3467', { hash: 'hash-changed' });
+
+  fakeSession.session.lockStore = async () => {
+    fakeSession.changeOnDisk({
+      ...changed,
+      frontMatter: { ...changed.frontMatter, title: 'Changed meanwhile' },
+    });
+
+    return lockStore();
+  };
+
+  const output = successOf(
+    await ticketEdit({
+      args: ['demo-3467', '--hash', 'hash-demo-3467', '--status', 'draft'],
+      json: true,
+      effects: fakeEffects.effects,
+      session: fakeSession.session,
+    }),
+  );
+
+  expect(fakeSession.writes[0]?.text).toContain('title: Changed meanwhile');
+  expect(output.json).toMatchObject({ title: 'Changed meanwhile' });
 });
 
 it('fails with locked and writes nothing when the store lock is held', async () => {
@@ -283,4 +327,14 @@ it('fails with locked and writes nothing when the store lock is held', async () 
 
   expect(failureOf(await result).code).toBe('locked');
   expect(fakeSession.writes).toEqual([]);
+});
+
+it('prints the derived state of a done task in the text after an edit', async () => {
+  const { result } = edit(['demo-3467', '--hash', 'hash-demo-3467', '--title', 'New'], false, {
+    facts: [makeFact({ kind: 'accept' })],
+  });
+
+  const output = successOf(await result);
+
+  expect(output.text).toContain('demo-3467  done');
 });
