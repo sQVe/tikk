@@ -33,7 +33,6 @@ export const resolveMachine = async (input: CommandInput): Promise<Result<string
   return machine;
 };
 
-// Checks the parent and edge targets against the tickets in the cache.
 export const checkSessionTree = (
   session: CliSession,
   frontMatter: TicketFrontMatter,
