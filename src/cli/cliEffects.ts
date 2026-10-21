@@ -96,6 +96,7 @@ export interface SyncSummary {
   committed: boolean;
   pending: string[];
   aliases: { from: string; to: string; path: string }[];
+  remote: boolean;
   fetched: boolean;
   merged: boolean;
   pushed: boolean;

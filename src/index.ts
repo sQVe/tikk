@@ -93,12 +93,22 @@ const runStoreGit = async (args: string[]): Promise<Result<string, { message: st
 // Git must fail instead of asking for credentials, since no one may be at the terminal.
 const runSyncGit: SyncFunctions['runGit'] = async (args, signal) => {
   try {
+    // A timed-out call runs in its own process group, so the kill also reaches the transport
+    // process (such as ssh) that Git started.
     const child = Bun.spawn(['git', ...args], {
       env: { ...Bun.env, GIT_TERMINAL_PROMPT: '0' },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
-      ...(signal === undefined ? {} : { signal }),
+      detached: signal !== undefined,
+    });
+
+    signal?.addEventListener('abort', () => {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
     });
 
     const [stdout, stderr, exitCode] = await Promise.all([

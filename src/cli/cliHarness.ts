@@ -304,6 +304,7 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
           committed: true,
           pending: [],
           aliases: [],
+          remote: true,
           fetched: true,
           merged: true,
           pushed: true,

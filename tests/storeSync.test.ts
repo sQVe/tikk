@@ -749,3 +749,53 @@ it('tikk sync commits and pushes a store that has no commit yet', async () => {
   expect(report.pushed).toBe(true);
   expect(tree).toContain('tickets/demo/demo-aaaa-old.md');
 });
+
+const countProcesses = async (marker: string): Promise<number> => {
+  const child = Bun.spawn(['pgrep', '-f', marker], { stdout: 'pipe', stderr: 'ignore' });
+  const [stdout] = await Promise.all([child.stdout.text(), child.exited]);
+
+  return stdout.split('\n').filter((line) => line !== '').length;
+};
+
+it('a sync against a remote whose transport hangs gives up and kills the hanging process', async () => {
+  const fixture = singleFixture();
+  const marker = `${process.pid}${Date.now() % 100000}`;
+  const hang = join(fixture.home, 'hang.sh');
+  const previous = process.env['GIT_SSH_COMMAND'];
+
+  await writeFile(hang, `#!/bin/sh\nexec sleep 3${marker}\n`);
+  await chmod(hang, 0o755);
+  await fixture.runChecked(['init']);
+  await gitOutput(fixture.storePath, ['remote', 'add', 'origin', 'ssh://hang.invalid/repo.git']);
+  process.env['GIT_SSH_COMMAND'] = hang;
+
+  const started = Date.now();
+
+  try {
+    const report = await fixture.runJson<SyncReport>(['sync']);
+
+    expect(report.fetched).toBe(false);
+    expect(Date.now() - started).toBeLessThan(25_000);
+  } finally {
+    if (previous === undefined) {
+      delete process.env['GIT_SSH_COMMAND'];
+    } else {
+      process.env['GIT_SSH_COMMAND'] = previous;
+    }
+  }
+
+  await Bun.sleep(500);
+  expect(await countProcesses(`sleep 3${marker}`)).toBe(0);
+}, 40_000);
+
+it('a sync reports merged false when the fetch failed', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+  await gitOutput(fixture.storePath, ['remote', 'add', 'origin', join(fixture.home, 'gone.git')]);
+
+  const report = await fixture.runJson<SyncReport>(['sync']);
+
+  expect(report.fetched).toBe(false);
+  expect(report.merged).toBe(false);
+});

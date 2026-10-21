@@ -16,6 +16,7 @@ export interface SyncReport {
   committed: boolean;
   pending: string[];
   aliases: SyncAlias[];
+  remote: boolean;
   fetched: boolean;
   merged: boolean;
   pushed: boolean;
@@ -23,6 +24,11 @@ export interface SyncReport {
 
 export interface SyncOptions {
   allowUnrelatedHistories: boolean;
+}
+
+interface LockedOptions extends SyncOptions {
+  // False after a failed fetch, so a stale `origin/main` is not merged.
+  merge: boolean;
 }
 
 interface LockedSteps {
@@ -41,7 +47,7 @@ export const networkSignal = (): AbortSignal => AbortSignal.timeout(networkTimeo
 
 const conflictReason = (root: string, files: string[]): SyncReason => ({
   kind: 'conflict',
-  message: `Sync stopped: ${files.join(', ')} changed both here and on the remote. Merge ${remoteBranch} by hand in ${root}, resolve each file, and commit.`,
+  message: `Sync stopped: ${files.join(', ')} changed both here and on the remote. To resolve it, run "git -C ${root} merge ${remoteBranch}", edit each listed file to remove the conflict markers, run "git -C ${root} add" on each, then run "git -C ${root} commit".`,
 });
 
 const mergeRemote = async (
@@ -131,7 +137,7 @@ const runLockedSteps = async (
   functions: SyncFunctions,
   root: string,
   hasRemote: boolean,
-  options: SyncOptions,
+  options: LockedOptions,
 ): Promise<Result<LockedSteps, SyncReason>> => {
   const branch = await ensureMainBranch(functions, root);
 
@@ -145,7 +151,7 @@ const runLockedSteps = async (
     return commit;
   }
 
-  if (!hasRemote) {
+  if (!hasRemote || !options.merge) {
     return { ok: true, value: { ...commit.value, aliases: [], merged: false } };
   }
 
@@ -178,7 +184,7 @@ const lockAndRun = async (
   functions: SyncFunctions,
   root: string,
   hasRemote: boolean,
-  options: SyncOptions,
+  options: LockedOptions,
 ): Promise<Result<LockedSteps, SyncReason>> => {
   const lock = await functions.lockStore();
 
@@ -210,7 +216,7 @@ export const fetchOrigin = async (functions: SyncFunctions, root: string): Promi
 // the result is dropped.
 export const mergeFetched = async (functions: SyncFunctions, root: string): Promise<void> => {
   if (await hasOrigin(functions, root)) {
-    await runLockedSteps(functions, root, true, { allowUnrelatedHistories: false });
+    await runLockedSteps(functions, root, true, { allowUnrelatedHistories: false, merge: true });
   }
 };
 
@@ -231,7 +237,7 @@ export const syncStore = async (
     fetched = fetch.ok;
   }
 
-  const locked = await lockAndRun(functions, root, hasRemote, options);
+  const locked = await lockAndRun(functions, root, hasRemote, { ...options, merge: fetched });
 
   if (!locked.ok) {
     return locked;
@@ -248,7 +254,7 @@ export const syncStore = async (
     pushed = push.ok;
   }
 
-  return { ok: true, value: { ...locked.value, fetched, pushed } };
+  return { ok: true, value: { ...locked.value, remote: hasRemote, fetched, pushed } };
 };
 
 export const pushNewStore = async (functions: SyncFunctions, root: string): Promise<boolean> => {

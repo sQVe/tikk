@@ -9,13 +9,30 @@ const syncText = (summary: SyncSummary): string => {
     summary.pushed ? 'pushed' : 'not pushed',
   ];
 
-  const pendingLines = summary.pending.map((path) => `pending: ${path}\n`);
+  const lines = [`Synced the store: ${steps.join(', ')}.`];
 
-  const aliasLines = summary.aliases.map(
-    (alias) => `renamed: ${alias.from} is now ${alias.to} in ${alias.path}\n`,
-  );
+  if (summary.pending.length > 0) {
+    lines.push(
+      'These files were not committed. Each one does not parse or changed in the last two seconds. A later sync commits it once it is valid and unchanged:',
+      ...summary.pending.map((path) => `pending: ${path}`),
+    );
+  }
 
-  return `Synced the store: ${steps.join(', ')}.\n${pendingLines.join('')}${aliasLines.join('')}`;
+  const unreached = !summary.fetched || !summary.pushed;
+
+  if (!summary.remote) {
+    lines.push('The store has no remote. Connect one with "tikk init --remote <url>".');
+  } else if (unreached) {
+    lines.push(
+      'The remote was not reached or did not take the push. Your changes stay local until a later sync.',
+    );
+  }
+
+  for (const alias of summary.aliases) {
+    lines.push(`renamed: ${alias.from} is now ${alias.to} in ${alias.path}`);
+  }
+
+  return `${lines.join('\n')}\n`;
 };
 
 export const syncCommand = async (args: string[], effects: CliEffects): Promise<CommandResult> => {

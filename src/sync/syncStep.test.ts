@@ -25,6 +25,7 @@ it('only commits when the store has no remote', async () => {
       committed: true,
       pending: [],
       aliases: [],
+      remote: false,
       fetched: false,
       merged: false,
       pushed: false,
@@ -42,7 +43,15 @@ it('fetches and pushes outside the lock with a timeout, and commits and merges u
 
   expect(result).toEqual({
     ok: true,
-    value: { committed: true, pending: [], aliases: [], fetched: true, merged: true, pushed: true },
+    value: {
+      committed: true,
+      pending: [],
+      aliases: [],
+      remote: true,
+      fetched: true,
+      merged: true,
+      pushed: true,
+    },
   });
 
   expect(callFor(fake, 'fetch')).toMatchObject({ signal: true, underLock: false });
@@ -53,7 +62,7 @@ it('fetches and pushes outside the lock with a timeout, and commits and merges u
   expect(fake.commands().some((command) => command.startsWith('rebase'))).toBe(false);
 });
 
-it('still commits, merges, and pushes when the fetch fails', async () => {
+it('still commits and pushes, but does not merge, when the fetch fails', async () => {
   const fake = makeSync({
     git: (args) => (args.includes('fetch') ? gitFailure('offline') : changedFacts(args)),
   });
@@ -62,7 +71,7 @@ it('still commits, merges, and pushes when the fetch fails', async () => {
 
   expect(result).toMatchObject({
     ok: true,
-    value: { committed: true, fetched: false, merged: true, pushed: true },
+    value: { committed: true, fetched: false, merged: false, pushed: true },
   });
 });
 
