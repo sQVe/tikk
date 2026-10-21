@@ -12,6 +12,9 @@ interface GitCall {
 export interface FakeSync {
   functions: RemoteInitFunctions;
   gitCalls: GitCall[];
+  blobs: string[];
+  renames: [string, string][];
+  aliasWrites: () => number;
   commands: () => string[];
   lockCalls: () => number;
   initCalls: () => number;
@@ -25,6 +28,7 @@ export interface FakeSyncOptions {
   // Entries per directory path; a directory not listed here uses `folder`.
   folders?: Record<string, string[]>;
   lockFails?: boolean;
+  aliases?: { from: string; to: string }[];
   now?: number;
 }
 
@@ -50,6 +54,20 @@ const subcommandOf = (args: string[]): string => {
 
 export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   const gitCalls: GitCall[] = [];
+  const blobs: string[] = [];
+  let indexUpdates = 0;
+
+  // The index tree differs from the `HEAD` tree once an `update-index` call has run.
+  const defaultReply = (args: string[]): GitReply => {
+    if (args.includes('write-tree')) {
+      return gitOutput(`tree${indexUpdates}\n`);
+    }
+
+    return args.includes('HEAD^{tree}') ? gitOutput('tree0\n') : gitOutput('');
+  };
+
+  const renames: [string, string][] = [];
+  let aliasWrites = 0;
   let locked = false;
   let lockCount = 0;
   let initCount = 0;
@@ -58,7 +76,11 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     runGit: (args, signal) => {
       gitCalls.push({ args, signal: signal !== undefined, underLock: locked });
 
-      return Promise.resolve(options.git?.(args) ?? gitOutput(''));
+      if (args.includes('update-index')) {
+        indexUpdates += 1;
+      }
+
+      return Promise.resolve(options.git?.(args) ?? defaultReply(args));
     },
     commitArguments: async (root) => {
       const email = await functions.runGit(['-C', root, 'config', 'user.email']);
@@ -69,6 +91,12 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
         ? unsigned
         : [...unsigned, '-c', 'user.name=tikk', '-c', 'user.email=tikk@localhost'];
     },
+    writeBlob: (_root, text) => {
+      blobs.push(text);
+
+      return Promise.resolve({ ok: true, value: `blob${blobs.length}\n` });
+    },
+    listAliases: () => Promise.resolve(options.aliases ?? []),
     lockStore: () => {
       lockCount += 1;
 
@@ -97,6 +125,11 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     readFile: (path) => {
       const file = options.files?.[path];
 
+      // A fact file or config the test does not list reads as empty.
+      if (file === undefined && !path.includes('/tickets/')) {
+        return Promise.resolve('');
+      }
+
       return file === undefined ? missingFile() : Promise.resolve(file.text);
     },
     now: () => options.now ?? defaultNow,
@@ -111,9 +144,17 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       return folder === 'missing' ? missingFile() : Promise.resolve(folder);
     },
-    rename: () => Promise.resolve(),
+    rename: (from, to) => {
+      renames.push([from, to]);
+
+      return Promise.resolve();
+    },
     randomIdSuffix: () => 'zzzz',
-    appendAlias: () => Promise.resolve({ ok: true, value: { path: 'facts/fake/2026-10.jsonl' } }),
+    appendAlias: () => {
+      aliasWrites += 1;
+
+      return Promise.resolve({ ok: true, value: { path: '/store/facts/fake/2026-10.jsonl' } });
+    },
     initStore: () => {
       initCount += 1;
 
@@ -124,6 +165,9 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   return {
     functions,
     gitCalls,
+    blobs,
+    renames,
+    aliasWrites: () => aliasWrites,
     commands: () => gitCalls.map((call) => subcommandOf(call.args)),
     lockCalls: () => lockCount,
     initCalls: () => initCount,

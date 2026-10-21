@@ -1,9 +1,9 @@
-import { dirname, join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import type { Result } from '../result.ts';
 import { parseProjectName, parseTicketFileName, parseTicketId } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
-import { isSettledTicket } from './syncCommit.ts';
+import { resetIndex, stageRemoval, stageText } from './syncCommit.ts';
 import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 
 export interface SyncClashFunctions extends SyncCommitFunctions {
@@ -11,6 +11,8 @@ export interface SyncClashFunctions extends SyncCommitFunctions {
   rename: (from: string, to: string) => Promise<void>;
   randomIdSuffix: () => string;
   appendAlias: (alias: AliasRecord) => Promise<Result<{ path: string }, { message: string }>>;
+  // The alias facts this machine has written.
+  listAliases: () => Promise<{ from: string; to: string }[]>;
 }
 
 interface AliasRecord {
@@ -40,20 +42,17 @@ interface DatedFile {
 interface MovedPath {
   from: string;
   to: string;
-  // True when the ticket goes into the alias commit, so nothing is pending for it.
-  committed: boolean;
-}
-
-interface ProjectRenames {
-  aliases: SyncAlias[];
-  // Paths to commit with the alias facts: the alias fact files and settled renamed tickets.
-  commitPaths: string[];
-  moves: MovedPath[];
+  // False for a file no commit added, which stays out of the clash commit.
+  tracked: boolean;
 }
 
 export interface ClashResolution {
   aliases: SyncAlias[];
   moves: MovedPath[];
+}
+
+interface Renames extends ClashResolution {
+  factPaths: string[];
 }
 
 const maxIdAttempts = 100;
@@ -183,45 +182,185 @@ const freeId = (
   return undefined;
 };
 
+// One clash gets one alias, even when an earlier sync wrote the fact and failed to commit the rename.
+const reusableId = async (
+  functions: SyncClashFunctions,
+  project: ProjectName,
+  file: ProjectFile,
+  taken: Set<string>,
+): Promise<TicketId | undefined> => {
+  const aliases = await functions.listAliases();
+
+  for (const alias of aliases) {
+    const parsed = parseTicketId(alias.to);
+    const isOwnAlias = alias.from === file.id && alias.to.startsWith(`${project}-`);
+
+    if (isOwnAlias && parsed.ok && !taken.has(parsed.value)) {
+      return parsed.value;
+    }
+  }
+
+  return undefined;
+};
+
+// Moves the file and writes the alias fact. The fact path is `undefined` for a reused alias.
 const renameFile = async (
   functions: SyncClashFunctions,
   root: string,
   project: ProjectName,
   file: ProjectFile,
-  to: TicketId,
-): Promise<Result<{ alias: SyncAlias; factPath: string }, SyncReason>> => {
-  const at = new Date(functions.now()).toISOString();
-  const appended = await functions.appendAlias({ ticket: to, from: file.id, at });
+  taken: Set<string>,
+): Promise<Result<{ alias: SyncAlias; factPath: string | undefined }, SyncReason>> => {
+  const reused = await reusableId(functions, project, file, taken);
+  const to = reused ?? freeId(functions, project, taken);
 
-  if (!appended.ok) {
-    return failed(appended.reason.message);
+  if (to === undefined) {
+    return failed(`No free ticket ID found for project "${project}".`);
+  }
+
+  taken.add(to);
+
+  let factPath: string | undefined;
+
+  if (reused === undefined) {
+    const at = new Date(functions.now()).toISOString();
+    const appended = await functions.appendAlias({ ticket: to, from: file.id, at });
+
+    if (!appended.ok) {
+      return failed(appended.reason.message);
+    }
+
+    factPath = relative(root, appended.value.path);
   }
 
   const path = join('tickets', project, `${to}-${file.slug}.md`);
   const from = join('tickets', project, file.fileName);
-  const moved = await functions.runGit(['-C', root, 'mv', '--', from, path]);
 
-  // `git mv` refuses a file that is not yet tracked, so that file moves on disk.
-  if (!moved.ok) {
-    try {
-      await functions.rename(join(root, from), join(root, path));
-    } catch {
-      return failed(moved.reason.message);
+  try {
+    await functions.rename(join(root, from), join(root, path));
+  } catch {
+    return failed(`Cannot rename ${from} to ${path}.`);
+  }
+
+  return { ok: true, value: { alias: { from: file.id, to, path }, factPath } };
+};
+
+// Adds each rename to `renames` as it happens, so a failure leaves the caller a full list to undo.
+const renameClashes = async (
+  functions: SyncClashFunctions,
+  root: string,
+  project: ProjectName,
+  renames: Renames,
+): Promise<Result<undefined, SyncReason>> => {
+  const files = await listProjectFiles(functions, root, project);
+  const taken = new Set<string>(files.map((file) => file.id));
+  const clashing = await newerClashingFiles(functions, root, project, files);
+
+  for (const { file, addedAt: addedTime } of clashing) {
+    // Renames run one at a time, since each new ID must differ from the ones chosen before it.
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const renamed = await renameFile(functions, root, project, file, taken);
+
+    if (!renamed.ok) {
+      return renamed;
+    }
+
+    const { alias, factPath } = renamed.value;
+
+    renames.aliases.push(alias);
+
+    renames.moves.push({
+      from: join('tickets', project, file.fileName),
+      to: alias.path,
+      tracked: addedTime !== undefined,
+    });
+
+    if (factPath !== undefined) {
+      renames.factPaths.push(factPath);
     }
   }
 
-  return { ok: true, value: { alias: { from: file.id, to, path }, factPath: appended.value.path } };
+  return { ok: true, value: undefined };
 };
 
-const commitAliases = async (
+const stageMove = async (
   functions: SyncClashFunctions,
   root: string,
-  factPaths: string[],
+  move: MovedPath,
 ): Promise<Result<undefined, SyncReason>> => {
-  const added = await functions.runGit(['-C', root, 'add', '--', ...factPaths]);
+  const blob = await functions.runGit(['-C', root, 'rev-parse', `HEAD:${move.from}`]);
+
+  if (!blob.ok) {
+    return failed(blob.reason.message);
+  }
+
+  const added = await functions.runGit([
+    '-C',
+    root,
+    'update-index',
+    '--add',
+    '--cacheinfo',
+    `100644,${blob.value.trim()},${move.to}`,
+  ]);
 
   if (!added.ok) {
     return failed(added.reason.message);
+  }
+
+  return stageRemoval(functions, root, move.from);
+};
+
+// The commit holds the renames of tracked files from `HEAD`, and the alias facts as they are on
+// disk, so a rename and its fact are committed together.
+const stageClashes = async (
+  functions: SyncClashFunctions,
+  root: string,
+  renames: Renames,
+): Promise<Result<undefined, SyncReason>> => {
+  const reset = await resetIndex(functions, root);
+
+  if (!reset.ok) {
+    return reset;
+  }
+
+  for (const move of renames.moves.filter((entry) => entry.tracked)) {
+    // Each call rewrites the index file, so they run one at a time.
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const staged = await stageMove(functions, root, move);
+
+    if (!staged.ok) {
+      return staged;
+    }
+  }
+
+  for (const factPath of new Set(renames.factPaths)) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const text = await functions.readFile(join(root, factPath)).catch(() => undefined);
+
+    if (text === undefined) {
+      return failed(`Cannot read ${factPath}.`);
+    }
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const staged = await stageText(functions, root, factPath, text);
+
+    if (!staged.ok) {
+      return staged;
+    }
+  }
+
+  return { ok: true, value: undefined };
+};
+
+const commitClashes = async (
+  functions: SyncClashFunctions,
+  root: string,
+  renames: Renames,
+): Promise<Result<undefined, SyncReason>> => {
+  const staged = await stageClashes(functions, root, renames);
+
+  if (!staged.ok) {
+    return staged;
   }
 
   const options = await functions.commitArguments(root);
@@ -239,101 +378,67 @@ const commitAliases = async (
   return committed.ok ? { ok: true, value: undefined } : failed(committed.reason.message);
 };
 
-// A renamed ticket that no commit added is committed with its alias only when it is settled.
-// Otherwise it stays pending under its new path, for a later sync.
-const placeUntracked = async (
+// Puts every renamed file back, so a failed sync leaves the clash for the next one. The alias
+// facts stay, since facts are append-only, and the next sync reuses them.
+const undoMoves = async (
   functions: SyncClashFunctions,
   root: string,
-  file: ProjectFile,
-  alias: SyncAlias,
-  renames: ProjectRenames,
+  moves: MovedPath[],
 ): Promise<void> => {
-  const settled = await isSettledTicket(functions, root, alias.path);
-  const from = join(dirname(alias.path), file.fileName);
-
-  if (settled) {
-    renames.commitPaths.push(alias.path);
-  }
-
-  renames.moves.push({ from, to: alias.path, committed: settled });
+  await Promise.all(
+    moves.map((move) =>
+      functions.rename(join(root, move.to), join(root, move.from)).catch(() => undefined),
+    ),
+  );
 };
 
-const renameClashes = async (
-  functions: SyncClashFunctions,
-  root: string,
-  project: ProjectName,
-): Promise<Result<ProjectRenames, SyncReason>> => {
-  const files = await listProjectFiles(functions, root, project);
-  const taken = new Set<string>(files.map((file) => file.id));
-  const clashing = await newerClashingFiles(functions, root, project, files);
-  const renames: ProjectRenames = { aliases: [], commitPaths: [], moves: [] };
-
-  for (const { file, addedAt: addedTime } of clashing) {
-    const to = freeId(functions, project, taken);
-
-    if (to === undefined) {
-      return failed(`No free ticket ID found for project "${project}".`);
-    }
-
-    taken.add(to);
-
-    // Renames run one at a time, since each new ID must differ from the ones chosen before it.
-    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
-    const renamed = await renameFile(functions, root, project, file, to);
-
-    if (!renamed.ok) {
-      return renamed;
-    }
-
-    renames.aliases.push(renamed.value.alias);
-    renames.commitPaths.push(renamed.value.factPath);
-
-    if (addedTime === undefined) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Same reason as the rename.
-      await placeUntracked(functions, root, file, renamed.value.alias, renames);
-    } else {
-      const from = join(dirname(renamed.value.alias.path), file.fileName);
-
-      renames.moves.push({ from, to: renamed.value.alias.path, committed: false });
-    }
-  }
-
-  return { ok: true, value: renames };
-};
+const hasCommitWork = (renames: Renames): boolean =>
+  renames.factPaths.length > 0 || renames.moves.some((move) => move.tracked);
 
 // The caller holds the store lock and has just merged. A new ID is free in the whole project
-// folder, so one folder never holds two files with one ID afterwards.
+// folder, so one folder never holds two files with one ID afterwards. The renames of tracked files
+// and their alias facts are committed as one commit, or the renames are undone.
 export const resolveIdClashes = async (
   functions: SyncClashFunctions,
   root: string,
 ): Promise<Result<ClashResolution, SyncReason>> => {
   const names = await listNames(functions, join(root, 'tickets'));
   const projects = names.map((name) => parseProjectName(name)).filter((parsed) => parsed.ok);
-  const resolution: ClashResolution = { aliases: [], moves: [] };
-  const commitPaths = new Set<string>();
+  const renames: Renames = { aliases: [], moves: [], factPaths: [] };
+
+  let failure: SyncReason | undefined;
 
   for (const project of projects) {
     // Projects run one at a time, so a failed rename stops the rest.
     // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
-    const renames = await renameClashes(functions, root, project.value);
+    const renamed = await renameClashes(functions, root, project.value, renames);
 
-    if (!renames.ok) {
-      return renames;
-    }
+    if (!renamed.ok) {
+      failure = renamed.reason;
 
-    resolution.aliases.push(...renames.value.aliases);
-    resolution.moves.push(...renames.value.moves);
-
-    for (const path of renames.value.commitPaths) {
-      commitPaths.add(path);
+      break;
     }
   }
 
-  if (resolution.aliases.length === 0) {
+  if (failure !== undefined) {
+    await undoMoves(functions, root, renames.moves);
+
+    return { ok: false, reason: failure };
+  }
+
+  const resolution = { aliases: renames.aliases, moves: renames.moves };
+
+  if (!hasCommitWork(renames)) {
     return { ok: true, value: resolution };
   }
 
-  const committed = await commitAliases(functions, root, [...commitPaths]);
+  const committed = await commitClashes(functions, root, renames);
 
-  return committed.ok ? { ok: true, value: resolution } : committed;
+  if (!committed.ok) {
+    await undoMoves(functions, root, renames.moves);
+
+    return committed;
+  }
+
+  return { ok: true, value: resolution };
 };

@@ -165,17 +165,8 @@ const runLockedSteps = async (
     return clashes;
   }
 
-  const moved = new Map(clashes.value.moves.map((entry) => [entry.from, entry]));
-
-  const pending = commit.value.pending.flatMap((path) => {
-    const entry = moved.get(path);
-
-    if (entry === undefined) {
-      return [path];
-    }
-
-    return entry.committed ? [] : [entry.to];
-  });
+  const moved = new Map(clashes.value.moves.map((move) => [move.from, move.to]));
+  const pending = commit.value.pending.map((path) => moved.get(path) ?? path);
 
   return {
     ok: true,

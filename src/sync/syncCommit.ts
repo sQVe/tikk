@@ -17,6 +17,8 @@ export interface SyncCommitFunctions {
   runGit: SyncGit;
   // The arguments that go before `commit` or `merge`.
   commitArguments: (root: string) => Promise<string[]>;
+  // Stores the text as a Git blob and returns its hash.
+  writeBlob: (root: string, text: string) => Promise<Result<string, { message: string }>>;
   stat: (path: string) => Promise<{ mtimeMs: number }>;
   readFile: (path: string) => Promise<string>;
   now: () => number;
@@ -29,6 +31,11 @@ export interface SyncCommit {
 
 const storePathspecs = ['facts', 'tickets', 'tikk.json', '.gitattributes'];
 const settleMilliseconds = 2000;
+
+const failedReason = (message: string): { ok: false; reason: SyncReason } => ({
+  ok: false,
+  reason: { kind: 'failed', message },
+});
 
 const splitPaths = (output: string): string[] => output.split('\0').filter((path) => path !== '');
 
@@ -47,53 +54,25 @@ const listPaths = async (
     ...storePathspecs,
   ]);
 
-  if (!listed.ok) {
-    return { ok: false, reason: { kind: 'failed', message: listed.reason.message } };
-  }
-
-  return { ok: true, value: splitPaths(listed.value) };
+  return listed.ok
+    ? { ok: true, value: splitPaths(listed.value) }
+    : failedReason(listed.reason.message);
 };
 
-// A failed commit leaves its changes in the index, where `ls-files --modified` does not list them.
-const listStagedPaths = async (
-  functions: SyncCommitFunctions,
-  root: string,
-): Promise<Result<string[], SyncReason>> => {
-  const listed = await functions.runGit([
-    '-C',
-    root,
-    'diff',
-    '--cached',
-    '--name-only',
-    '-z',
-    '--',
-    ...storePathspecs,
-  ]);
-
-  if (!listed.ok) {
-    return { ok: false, reason: { kind: 'failed', message: listed.reason.message } };
-  }
-
-  return { ok: true, value: splitPaths(listed.value) };
-};
+const isTicketPath = (path: string): boolean => path.startsWith('tickets/');
 
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
-// not changed for two seconds.
-export const isSettledTicket = async (
+// not changed for two seconds. The age is read after the text, so an edit in between makes it fresh.
+const isSettledText = async (
   functions: SyncCommitFunctions,
   root: string,
   path: string,
+  text: string,
 ): Promise<boolean> => {
   try {
     const { mtimeMs } = await functions.stat(join(root, path));
 
-    if (functions.now() - mtimeMs < settleMilliseconds) {
-      return false;
-    }
-
-    const text = await functions.readFile(join(root, path));
-
-    return parseTicketFile(text).ok;
+    return functions.now() - mtimeMs >= settleMilliseconds && parseTicketFile(text).ok;
   } catch {
     return false;
   }
@@ -118,81 +97,96 @@ export const settlingPaths = async (
   return pending.filter((_path, index) => parsed[index] === true);
 };
 
-const isTicketPath = (path: string): boolean => path.startsWith('tickets/');
-
-// A staged deletion has no file left to check, and is committed.
-const isStagedSettled = async (
+// Every sync builds its index from `HEAD`, so a failed commit leaves nothing for the next sync.
+export const resetIndex = async (
   functions: SyncCommitFunctions,
   root: string,
-  path: string,
-): Promise<boolean> => {
-  if (!isTicketPath(path)) {
-    return true;
-  }
-
-  const exists = await functions.stat(join(root, path)).then(
-    () => true,
-    () => false,
-  );
-
-  return exists ? isSettledTicket(functions, root, path) : true;
-};
-
-const indexedParses = async (
-  functions: SyncCommitFunctions,
-  root: string,
-  path: string,
-): Promise<boolean> => {
-  const shown = await functions.runGit(['-C', root, 'show', `:${path}`]);
-
-  return shown.ok && parseTicketFile(shown.value).ok;
-};
-
-// A path edited after it was staged is judged by its staged snapshot, so a valid snapshot (such as
-// a rename with its alias fact) is committed and only the worktree edit waits.
-const isIndexedSettled = async (
-  functions: SyncCommitFunctions,
-  root: string,
-  path: string,
-  modified: Set<string>,
-): Promise<boolean> => {
-  if (isTicketPath(path) && modified.has(path)) {
-    return indexedParses(functions, root, path);
-  }
-
-  return isStagedSettled(functions, root, path);
-};
-
-const unstage = async (
-  functions: SyncCommitFunctions,
-  root: string,
-  paths: string[],
 ): Promise<Result<undefined, SyncReason>> => {
-  if (paths.length === 0) {
-    return { ok: true, value: undefined };
-  }
+  const reset = await functions.runGit(['-C', root, 'read-tree', 'HEAD']);
 
-  const reset = await functions.runGit(['-C', root, 'reset', '--quiet', '--', ...paths]);
-
-  return reset.ok
-    ? { ok: true, value: undefined }
-    : { ok: false, reason: { kind: 'failed', message: reset.reason.message } };
+  return reset.ok ? { ok: true, value: undefined } : failedReason(reset.reason.message);
 };
 
-const commitStaged = async (
+// Puts exactly this text in the index, so the commit holds the bytes that were checked.
+export const stageText = async (
   functions: SyncCommitFunctions,
   root: string,
-  paths: string[],
+  path: string,
+  text: string,
 ): Promise<Result<undefined, SyncReason>> => {
-  // Paths already in the index are left out, since `git add` fails on a staged deletion.
-  if (paths.length > 0) {
-    const added = await functions.runGit(['-C', root, 'add', '-A', '--', ...paths]);
+  const blob = await functions.writeBlob(root, text);
 
-    if (!added.ok) {
-      return { ok: false, reason: { kind: 'failed', message: added.reason.message } };
-    }
+  if (!blob.ok) {
+    return failedReason(blob.reason.message);
   }
 
+  const staged = await functions.runGit([
+    '-C',
+    root,
+    'update-index',
+    '--add',
+    '--cacheinfo',
+    `100644,${blob.value.trim()},${path}`,
+  ]);
+
+  return staged.ok ? { ok: true, value: undefined } : failedReason(staged.reason.message);
+};
+
+export const stageRemoval = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<Result<undefined, SyncReason>> => {
+  const removed = await functions.runGit([
+    '-C',
+    root,
+    'update-index',
+    '--force-remove',
+    '--',
+    path,
+  ]);
+
+  return removed.ok ? { ok: true, value: undefined } : failedReason(removed.reason.message);
+};
+
+// Returns the text to commit, or `undefined` when the file waits for a later sync.
+const checkChanged = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<string | undefined> => {
+  try {
+    const text = await functions.readFile(join(root, path));
+    const settled = !isTicketPath(path) || (await isSettledText(functions, root, path, text));
+
+    return settled ? text : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const indexDiffers = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<boolean, SyncReason>> => {
+  const index = await functions.runGit(['-C', root, 'write-tree']);
+  const head = await functions.runGit(['-C', root, 'rev-parse', 'HEAD^{tree}']);
+
+  if (!index.ok) {
+    return failedReason(index.reason.message);
+  }
+
+  if (!head.ok) {
+    return failedReason(head.reason.message);
+  }
+
+  return { ok: true, value: index.value.trim() !== head.value.trim() };
+};
+
+const commitIndex = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<undefined, SyncReason>> => {
   const commitOptions = await functions.commitArguments(root);
 
   const committed = await functions.runGit([
@@ -205,17 +199,49 @@ const commitStaged = async (
     'Sync the tikk store',
   ]);
 
-  if (!committed.ok) {
-    return { ok: false, reason: { kind: 'failed', message: committed.reason.message } };
+  return committed.ok ? { ok: true, value: undefined } : failedReason(committed.reason.message);
+};
+
+// Checks the candidates together, then stages the ones that pass. Returns the ones that wait.
+const stageCandidates = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  candidates: string[],
+): Promise<Result<string[], SyncReason>> => {
+  const texts = await Promise.all(candidates.map((path) => checkChanged(functions, root, path)));
+  const pending: string[] = [];
+
+  for (const [index, text] of texts.entries()) {
+    const path = candidates[index] ?? '';
+
+    if (text === undefined) {
+      pending.push(path);
+
+      continue;
+    }
+
+    // Each call rewrites the index file, so they run one at a time.
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const staged = await stageText(functions, root, path, text);
+
+    if (!staged.ok) {
+      return staged;
+    }
   }
 
-  return { ok: true, value: undefined };
+  return { ok: true, value: pending };
 };
 
 export const commitStore = async (
   functions: SyncCommitFunctions,
   root: string,
 ): Promise<Result<SyncCommit, SyncReason>> => {
+  const reset = await resetIndex(functions, root);
+
+  if (!reset.ok) {
+    return reset;
+  }
+
   const deleted = await listPaths(functions, root, ['--deleted']);
 
   if (!deleted.ok) {
@@ -232,53 +258,37 @@ export const commitStore = async (
     return changed;
   }
 
-  const indexed = await listStagedPaths(functions, root);
-
-  if (!indexed.ok) {
-    return indexed;
-  }
-
   const deletedPaths = new Set(deleted.value);
   const candidates = changed.value.filter((path) => !deletedPaths.has(path));
+  const pending = await stageCandidates(functions, root, candidates);
 
-  const settled = await Promise.all(
-    candidates.map((path) =>
-      isTicketPath(path) ? isSettledTicket(functions, root, path) : Promise.resolve(true),
-    ),
-  );
-
-  const indexedSettled = await Promise.all(
-    indexed.value.map((path) => isIndexedSettled(functions, root, path, new Set(changed.value))),
-  );
-
-  const unsettledIndexed = indexed.value.filter((_path, index) => indexedSettled[index] === false);
-  const unstaged = await unstage(functions, root, unsettledIndexed);
-
-  if (!unstaged.ok) {
-    return unstaged;
+  if (!pending.ok) {
+    return pending;
   }
 
-  const unsettledStaged = new Set(unsettledIndexed);
-  const pending = candidates.filter((_path, index) => settled[index] === false);
+  for (const path of deletedPaths) {
+    // Removals run one at a time, since each call rewrites the index file.
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const removed = await stageRemoval(functions, root, path);
 
-  for (const path of unsettledIndexed) {
-    if (!pending.includes(path)) {
-      pending.push(path);
+    if (!removed.ok) {
+      return removed;
     }
   }
 
-  const staged = new Set([
-    ...deletedPaths,
-    ...candidates.filter((_path, index) => settled[index] === true),
-  ]);
+  const differs = await indexDiffers(functions, root);
 
-  const hasIndexed = indexed.value.some((path) => !unsettledStaged.has(path));
-
-  if (staged.size === 0 && !hasIndexed) {
-    return { ok: true, value: { committed: false, pending } };
+  if (!differs.ok) {
+    return differs;
   }
 
-  const committed = await commitStaged(functions, root, [...staged]);
+  if (!differs.value) {
+    return { ok: true, value: { committed: false, pending: pending.value } };
+  }
 
-  return committed.ok ? { ok: true, value: { committed: true, pending } } : committed;
+  const committed = await commitIndex(functions, root);
+
+  return committed.ok
+    ? { ok: true, value: { committed: true, pending: pending.value } }
+    : committed;
 };

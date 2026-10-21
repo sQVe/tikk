@@ -581,7 +581,7 @@ it('the next sync commits a ticket deletion that a failed commit left staged', a
   expect(await remoteTree(remotePath)).not.toContain(relativePath);
 });
 
-it('a failed clash commit and a bad edit to the renamed ticket lose no ticket on the remote', async () => {
+it('a failed clash commit and a bad edit to the clashing ticket lose no ticket on the remote', async () => {
   const { first, second, remotePath } = clonePair();
 
   await first.runChecked(['init', '--remote', remotePath]);
@@ -608,14 +608,13 @@ it('a failed clash commit and a bad edit to the renamed ticket lose no ticket on
   await rm(hook);
 
   const directory = join(second.storePath, 'tickets', 'demo');
-  const renamed = (await readdir(directory)).find((name) => name.endsWith('-b.md'));
-  const renamedRelative = `tickets/demo/${renamed ?? ''}`;
 
-  expect(renamed).toBeDefined();
-  expect(renamed).not.toBe('demo-aaaa-b.md');
-  await writeFile(join(directory, renamed ?? ''), 'no front matter here\n');
+  expect(await readdir(directory)).toContain('demo-aaaa-b.md');
+  await writeFile(join(directory, 'demo-aaaa-b.md'), 'no front matter here\n');
 
   const report = await second.runJson<SyncReport>(['sync']);
+  const renamed = (await readdir(directory)).find((name) => /^demo-(?!aaaa).*-b\.md$/.test(name));
+  const renamedRelative = `tickets/demo/${renamed ?? ''}`;
   const tree = await remoteTree(remotePath);
   const content = await gitOutput(remotePath, ['show', `main:${renamedRelative}`]);
 
@@ -639,4 +638,85 @@ it('tikk sync alone pushes a store on master to the remote main', async () => {
   expect(branch.trim()).toBe('main');
   expect(report.pushed).toBe(true);
   expect(tree).toContain('tickets/personal/');
+});
+
+it('a failed clash commit and a sync within two seconds keep both tickets and one alias fact', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const offline = join(first.home, 'offline.git');
+
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', offline]);
+  await writeHandTicket(first, 'demo-aaaa-older.md');
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeHandTicket(second, 'demo-aaaa-newer.md');
+  await second.runChecked(['sync']);
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', remotePath]);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+  await rm(hook);
+  await first.runChecked(['sync']);
+
+  const tree = await remoteTree(remotePath);
+  const facts = await readAllFacts(first);
+  const aliasLines = facts.split('\n').filter((line) => line.includes('"kind":"alias"'));
+
+  expect(tree).toContain('tickets/demo/demo-aaaa-older.md');
+  expect(tree.match(/-newer\.md/g)).toHaveLength(1);
+  expect(tree).not.toContain('demo-aaaa-newer.md');
+  expect(aliasLines).toHaveLength(1);
+});
+
+it('a sync after a failed commit commits an edit, a deletion, and a new ticket', async () => {
+  const { first, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+
+  const edited = await createSettledTask(first, 'Edited task');
+  const deleted = await createSettledTask(first, 'Deleted task');
+
+  await first.runChecked(['sync']);
+
+  const editedText = await readFile(edited.path, 'utf8');
+
+  await writeFile(edited.path, `${editedText}\nAn edit.\n`);
+  await ageFile(edited.path);
+  await rm(deleted.path);
+
+  const created = await createSettledTask(first, 'New task');
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+  await writeFile(hook, '#!/bin/sh\nexit 1\n');
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+  await rm(hook);
+  await first.runChecked(['sync']);
+
+  const tree = await remoteTree(remotePath);
+  const editedRelative = relative(first.storePath, edited.path);
+  const shown = await gitOutput(remotePath, ['show', `main:${editedRelative}`]);
+
+  expect(tree).toContain(relative(first.storePath, created.path));
+  expect(tree).not.toContain(relative(first.storePath, deleted.path));
+  expect(shown).toContain('An edit.');
 });

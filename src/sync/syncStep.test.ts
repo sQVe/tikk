@@ -123,7 +123,7 @@ it('reports merged false and still pushes when git refuses the merge before it s
 });
 
 it('skips the merge when the remote has no main yet', async () => {
-  const fake = makeSync({ git: (args) => (args.includes('rev-parse') ? gitFailure() : undefined) });
+  const fake = makeSync({ git: (args) => (args.includes('--verify') ? gitFailure() : undefined) });
 
   const result = await syncStore(fake.functions, root, plain);
 

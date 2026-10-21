@@ -21,8 +21,12 @@ const listing =
     return undefined;
   };
 
-const addedPaths = (args: string[] | undefined): string[] =>
-  args === undefined ? [] : args.slice(args.indexOf('--') + 1);
+const stagedEntries = (fake: ReturnType<typeof makeSync>): string[] =>
+  fake.gitCalls.flatMap((call) => {
+    const index = call.args.indexOf('update-index');
+
+    return index === -1 ? [] : [call.args.slice(index + 1).join(' ')];
+  });
 
 it('stages facts, settled tickets, and deletions, and lists the rest as pending', async () => {
   const fake = makeSync({
@@ -47,7 +51,6 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
   });
 
   const result = await commitStore(fake.functions, root);
-  const add = fake.gitCalls.find((call) => call.args.includes('add'));
 
   expect(result).toEqual({
     ok: true,
@@ -57,14 +60,16 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
     },
   });
 
-  expect(addedPaths(add?.args).toSorted()).toEqual(
+  expect(stagedEntries(fake).toSorted()).toEqual(
     [
-      'facts/laptop/2026-10.jsonl',
-      'tickets/demo/gone.md',
-      'tickets/demo/settled.md',
-      'tikk.json',
+      '--add --cacheinfo 100644,blob1,facts/laptop/2026-10.jsonl',
+      '--add --cacheinfo 100644,blob3,tickets/demo/settled.md',
+      '--add --cacheinfo 100644,blob2,tikk.json',
+      '--force-remove -- tickets/demo/gone.md',
     ].toSorted(),
   );
+
+  expect(fake.commands()[0]).toBe('read-tree HEAD');
 });
 
 it('makes no commit when only pending tickets changed', async () => {
@@ -81,7 +86,7 @@ it('makes no commit when only pending tickets changed', async () => {
     value: { committed: false, pending: ['tickets/demo/fresh.md'] },
   });
 
-  expect(fake.gitCalls.some((call) => call.args.includes('add'))).toBe(false);
+  expect(stagedEntries(fake)).toEqual([]);
   expect(fake.gitCalls.some((call) => call.args.includes('commit'))).toBe(false);
 });
 
@@ -105,4 +110,40 @@ it('fails with the git message when the commit fails', async () => {
   const result = await commitStore(fake.functions, root);
 
   expect(result).toEqual({ ok: false, reason: { kind: 'failed', message: 'cannot sign' } });
+});
+
+it('commits the bytes it checked when the file changes afterwards', async () => {
+  const fake = makeSync({
+    now,
+    git: listing([], ['tickets/demo/edited.md']),
+    files: { '/store/tickets/demo/edited.md': { text: validTicket, mtimeMs: now - 5000 } },
+  });
+
+  const checkedRead = fake.functions.readFile;
+  let reads = 0;
+
+  const functions = {
+    ...fake.functions,
+    readFile: async (path: string) => {
+      reads += 1;
+
+      return reads === 1 ? checkedRead(path) : 'no front matter here';
+    },
+  };
+
+  await commitStore(functions, root);
+
+  expect(fake.blobs).toEqual([validTicket]);
+});
+
+it('builds the index from HEAD, so staged state from an earlier sync is dropped', async () => {
+  const fake = makeSync({ git: listing([], ['tikk.json']) });
+
+  await commitStore(fake.functions, root);
+
+  const commands = fake.commands();
+
+  expect(commands.indexOf('read-tree HEAD')).toBeLessThan(
+    commands.findIndex((command) => command.startsWith('update-index')),
+  );
 });

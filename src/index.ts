@@ -19,6 +19,7 @@ import { openCache } from './cache/cache.ts';
 import type { CacheFiles, TicketCache } from './cache/cache.ts';
 import { runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
+import { parseFactLine } from './fact/fact.ts';
 import { resolveMachine, resolveProject } from './project.ts';
 import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
@@ -291,8 +292,58 @@ const initLocalStore = async (): Promise<
   return { ok: true, value: { store: store.root, created } };
 };
 
+const writeBlob: SyncFunctions['writeBlob'] = async (root, text) => {
+  const child = Bun.spawn(['git', '-C', root, 'hash-object', '-w', '--stdin'], {
+    stdin: new TextEncoder().encode(text),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    child.stdout.text(),
+    child.stderr.text(),
+    child.exited,
+  ]);
+
+  if (exitCode === 0) {
+    return { ok: true, value: stdout };
+  }
+
+  return { ok: false, reason: { message: `"git hash-object" failed: ${stderr.trim()}` } };
+};
+
+const listAliases: SyncFunctions['listAliases'] = async () => {
+  const machine = await resolveMachine(projectEffects);
+
+  if (!machine.ok) {
+    return [];
+  }
+
+  const directory = join(storeRoot, 'facts', machine.value);
+  const names = await readdir(directory).catch(() => []);
+
+  const texts = await Promise.all(
+    names
+      .filter((name) => name.endsWith('.jsonl'))
+      .map((name) => readFile(join(directory, name), 'utf8').catch(() => '')),
+  );
+
+  const facts = texts
+    .flatMap((text) => text.split('\n'))
+    .filter((line) => line !== '')
+    .map((line) => parseFactLine(line));
+
+  return facts.flatMap((parsed) =>
+    parsed.ok && parsed.value.kind === 'alias'
+      ? [{ from: parsed.value.from, to: parsed.value.ticket }]
+      : [],
+  );
+};
+
 const syncFunctions: SyncFunctions = {
   runGit: runSyncGit,
+  writeBlob,
+  listAliases,
   commitArguments: (root) => commitArguments(runSyncGit, root),
   lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
   stat: (path) => stat(path),

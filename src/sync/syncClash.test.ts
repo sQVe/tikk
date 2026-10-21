@@ -1,22 +1,28 @@
 import { expect, it } from 'bun:test';
 
 import { resolveIdClashes } from './syncClash.ts';
-import { gitOutput, makeSync } from './syncHarness.ts';
-
-const validTicket = '---\nkind: task\ntitle: Valid\nproject: demo\nstatus: open\n---\nBody\n';
+import { gitFailure, gitOutput, makeSync } from './syncHarness.ts';
 
 const root = '/store';
+const factPath = '/store/facts/fake/2026-10.jsonl';
 
 // Each file's adding commit time, or no entry for a file no commit added yet.
 const clashingStore = (
   addedTimes: Record<string, string>,
   fileNames: string[],
-  files: Parameters<typeof makeSync>[0] = {},
+  extra: Parameters<typeof makeSync>[0] = {},
 ) =>
   makeSync({
-    ...files,
+    ...extra,
+    files: { [factPath]: { text: 'alias line\n', mtimeMs: 0 }, ...extra.files },
     folders: { '/store/tickets': ['demo'], '/store/tickets/demo': fileNames },
     git: (args) => {
+      const reply = extra.git?.(args);
+
+      if (reply !== undefined) {
+        return reply;
+      }
+
       if (args.includes('log')) {
         const path = args.at(-1) ?? '';
 
@@ -28,9 +34,7 @@ const clashingStore = (
   });
 
 const movedFiles = (fake: ReturnType<typeof makeSync>): string[] =>
-  fake.gitCalls
-    .filter((call) => call.args.includes('mv'))
-    .map((call) => call.args.at(-2)?.split('/').at(-1) ?? '');
+  fake.renames.map(([from]) => from.split('/').at(-1) ?? '');
 
 it('renames the file added later even when its name sorts first', async () => {
   const fake = clashingStore({ 'demo-aaaa-b.md': '100', 'demo-aaaa-a.md': '200' }, [
@@ -63,43 +67,88 @@ it('renames a file that no commit added, and keeps the committed one', async () 
   expect(movedFiles(fake)).toEqual(['demo-aaaa-a.md']);
 });
 
-const renamedTicketStore = (ageMilliseconds: number) =>
-  clashingStore({ 'demo-aaaa-a.md': '100' }, ['demo-aaaa-a.md', 'demo-aaaa-b.md'], {
-    now: 100_000,
-    files: {
-      '/store/tickets/demo/demo-zzzz-b.md': {
-        text: validTicket,
-        mtimeMs: 100_000 - ageMilliseconds,
-      },
-    },
+const twoTickets = (options: Parameters<typeof makeSync>[0] = {}) =>
+  clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+    options,
+  );
+
+const stagedEntries = (fake: ReturnType<typeof makeSync>): string[] =>
+  fake.gitCalls.flatMap((call) =>
+    call.args.includes('update-index')
+      ? [call.args.slice(call.args.indexOf('update-index') + 1).join(' ')]
+      : [],
+  );
+
+it('commits a tracked rename from HEAD together with its alias fact in one commit', async () => {
+  const fake = twoTickets();
+
+  const result = await resolveIdClashes(fake.functions, root);
+  const commits = fake.commands().filter((command) => command.startsWith('commit'));
+
+  expect(result.ok && result.value.moves).toEqual([
+    { from: 'tickets/demo/demo-aaaa-b.md', to: 'tickets/demo/demo-zzzz-b.md', tracked: true },
+  ]);
+
+  expect(commits).toHaveLength(1);
+
+  expect(stagedEntries(fake)).toEqual([
+    '--add --cacheinfo 100644,,tickets/demo/demo-zzzz-b.md',
+    '--force-remove -- tickets/demo/demo-aaaa-b.md',
+    '--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl',
+  ]);
+
+  expect(fake.blobs).toEqual(['alias line\n']);
+});
+
+it('puts the files back and fails when the clash commit fails', async () => {
+  const fake = twoTickets({
+    git: (args) => (args.includes('commit') ? gitFailure('hook refused') : undefined),
   });
-
-const addedPathsOf = (fake: ReturnType<typeof makeSync>): string[] =>
-  fake.gitCalls
-    .filter((call) => call.args.includes('add'))
-    .flatMap((call) => call.args.slice(call.args.indexOf('--') + 1));
-
-it('commits a settled renamed ticket that no commit added with its alias fact', async () => {
-  const fake = renamedTicketStore(5000);
 
   const result = await resolveIdClashes(fake.functions, root);
 
-  expect(addedPathsOf(fake)).toEqual(['facts/fake/2026-10.jsonl', 'tickets/demo/demo-zzzz-b.md']);
+  expect(result.ok).toBe(false);
 
-  expect(result.ok && result.value.moves).toEqual([
-    {
-      from: 'tickets/demo/demo-aaaa-b.md',
-      to: 'tickets/demo/demo-zzzz-b.md',
-      committed: true,
-    },
+  expect(fake.renames).toEqual([
+    ['/store/tickets/demo/demo-aaaa-b.md', '/store/tickets/demo/demo-zzzz-b.md'],
+    ['/store/tickets/demo/demo-zzzz-b.md', '/store/tickets/demo/demo-aaaa-b.md'],
   ]);
 });
 
-it('leaves an unsettled renamed ticket out of the commit and reports it under its new path', async () => {
-  const fake = renamedTicketStore(500);
+it('reuses the new ID of an earlier alias and writes no second alias fact', async () => {
+  const fake = twoTickets({ aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq' }] });
 
   const result = await resolveIdClashes(fake.functions, root);
 
-  expect(addedPathsOf(fake)).toEqual(['facts/fake/2026-10.jsonl']);
-  expect(result.ok && result.value.moves.map((entry) => entry.committed)).toEqual([false]);
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-qqqq']);
+  expect(fake.aliasWrites()).toBe(0);
+});
+
+it('does not reuse an alias whose new ID a file already uses', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-qqqq-c.md'],
+    {
+      files: { [factPath]: { text: 'alias line\n', mtimeMs: 0 } },
+      aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq' }],
+    },
+  );
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-zzzz']);
+  expect(fake.aliasWrites()).toBe(1);
+});
+
+it('leaves a file no commit added out of the clash commit', async () => {
+  const fake = clashingStore({ 'demo-aaaa-a.md': '100' }, ['demo-aaaa-a.md', 'demo-aaaa-b.md'], {
+    files: { [factPath]: { text: 'alias line\n', mtimeMs: 0 } },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.moves.map((move) => move.tracked)).toEqual([false]);
+  expect(stagedEntries(fake)).toEqual(['--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl']);
 });
