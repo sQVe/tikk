@@ -51,6 +51,8 @@ export interface FakeEffects {
   initCalls: () => number;
   openCalls: () => number;
   resolveCalls: () => number;
+  syncCalls: () => number;
+  remoteUrls: string[];
   editorPaths: string[];
 }
 
@@ -274,6 +276,8 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
 export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
   const fakeSession = options.session ?? makeSession();
   const editorPaths: string[] = [];
+  const remoteUrls: string[] = [];
+  let syncCount = 0;
   let initCount = 0;
   let openCount = 0;
   let resolveCount = 0;
@@ -283,6 +287,19 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
       initCount += 1;
 
       return Promise.resolve({ ok: true, value: { store: '/store', created: true } });
+    },
+    initRemoteStore: (url) => {
+      remoteUrls.push(url);
+
+      return Promise.resolve({ ok: true, value: { store: '/store', created: true, remote: url } });
+    },
+    syncStore: () => {
+      syncCount += 1;
+
+      return Promise.resolve({
+        ok: true,
+        value: { committed: true, pending: [], fetched: true, merged: true, pushed: true },
+      });
     },
     openSession: () => {
       openCount += 1;
@@ -310,6 +327,8 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
     initCalls: () => initCount,
     openCalls: () => openCount,
     resolveCalls: () => resolveCount,
+    syncCalls: () => syncCount,
+    remoteUrls,
     editorPaths,
   };
 };

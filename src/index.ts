@@ -44,6 +44,8 @@ import type {
   StoreLockFunctions,
   TicketFileFunctions,
 } from './store/store.ts';
+import { initRemoteStore, syncStore } from './sync/sync.ts';
+import type { RemoteInitFunctions, SyncFunctions, SyncReason } from './sync/sync.ts';
 import type { TicketId } from './ticket/ticket.ts';
 
 const homeDirectory = homedir();
@@ -71,6 +73,35 @@ const runStoreGit = async (args: string[]): Promise<Result<string, { message: st
   }
 
   return { ok: false, reason: { message: `"git ${args.join(' ')}" failed.` } };
+};
+
+// Git must fail instead of asking for credentials, since no one may be at the terminal.
+const runSyncGit: SyncFunctions['runGit'] = async (args, signal) => {
+  try {
+    const child = Bun.spawn(['git', ...args], {
+      env: { ...Bun.env, GIT_TERMINAL_PROMPT: '0' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      ...(signal === undefined ? {} : { signal }),
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      child.stdout.text(),
+      child.stderr.text(),
+      child.exited,
+    ]);
+
+    if (exitCode === 0) {
+      return { ok: true, value: stdout };
+    }
+
+    return { ok: false, reason: { message: `"git ${args.join(' ')}" failed: ${stderr.trim()}` } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'git did not start.';
+
+    return { ok: false, reason: { message: `Cannot run git: ${message}` } };
+  }
 };
 
 const ticketFiles: TicketFileFunctions = {
@@ -210,6 +241,12 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
   };
 };
 
+const openFailureCode = (): 'storeError' | 'notInitialized' => {
+  const configured = existsSync(join(storeRoot, 'tikk.json'));
+
+  return configured ? 'storeError' : 'notInitialized';
+};
+
 const openSession: CliEffects['openSession'] = async () => {
   const store = await openStore(storeRoot, storeFiles);
 
@@ -223,10 +260,71 @@ const openSession: CliEffects['openSession'] = async () => {
     return { ok: true, value: sessionFor(store.value, cache.value) };
   }
 
-  const configured = existsSync(join(storeRoot, 'tikk.json'));
-  const code = configured ? 'storeError' : 'notInitialized';
+  return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
+};
 
-  return { ok: false, reason: { code, message: store.reason.message } };
+const initLocalStore = async (): Promise<
+  Result<{ store: string; created: boolean }, { message: string }>
+> => {
+  const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
+
+  if (!initialized.ok) {
+    return initialized;
+  }
+
+  const { store, created } = initialized.value;
+
+  return { ok: true, value: { store: store.root, created } };
+};
+
+const syncFunctions: SyncFunctions = {
+  runGit: runSyncGit,
+  lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
+  stat: (path) => stat(path),
+  readFile: (path) => readFile(path, 'utf8'),
+  now: () => Date.now(),
+};
+
+const remoteInitFunctions: RemoteInitFunctions = {
+  ...syncFunctions,
+  readdir: (directory) => readdir(directory),
+  initStore: initLocalStore,
+};
+
+const syncFailureCode = (reason: SyncReason): 'conflict' | 'locked' | 'storeError' =>
+  reason.kind === 'failed' ? 'storeError' : reason.kind;
+
+const runSync: CliEffects['syncStore'] = async () => {
+  const store = await openStore(storeRoot, storeFiles);
+
+  if (!store.ok) {
+    return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
+  }
+
+  const synced = await syncStore(syncFunctions, store.value.root, {
+    allowUnrelatedHistories: false,
+  });
+
+  if (!synced.ok) {
+    return {
+      ok: false,
+      reason: { code: syncFailureCode(synced.reason), message: synced.reason.message },
+    };
+  }
+
+  return synced;
+};
+
+const runRemoteInit: CliEffects['initRemoteStore'] = async (url) => {
+  const initialized = await initRemoteStore(remoteInitFunctions, storeRoot, url);
+
+  if (!initialized.ok) {
+    const { reason } = initialized;
+
+    return { ok: false, reason: { code: syncFailureCode(reason), message: reason.message } };
+  }
+
+  return initialized;
 };
 
 const runEditor = async (path: string): Promise<Result<undefined, { message: string }>> => {
@@ -260,17 +358,9 @@ const projectEffects: ProjectEffects = {
 };
 
 const effects: CliEffects = {
-  initStore: async () => {
-    const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
-
-    if (!initialized.ok) {
-      return initialized;
-    }
-
-    const { store, created } = initialized.value;
-
-    return { ok: true, value: { store: store.root, created } };
-  },
+  initStore: initLocalStore,
+  initRemoteStore: runRemoteInit,
+  syncStore: runSync,
   openSession,
   resolveProject: () => resolveProject(process.cwd(), projectEffects),
   resolveMachine: () => resolveMachine(projectEffects),

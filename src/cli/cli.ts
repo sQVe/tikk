@@ -4,6 +4,7 @@ import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
 import { needsCommand } from './needsCommand.ts';
 import { readyCommand } from './readyCommand.ts';
+import { syncCommand } from './syncCommand.ts';
 import { taskClaim, taskRelease } from './taskClaim.ts';
 import { taskLog } from './taskLog.ts';
 import { taskAccept, taskSubmit } from './taskSubmit.ts';
@@ -43,7 +44,7 @@ const sessionCommands = new Map<string, SessionCommand>([
 ]);
 
 const usage =
-  'Usage: tikk <init|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|archive|unarchive> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|archive|unarchive> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,
@@ -58,6 +59,10 @@ const runCommand = async (
 ): Promise<CommandResult> => {
   if (command === 'init') {
     return cliInit(args, effects);
+  }
+
+  if (command === 'sync') {
+    return syncCommand(args, effects);
   }
 
   const run = sessionCommands.get(command);

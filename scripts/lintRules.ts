@@ -21,7 +21,7 @@ type ImportSource =
   | ESTree.ExportNamedDeclaration
   | ESTree.ExportAllDeclaration;
 
-const folderModules = new Set(['ticket', 'fact', 'store', 'cache', 'cli']);
+const folderModules = new Set(['ticket', 'fact', 'store', 'cache', 'sync', 'cli']);
 const flatModules = new Set(['invariant', 'result', 'project', 'index']);
 
 const allowedImports = new Map<string, Set<string>>([
@@ -31,6 +31,7 @@ const allowedImports = new Map<string, Set<string>>([
   ['fact', new Set(['ticket', 'invariant', 'result'])],
   ['store', new Set(['ticket', 'fact', 'invariant', 'result'])],
   ['cache', new Set(['ticket', 'fact', 'invariant', 'result'])],
+  ['sync', new Set(['store', 'ticket', 'invariant', 'result'])],
   ['project', new Set(['ticket', 'invariant', 'result'])],
   ['cli', new Set(['ticket', 'fact', 'invariant', 'result'])],
   ['index', new Set([...folderModules, ...flatModules])],
@@ -44,6 +45,7 @@ const packagePolicies = new Map<string, PackagePolicy>([
   ['fact', { builtins: false, packages: ['zod'] }],
   ['store', { builtins: true, packages: ['nanoid'] }],
   ['cache', { builtins: true, packages: ['zod'] }],
+  ['sync', builtinsOnly],
   ['project', { builtins: true, packages: ['zod'] }],
   ['cli', { builtins: false, packages: ['node:util'] }],
   ['index', builtinsOnly],

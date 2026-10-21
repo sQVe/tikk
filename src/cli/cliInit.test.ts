@@ -55,3 +55,43 @@ it('returns a storeError with the message when the store cannot be created', asy
   expect(reason.code).toBe('storeError');
   expect(reason.message).toContain('/store');
 });
+
+it('connects the store to a remote and reports it in json and text', async () => {
+  const fake = makeEffects();
+
+  const output = successOf(
+    await cliInit(['--remote', 'git@example.com:me/store.git'], fake.effects),
+  );
+
+  expect(output.json).toEqual({
+    store: '/store',
+    created: true,
+    remote: 'git@example.com:me/store.git',
+  });
+
+  expect(output.text).toContain('git@example.com:me/store.git');
+  expect(fake.remoteUrls).toEqual(['git@example.com:me/store.git']);
+  expect(fake.initCalls()).toBe(0);
+});
+
+it('refuses an empty remote URL without touching the store', async () => {
+  const fake = makeEffects();
+  const reason = failureOf(await cliInit(['--remote', ''], fake.effects));
+
+  expect(reason.code).toBe('invalidArguments');
+  expect(fake.remoteUrls).toEqual([]);
+  expect(fake.initCalls()).toBe(0);
+});
+
+it('passes a failure to connect the remote through with its code', async () => {
+  const { effects } = makeEffects({
+    overrides: {
+      initRemoteStore: () =>
+        Promise.resolve({ ok: false, reason: { code: 'storeError', message: 'origin differs' } }),
+    },
+  });
+
+  const reason = failureOf(await cliInit(['--remote', 'url'], effects));
+
+  expect(reason).toEqual({ code: 'storeError', message: 'origin differs' });
+});

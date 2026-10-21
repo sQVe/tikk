@@ -5,6 +5,8 @@ import { chmod, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { cliEnvironment } from './cliFixture.ts';
+
 interface RunResult {
   exitCode: number;
   stdout: string;
@@ -34,7 +36,7 @@ let work = '';
 const run = async (args: string[], extraEnvironment: Record<string, string> = {}) => {
   const child = Bun.spawn(['bun', 'run', entryPath, ...args], {
     cwd: work,
-    env: { ...process.env, HOME: home, TIKK_HOME: join(home, 'store'), ...extraEnvironment },
+    env: { ...cliEnvironment(home, join(home, 'store')), ...extraEnvironment },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -532,7 +534,7 @@ it('leaves no ticket file when the write fails after the file was created', asyn
     ],
     {
       cwd: work,
-      env: { ...process.env, HOME: home, TIKK_HOME: join(home, 'store') },
+      env: cliEnvironment(home, join(home, 'store')),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',

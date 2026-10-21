@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 
 import type { Result } from '../result.ts';
+import { commitArguments } from './storeCommit.ts';
 import type { Store } from './storePaths.ts';
 
 export interface StoreOpenFunctions {
@@ -23,6 +24,8 @@ const hasSupportedVersion = (json: unknown): boolean =>
   isObject(json) && 'version' in json && json.version === 1;
 
 const configFileName = 'tikk.json';
+const attributesFileName = '.gitattributes';
+const attributesText = 'facts/** merge=union\n';
 
 const isMissingFile = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -62,6 +65,76 @@ export const openStore = async (
   return { ok: true, value: { root } };
 };
 
+const ensureAttributesFile = async (
+  root: string,
+  effects: StoreInitEffects,
+): Promise<Result<undefined, StoreReason>> => {
+  const attributesPath = join(root, attributesFileName);
+
+  try {
+    await effects.readFile(attributesPath);
+
+    return { ok: true, value: undefined };
+  } catch (error) {
+    if (!isMissingFile(error)) {
+      return { ok: false, reason: { message: `Cannot read ${attributesPath}.` } };
+    }
+  }
+
+  try {
+    await effects.writeFile(attributesPath, attributesText);
+  } catch {
+    return { ok: false, reason: { message: `Cannot write ${attributesPath}.` } };
+  }
+
+  return { ok: true, value: undefined };
+};
+
+const ensureFirstCommit = async (
+  root: string,
+  effects: StoreInitEffects,
+): Promise<Result<undefined, StoreReason>> => {
+  const head = await effects.runGit(['-C', root, 'rev-parse', '--verify', '--quiet', 'HEAD']);
+
+  if (head.ok) {
+    return { ok: true, value: undefined };
+  }
+
+  const added = await effects.runGit(['-C', root, 'add', '--', configFileName, attributesFileName]);
+
+  if (!added.ok) {
+    return added;
+  }
+
+  const commitOptions = await commitArguments(effects.runGit, root);
+
+  const committed = await effects.runGit([
+    ...commitOptions,
+    '-C',
+    root,
+    'commit',
+    '--quiet',
+    '-m',
+    'Start the tikk store',
+  ]);
+
+  return committed.ok ? { ok: true, value: undefined } : committed;
+};
+
+// The union driver merges fact lines from two machines, so `facts/` never conflicts.
+const ensureHistory = async (
+  root: string,
+  effects: StoreInitEffects,
+): Promise<Result<undefined, StoreReason>> => {
+  const attributes = await ensureAttributesFile(root, effects);
+
+  if (!attributes.ok) {
+    return attributes;
+  }
+
+  return ensureFirstCommit(root, effects);
+};
+
 export const initStore = async (
   root: string,
   effects: StoreInitEffects,
@@ -69,7 +142,9 @@ export const initStore = async (
   const existing = await openStore(root, effects);
 
   if (existing.ok) {
-    return { ok: true, value: { store: existing.value, created: false } };
+    const history = await ensureHistory(root, effects);
+
+    return history.ok ? { ok: true, value: { store: existing.value, created: false } } : history;
   }
 
   const configPath = join(root, configFileName);
@@ -89,7 +164,7 @@ export const initStore = async (
     return { ok: false, reason: { message: `Cannot create the store folder ${root}.` } };
   }
 
-  const git = await effects.runGit(['-C', root, 'init']);
+  const git = await effects.runGit(['-C', root, 'init', '--quiet', '--initial-branch=main']);
 
   if (!git.ok) {
     return git;
@@ -101,5 +176,7 @@ export const initStore = async (
     return { ok: false, reason: { message: `Cannot write ${configPath}.` } };
   }
 
-  return { ok: true, value: { store: { root }, created: true } };
+  const history = await ensureHistory(root, effects);
+
+  return history.ok ? { ok: true, value: { store: { root }, created: true } } : history;
 };

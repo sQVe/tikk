@@ -92,8 +92,29 @@ interface SessionReason {
   message: string;
 }
 
+export interface SyncSummary {
+  committed: boolean;
+  pending: string[];
+  fetched: boolean;
+  merged: boolean;
+  pushed: boolean;
+}
+
+interface RemoteStoreSummary {
+  store: string;
+  created: boolean;
+  remote: string;
+}
+
+interface SyncFailure {
+  code: 'notInitialized' | 'storeError' | 'conflict' | 'locked';
+  message: string;
+}
+
 export interface CliEffects {
   initStore: () => Promise<Result<{ store: string; created: boolean }, CliMessage>>;
+  initRemoteStore: (url: string) => Promise<Result<RemoteStoreSummary, SyncFailure>>;
+  syncStore: () => Promise<Result<SyncSummary, SyncFailure>>;
   openSession: () => Promise<Result<CliSession, SessionReason>>;
   resolveProject: () => Promise<Result<ProjectName, CliMessage>>;
   readTextFile: (path: string) => Promise<string | undefined>;
