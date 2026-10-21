@@ -1,19 +1,22 @@
 import type { Result } from '../result.ts';
 import { commitArguments } from '../store/store.ts';
+import { resolveIdClashes } from './syncClash.ts';
+import type { SyncAlias, SyncClashFunctions } from './syncClash.ts';
 import { commitStore } from './syncCommit.ts';
-import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
+import type { SyncReason } from './syncCommit.ts';
 
 interface SyncLock {
   release: () => Promise<void>;
 }
 
-export interface SyncFunctions extends SyncCommitFunctions {
+export interface SyncFunctions extends SyncClashFunctions {
   lockStore: () => Promise<Result<SyncLock, { kind: 'locked' | 'failed'; message: string }>>;
 }
 
 export interface SyncReport {
   committed: boolean;
   pending: string[];
+  aliases: SyncAlias[];
   fetched: boolean;
   merged: boolean;
   pushed: boolean;
@@ -26,6 +29,7 @@ export interface SyncOptions {
 interface LockedSteps {
   committed: boolean;
   pending: string[];
+  aliases: SyncAlias[];
   merged: boolean;
 }
 
@@ -104,7 +108,7 @@ const runLockedSteps = async (
   }
 
   if (!hasRemote) {
-    return { ok: true, value: { ...commit.value, merged: false } };
+    return { ok: true, value: { ...commit.value, aliases: [], merged: false } };
   }
 
   const merged = await mergeRemote(functions, root, options);
@@ -113,7 +117,17 @@ const runLockedSteps = async (
     return merged;
   }
 
-  return { ok: true, value: { ...commit.value, merged: merged.value } };
+  if (!merged.value) {
+    return { ok: true, value: { ...commit.value, aliases: [], merged: false } };
+  }
+
+  const clashes = await resolveIdClashes(functions, root);
+
+  if (!clashes.ok) {
+    return clashes;
+  }
+
+  return { ok: true, value: { ...commit.value, aliases: clashes.value, merged: true } };
 };
 
 const lockAndRun = async (

@@ -295,6 +295,20 @@ const syncFunctions: SyncFunctions = {
   stat: (path) => stat(path),
   readFile: (path) => readFile(path, 'utf8'),
   now: () => Date.now(),
+  readdir: (directory) => readdir(directory),
+  randomIdSuffix: () => newIdSuffix(),
+  appendAlias: async (alias) => {
+    const machine = await resolveMachine(projectEffects);
+
+    if (!machine.ok) {
+      return { ok: false, reason: { message: machine.reason.message } };
+    }
+
+    const fact = { version: 1, kind: 'alias', machine: machine.value, ...alias } as const;
+    const appended = await appendFact(factFiles, { root: storeRoot }, machine.value, fact);
+
+    return appended.ok ? appended : { ok: false, reason: { message: appended.reason.message } };
+  },
 };
 
 // A compiled binary runs itself. Otherwise the child runs this script with the same Bun.
@@ -334,7 +348,6 @@ const scheduleFunctions: SyncScheduleFunctions = {
 
 const remoteInitFunctions: RemoteInitFunctions = {
   ...syncFunctions,
-  readdir: (directory) => readdir(directory),
   initStore: initLocalStore,
 };
 

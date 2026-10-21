@@ -4,7 +4,6 @@ import { listRemoteMain, pushNewStore, syncStore } from './syncStep.ts';
 import type { SyncFunctions } from './syncStep.ts';
 
 export interface RemoteInitFunctions extends SyncFunctions {
-  readdir: (directory: string) => Promise<string[]>;
   initStore: () => Promise<Result<{ created: boolean }, { message: string }>>;
 }
 

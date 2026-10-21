@@ -21,7 +21,14 @@ it('only commits when the store has no remote', async () => {
 
   expect(result).toEqual({
     ok: true,
-    value: { committed: true, pending: [], fetched: false, merged: false, pushed: false },
+    value: {
+      committed: true,
+      pending: [],
+      aliases: [],
+      fetched: false,
+      merged: false,
+      pushed: false,
+    },
   });
 
   expect(fake.commands().some((command) => command.startsWith('fetch'))).toBe(false);
@@ -35,7 +42,7 @@ it('fetches and pushes outside the lock with a timeout, and commits and merges u
 
   expect(result).toEqual({
     ok: true,
-    value: { committed: true, pending: [], fetched: true, merged: true, pushed: true },
+    value: { committed: true, pending: [], aliases: [], fetched: true, merged: true, pushed: true },
   });
 
   expect(callFor(fake, 'fetch')).toMatchObject({ signal: true, underLock: false });

@@ -7,6 +7,7 @@ it('reports the sync steps and pending files in json and text', async () => {
   const summary = {
     committed: true,
     pending: ['tickets/demo/fresh.md'],
+    aliases: [],
     fetched: false,
     merged: false,
     pushed: false,

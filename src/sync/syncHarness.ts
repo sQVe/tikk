@@ -94,6 +94,8 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       return folder === 'missing' ? missingFile() : Promise.resolve(folder);
     },
+    randomIdSuffix: () => 'zzzz',
+    appendAlias: () => Promise.resolve({ ok: true, value: { path: 'facts/fake/2026-10.jsonl' } }),
     initStore: () => {
       initCount += 1;
 

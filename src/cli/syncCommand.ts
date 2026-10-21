@@ -11,7 +11,11 @@ const syncText = (summary: SyncSummary): string => {
 
   const pendingLines = summary.pending.map((path) => `pending: ${path}\n`);
 
-  return `Synced the store: ${steps.join(', ')}.\n${pendingLines.join('')}`;
+  const aliasLines = summary.aliases.map(
+    (alias) => `renamed: ${alias.from} is now ${alias.to} in ${alias.path}\n`,
+  );
+
+  return `Synced the store: ${steps.join(', ')}.\n${pendingLines.join('')}${aliasLines.join('')}`;
 };
 
 export const syncCommand = async (args: string[], effects: CliEffects): Promise<CommandResult> => {

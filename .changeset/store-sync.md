@@ -8,4 +8,6 @@ machines edit one ticket, sync stops, leaves no merge in progress, and names the
 ticket file out of the commit until it parses and has not changed for two seconds, and lists it as
 `pending`. After a write, a store with an `origin` remote syncs in the background after a three
 second delay. `tikk claim` fetches and merges first, so it sees claims made on other machines, and
-still works offline.
+still works offline. When a merge brings in a ticket whose ID another ticket already uses, sync
+gives the newer ticket a new ID, renames its file, and records an `alias` fact. `tikk sync --json`
+lists these as `aliases`.

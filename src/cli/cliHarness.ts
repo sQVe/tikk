@@ -300,7 +300,14 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
 
       return Promise.resolve({
         ok: true,
-        value: { committed: true, pending: [], fetched: true, merged: true, pushed: true },
+        value: {
+          committed: true,
+          pending: [],
+          aliases: [],
+          fetched: true,
+          merged: true,
+          pushed: true,
+        },
       });
     },
     runBackgroundSync: () => Promise.resolve(),

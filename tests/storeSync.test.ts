@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
@@ -20,6 +20,10 @@ interface SyncReport {
   fetched: boolean;
   merged: boolean;
   pushed: boolean;
+}
+
+interface AliasSyncReport extends SyncReport {
+  aliases: { from: string; to: string; path: string }[];
 }
 
 let clones: CloneFixtures | undefined;
@@ -269,3 +273,46 @@ it('a burst of writes on a store with a remote reaches the remote with no explic
 
   expect(count).toBeGreaterThan(baseline);
 }, 30_000);
+
+const writeHandTicket = async (fixture: CliFixture, fileName: string): Promise<void> => {
+  const directory = join(fixture.storePath, 'tickets', 'demo');
+  const path = join(directory, fileName);
+  const text = '---\nkind: task\ntitle: By hand\nproject: demo\nblockedBy: []\nstatus: open\n---\n';
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(path, text);
+  await ageFile(path);
+};
+
+it('an ID clash found at merge gives the newer ticket a new ID and writes an alias fact', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  await writeHandTicket(first, 'demo-aaaa-first.md');
+  await writeHandTicket(second, 'demo-aaaa-second.md');
+
+  await first.runChecked(['sync']);
+
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const listing = await second.runJson<{ tickets: { id: string }[] }>(['ls', '--project', 'demo']);
+  const ids = listing.tickets.map((ticket) => ticket.id);
+  const alias = report.aliases[0];
+
+  expect(report.aliases).toHaveLength(1);
+  expect(alias?.from).toBe('demo-aaaa');
+  expect(alias?.to).not.toBe('demo-aaaa');
+  expect(alias?.path).toContain(`${alias?.to}-second.md`);
+  expect(ids).toHaveLength(2);
+  expect(new Set(ids).size).toBe(2);
+  expect(existsSync(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'))).toBe(true);
+  expect(existsSync(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'))).toBe(false);
+
+  const facts = await readAllFacts(second);
+
+  expect(facts).toContain('"kind":"alias"');
+  expect(facts).toContain('"from":"demo-aaaa"');
+  expect(facts).toContain(`"ticket":"${alias?.to}"`);
+  expect(await gitOutput(second.storePath, ['status', '--porcelain'])).toBe('');
+});

@@ -95,6 +95,7 @@ interface SessionReason {
 export interface SyncSummary {
   committed: boolean;
   pending: string[];
+  aliases: { from: string; to: string; path: string }[];
   fetched: boolean;
   merged: boolean;
   pushed: boolean;
