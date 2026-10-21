@@ -23,8 +23,9 @@ private GitHub repository.
   write races a Git operation. tikk clears a stale lock by checking its PID.
 - Writes never commit. One sync step fetches, then commits and merges under the lock, then pushes.
   The network steps run outside the lock, because writers wait for it at most five seconds. Each
-  network step has a timeout, and a failed one leaves the sync to the next run. Background sync is
-  debounced to at most once every few seconds.
+  network step has a timeout, and a failed one leaves the sync to the next run. A write on a store
+  with an `origin` remote starts a detached `tikk sync --background` child, unless a live one is
+  waiting. The child waits three seconds, so a burst of writes shares one sync.
 - `facts/` merges with Git's `union` driver, so it never conflicts. tikk never rebases.
 - A conflict can occur only in `tickets/`, when two machines edited one ticket offline. tikk aborts
   the merge, skips the push, stops the sync, and names the file. No merge is left in progress.

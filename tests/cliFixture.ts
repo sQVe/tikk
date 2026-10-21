@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,6 +51,20 @@ export const cliEnvironment = (home: string, storePath: string): Record<string, 
   GIT_CONFIG_NOSYSTEM: '1',
 });
 
+// A background sync child owns these files while it waits and while it runs, and it must not meet a
+// deleted store.
+export const waitForBackgroundSync = async (storePath: string): Promise<void> => {
+  const files = ['tikk.sync-scheduled', 'tikk.sync-running'].map((name) =>
+    join(storePath, '.git', name),
+  );
+
+  const deadline = Date.now() + 60_000;
+
+  while (files.some((file) => existsSync(file)) && Date.now() < deadline) {
+    await Bun.sleep(100);
+  }
+};
+
 // Runs the real CLI in a child process against a store in a temporary home.
 export const createCliFixture = async (
   prefix: string,
@@ -101,7 +116,10 @@ export const createCliFixture = async (
     return JSON.parse(result.stdout) as Shape;
   };
 
-  const cleanup = (): Promise<void> => rm(home, { recursive: true, force: true });
+  const cleanup = async (): Promise<void> => {
+    await waitForBackgroundSync(storePath);
+    await rm(home, { recursive: true, force: true });
+  };
 
   return { home, storePath, remotePath, run, runChecked, runJson, cleanup };
 };

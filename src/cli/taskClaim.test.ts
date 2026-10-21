@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import type { CommandInput } from './cliEffects.ts';
 import {
   failed,
   failureOf,
@@ -390,4 +391,53 @@ it('reports a storeError when the facts of the task cannot be read', async () =>
 
   expect(failureOf(result).code).toBe('storeError');
   expect(fakeSession.appends).toEqual([]);
+});
+
+it('schedules a background sync after a write that succeeds, and after no other write', async () => {
+  const fakeSession = makeSession({ tickets: [task] });
+  const { effects, scheduleCalls } = makeEffects({ session: fakeSession });
+
+  const input = (args: string[]): CommandInput => ({
+    args,
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  failureOf(await taskClaim(input(['demo-3467'])));
+  expect(scheduleCalls()).toBe(0);
+
+  successOf(await taskClaim(input(['demo-3467', '--holder', 'agent'])));
+  expect(scheduleCalls()).toBe(1);
+});
+
+it('fetches before the lock and merges under it before the claim reads the task', async () => {
+  const fakeSession = makeSession({ tickets: [task] });
+  const steps: string[] = [];
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    overrides: {
+      fetchRemote: () => {
+        steps.push(`fetch ${fakeSession.lockHeld() ? 'locked' : 'free'}`);
+
+        return Promise.resolve();
+      },
+      mergeFetched: () => {
+        steps.push(`merge ${fakeSession.lockHeld() ? 'locked' : 'free'}`);
+
+        return Promise.resolve();
+      },
+    },
+  });
+
+  const result = await taskClaim({
+    args: ['demo-3467', '--holder', 'agent'],
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  successOf(result);
+  expect(steps).toEqual(['fetch free', 'merge locked']);
 });

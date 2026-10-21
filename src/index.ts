@@ -44,8 +44,20 @@ import type {
   StoreLockFunctions,
   TicketFileFunctions,
 } from './store/store.ts';
-import { initRemoteStore, syncStore } from './sync/sync.ts';
-import type { RemoteInitFunctions, SyncFunctions, SyncReason } from './sync/sync.ts';
+import {
+  fetchOrigin,
+  initRemoteStore,
+  mergeFetched,
+  runBackgroundSync,
+  scheduleSync,
+  syncStore,
+} from './sync/sync.ts';
+import type {
+  RemoteInitFunctions,
+  SyncFunctions,
+  SyncReason,
+  SyncScheduleFunctions,
+} from './sync/sync.ts';
 import type { TicketId } from './ticket/ticket.ts';
 
 const homeDirectory = homedir();
@@ -285,6 +297,41 @@ const syncFunctions: SyncFunctions = {
   now: () => Date.now(),
 };
 
+// A compiled binary runs itself. Otherwise the child runs this script with the same Bun.
+const backgroundCommand = (): string[] => {
+  const compiled = Bun.main.startsWith('/$bunfs/');
+  const entry = compiled ? [] : ['run', Bun.main];
+
+  return [process.execPath, ...entry, 'sync', '--background'];
+};
+
+const startBackground = (): number | undefined => {
+  const child = Bun.spawn(backgroundCommand(), {
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+
+  child.unref();
+
+  return child.pid;
+};
+
+const scheduleFunctions: SyncScheduleFunctions = {
+  pid: process.pid,
+  runGit: runSyncGit,
+  writeFile: storeLock.writeFile,
+  link: storeLock.link,
+  rename: (from, to) => rename(from, to),
+  unlink: storeLock.unlink,
+  readFile: storeLock.readFile,
+  randomSuffix: storeLock.randomSuffix,
+  isProcessAlive: storeLock.isProcessAlive,
+  sleep: storeLock.sleep,
+  startBackground,
+};
+
 const remoteInitFunctions: RemoteInitFunctions = {
   ...syncFunctions,
   readdir: (directory) => readdir(directory),
@@ -313,6 +360,23 @@ const runSync: CliEffects['syncStore'] = async () => {
   }
 
   return synced;
+};
+
+const runBackground: CliEffects['runBackgroundSync'] = async () => {
+  const store = await openStore(storeRoot, storeFiles);
+
+  if (store.ok) {
+    await runBackgroundSync(scheduleFunctions, store.value.root, () => runSync());
+  }
+};
+
+const runScheduleSync: CliEffects['scheduleSync'] = () =>
+  scheduleSync(scheduleFunctions, storeRoot);
+
+const runFetch: CliEffects['fetchRemote'] = () => fetchOrigin(syncFunctions, storeRoot);
+
+const runMergeFetched: CliEffects['mergeFetched'] = async () => {
+  await mergeFetched(syncFunctions, storeRoot);
 };
 
 const runRemoteInit: CliEffects['initRemoteStore'] = async (url) => {
@@ -361,6 +425,10 @@ const effects: CliEffects = {
   initStore: initLocalStore,
   initRemoteStore: runRemoteInit,
   syncStore: runSync,
+  runBackgroundSync: runBackground,
+  scheduleSync: runScheduleSync,
+  fetchRemote: runFetch,
+  mergeFetched: runMergeFetched,
   openSession,
   resolveProject: () => resolveProject(process.cwd(), projectEffects),
   resolveMachine: () => resolveMachine(projectEffects),

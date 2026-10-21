@@ -62,9 +62,7 @@ const loadTicket = async (
   return { ok: true, value: ticket };
 };
 
-// Every write runs under the store lock. The work refreshes the cache after it takes the lock, so
-// its checks see every earlier write.
-export const withStoreLock = async (
+const runUnderStoreLock = async (
   input: CommandInput,
   work: () => Promise<CommandResult>,
 ): Promise<CommandResult> => {
@@ -83,6 +81,22 @@ export const withStoreLock = async (
   }
 };
 
+// Every write runs under the store lock. The work refreshes the cache after it takes the lock, so
+// its checks see every earlier write. A write that succeeds schedules a background sync once the
+// lock is free.
+export const withStoreLock = async (
+  input: CommandInput,
+  work: () => Promise<CommandResult>,
+): Promise<CommandResult> => {
+  const result = await runUnderStoreLock(input, work);
+
+  if (result.ok) {
+    await input.effects.scheduleSync();
+  }
+
+  return result;
+};
+
 export const withLockedTicket = (
   input: CommandInput,
   rawId: string,
@@ -99,18 +113,61 @@ export const withLockedTicket = (
     return work(loaded.value);
   });
 
+const loadTask = async (
+  input: CommandInput,
+  rawId: string,
+  fileErrors: FileErrors,
+): Promise<Result<LockedTask, CliFailure>> => {
+  const loaded = await loadTicket(input, rawId, { fileErrors, requireTask: true });
+
+  if (!loaded.ok) {
+    return loaded;
+  }
+
+  const facts = await input.session.listStateFacts([loaded.value.id]);
+
+  if (!facts.ok) {
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+  }
+
+  return { ok: true, value: { task: loaded.value, facts: facts.value, now: input.effects.now() } };
+};
+
 export const withLockedTask = (
   input: CommandInput,
   rawId: string,
   fileErrors: FileErrors,
   work: (locked: LockedTask) => Promise<CommandResult>,
 ): Promise<CommandResult> =>
-  withLockedTicket(input, rawId, { fileErrors, requireTask: true }, async (task) => {
-    const facts = await input.session.listStateFacts([task.id]);
+  withStoreLock(input, async () => {
+    const loaded = await loadTask(input, rawId, fileErrors);
 
-    if (!facts.ok) {
-      return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+    if (!loaded.ok) {
+      return loaded;
     }
 
-    return work({ task, facts: facts.value, now: input.effects.now() });
+    return work(loaded.value);
   });
+
+// The fetch runs before the lock because writers wait for the lock only five seconds. The merge runs
+// under the lock, so the checks of the work see claims made on other machines.
+export const withFetchedTask = async (
+  input: CommandInput,
+  rawId: string,
+  fileErrors: FileErrors,
+  work: (locked: LockedTask) => Promise<CommandResult>,
+): Promise<CommandResult> => {
+  await input.effects.fetchRemote();
+
+  return withStoreLock(input, async () => {
+    await input.effects.mergeFetched();
+
+    const loaded = await loadTask(input, rawId, fileErrors);
+
+    if (!loaded.ok) {
+      return loaded;
+    }
+
+    return work(loaded.value);
+  });
+};

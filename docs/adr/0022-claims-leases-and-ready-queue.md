@@ -17,7 +17,8 @@ Two offline machines can claim the same task, and reconcile must show the clash.
 ## Decision
 
 A `claim` is a fact with a lease. `ready` returns ordered candidates and names what blocks each
-skipped item. Before a claim, tikk fetches when the network is up.
+skipped item. Before a claim, tikk fetches when the network is up, and merges what it fetched under
+the store lock. A failed fetch or a conflicting merge does not stop the claim.
 
 ### Claims
 

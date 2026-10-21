@@ -189,3 +189,83 @@ it('leaves a fresh ticket file and one that does not parse out of the commit as 
   expect(tracked).not.toContain(freshPath);
   expect(tracked).not.toContain(brokenRelative);
 });
+
+it('a claim fetches first and sees a claim made on another clone', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const task = await createSettledTask(first, 'Contested task');
+
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await first.runChecked(['claim', task.id, '--holder', 'first-agent']);
+  await first.runChecked(['sync']);
+
+  const result = await second.run(['claim', task.id, '--holder', 'second-agent']);
+  const parsed = JSON.parse(result.stdout) as { error: { code: string } };
+
+  expect(result.exitCode).not.toBe(0);
+  expect(parsed.error.code).toBe('conflict');
+});
+
+it('a claim still succeeds when origin points at a missing path', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const task = await createSettledTask(fixture, 'Offline task');
+
+  await gitOutput(fixture.storePath, [
+    'remote',
+    'add',
+    'origin',
+    join(fixture.home, 'missing.git'),
+  ]);
+
+  const claimed = await fixture.runJson<ShownTask>(['claim', task.id, '--holder', 'agent']);
+
+  expect(claimed).toMatchObject({ state: 'active', claim: { holder: 'agent' } });
+});
+
+const waitForRemoteCommits = async (remotePath: string, minimum: number): Promise<number> => {
+  const deadline = Date.now() + 10_000;
+  let count = 0;
+
+  while (Date.now() < deadline) {
+    const child = Bun.spawn(['git', '-C', remotePath, 'rev-list', '--count', 'main'], {
+      stdout: 'pipe',
+      stderr: 'ignore',
+    });
+
+    const [stdout, exitCode] = await Promise.all([child.stdout.text(), child.exited]);
+
+    count = exitCode === 0 ? Number(stdout.trim()) : 0;
+
+    if (count >= minimum) {
+      return count;
+    }
+
+    await Bun.sleep(200);
+  }
+
+  return count;
+};
+
+it('a burst of writes on a store with a remote reaches the remote with no explicit sync', async () => {
+  const { first, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+
+  const baseline = await waitForRemoteCommits(remotePath, 1);
+  const task = await first.runJson<ShownTask>(['new', 'task', 'Burst task']);
+
+  for (const text of ['one', 'two', 'three']) {
+    await first.runChecked(['log', task.id, '--type', 'progress', '--text', text]);
+  }
+
+  const count = await waitForRemoteCommits(remotePath, baseline + 1);
+
+  expect(count).toBeGreaterThan(baseline);
+}, 30_000);

@@ -52,6 +52,7 @@ export interface FakeEffects {
   openCalls: () => number;
   resolveCalls: () => number;
   syncCalls: () => number;
+  scheduleCalls: () => number;
   remoteUrls: string[];
   editorPaths: string[];
 }
@@ -278,6 +279,7 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
   const editorPaths: string[] = [];
   const remoteUrls: string[] = [];
   let syncCount = 0;
+  let scheduleCount = 0;
   let initCount = 0;
   let openCount = 0;
   let resolveCount = 0;
@@ -301,6 +303,14 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
         value: { committed: true, pending: [], fetched: true, merged: true, pushed: true },
       });
     },
+    runBackgroundSync: () => Promise.resolve(),
+    scheduleSync: () => {
+      scheduleCount += 1;
+
+      return Promise.resolve();
+    },
+    fetchRemote: () => Promise.resolve(),
+    mergeFetched: () => Promise.resolve(),
     openSession: () => {
       openCount += 1;
 
@@ -328,6 +338,7 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
     openCalls: () => openCount,
     resolveCalls: () => resolveCount,
     syncCalls: () => syncCount,
+    scheduleCalls: () => scheduleCount,
     remoteUrls,
     editorPaths,
   };

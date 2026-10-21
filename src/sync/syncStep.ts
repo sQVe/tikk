@@ -135,13 +135,39 @@ const lockAndRun = async (
   }
 };
 
+const hasOrigin = async (functions: SyncFunctions, root: string): Promise<boolean> => {
+  const remote = await functions.runGit(['-C', root, 'remote', 'get-url', 'origin']);
+
+  return remote.ok;
+};
+
+// A failed fetch, such as offline, changes nothing, so the caller goes on with what it has.
+export const fetchOrigin = async (functions: SyncFunctions, root: string): Promise<void> => {
+  if (await hasOrigin(functions, root)) {
+    await functions.runGit(['-C', root, 'fetch', '--quiet', 'origin'], networkSignal());
+  }
+};
+
+// The caller holds the store lock. A conflict is aborted and left for the next sync to report.
+export const mergeFetched = async (
+  functions: SyncFunctions,
+  root: string,
+): Promise<Result<undefined, SyncReason>> => {
+  if (!(await hasOrigin(functions, root))) {
+    return { ok: true, value: undefined };
+  }
+
+  const steps = await runLockedSteps(functions, root, true, { allowUnrelatedHistories: false });
+
+  return steps.ok ? { ok: true, value: undefined } : steps;
+};
+
 export const syncStore = async (
   functions: SyncFunctions,
   root: string,
   options: SyncOptions,
 ): Promise<Result<SyncReport, SyncReason>> => {
-  const remote = await functions.runGit(['-C', root, 'remote', 'get-url', 'origin']);
-  const hasRemote = remote.ok;
+  const hasRemote = await hasOrigin(functions, root);
   let fetched = false;
 
   if (hasRemote) {

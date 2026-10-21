@@ -115,6 +115,10 @@ export interface CliEffects {
   initStore: () => Promise<Result<{ store: string; created: boolean }, CliMessage>>;
   initRemoteStore: (url: string) => Promise<Result<RemoteStoreSummary, SyncFailure>>;
   syncStore: () => Promise<Result<SyncSummary, SyncFailure>>;
+  runBackgroundSync: () => Promise<void>;
+  scheduleSync: () => Promise<void>;
+  fetchRemote: () => Promise<void>;
+  mergeFetched: () => Promise<void>;
   openSession: () => Promise<Result<CliSession, SessionReason>>;
   resolveProject: () => Promise<Result<ProjectName, CliMessage>>;
   readTextFile: (path: string) => Promise<string | undefined>;

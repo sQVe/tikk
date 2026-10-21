@@ -15,7 +15,7 @@ const syncText = (summary: SyncSummary): string => {
 };
 
 export const syncCommand = async (args: string[], effects: CliEffects): Promise<CommandResult> => {
-  const parsed = parseCommandArguments(args, {});
+  const parsed = parseCommandArguments(args, { background: { type: 'boolean' } });
 
   if (!parsed.ok) {
     return parsed;
@@ -23,6 +23,12 @@ export const syncCommand = async (args: string[], effects: CliEffects): Promise<
 
   if (parsed.value.positionals.length > 0) {
     return invalidArguments('Usage: tikk sync [--json]');
+  }
+
+  if (parsed.value.values['background'] === true) {
+    await effects.runBackgroundSync();
+
+    return { ok: true, value: { json: {}, text: '' } };
   }
 
   const synced = await effects.syncStore();
