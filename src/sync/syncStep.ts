@@ -109,12 +109,36 @@ const mergeRemote = async (
   return { ok: false, reason: { kind: 'failed', message: merged.reason.message } };
 };
 
+// Sync pushes `main`, so a store on another branch is renamed first.
+const ensureMainBranch = async (
+  functions: SyncFunctions,
+  root: string,
+): Promise<Result<undefined, SyncReason>> => {
+  const current = await functions.runGit(['-C', root, 'symbolic-ref', '--short', 'HEAD']);
+
+  if (!current.ok || current.value.trim() === 'main') {
+    return { ok: true, value: undefined };
+  }
+
+  const renamed = await functions.runGit(['-C', root, 'branch', '-m', 'main']);
+
+  return renamed.ok
+    ? { ok: true, value: undefined }
+    : { ok: false, reason: { kind: 'failed', message: renamed.reason.message } };
+};
+
 const runLockedSteps = async (
   functions: SyncFunctions,
   root: string,
   hasRemote: boolean,
   options: SyncOptions,
 ): Promise<Result<LockedSteps, SyncReason>> => {
+  const branch = await ensureMainBranch(functions, root);
+
+  if (!branch.ok) {
+    return branch;
+  }
+
   const commit = await commitStore(functions, root);
 
   if (!commit.ok) {

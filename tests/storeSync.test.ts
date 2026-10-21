@@ -580,3 +580,63 @@ it('the next sync commits a ticket deletion that a failed commit left staged', a
 
   expect(await remoteTree(remotePath)).not.toContain(relativePath);
 });
+
+it('a failed clash commit and a bad edit to the renamed ticket lose no ticket on the remote', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+  await writeHandTicket(first, 'demo-aaaa-a.md');
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeHandTicket(second, 'demo-aaaa-b.md');
+
+  const hook = join(second.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await second.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+  await rm(hook);
+
+  const directory = join(second.storePath, 'tickets', 'demo');
+  const renamed = (await readdir(directory)).find((name) => name.endsWith('-b.md'));
+  const renamedRelative = `tickets/demo/${renamed ?? ''}`;
+
+  expect(renamed).toBeDefined();
+  expect(renamed).not.toBe('demo-aaaa-b.md');
+  await writeFile(join(directory, renamed ?? ''), 'no front matter here\n');
+
+  const report = await second.runJson<SyncReport>(['sync']);
+  const tree = await remoteTree(remotePath);
+  const content = await gitOutput(remotePath, ['show', `main:${renamedRelative}`]);
+
+  expect(report.pending).toEqual([renamedRelative]);
+  expect(tree).toContain('tickets/demo/demo-aaaa-a.md');
+  expect(tree).toContain(renamedRelative);
+  expect(content).toContain('title: By hand');
+});
+
+it('tikk sync alone pushes a store on master to the remote main', async () => {
+  const { first, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await gitOutput(first.storePath, ['branch', '-m', 'master']);
+  await createSettledTask(first, 'Master task');
+
+  const report = await first.runJson<SyncReport>(['sync']);
+  const branch = await gitOutput(first.storePath, ['branch', '--show-current']);
+  const tree = await remoteTree(remotePath);
+
+  expect(branch.trim()).toBe('main');
+  expect(report.pushed).toBe(true);
+  expect(tree).toContain('tickets/personal/');
+});

@@ -138,6 +138,31 @@ const isStagedSettled = async (
   return exists ? isSettledTicket(functions, root, path) : true;
 };
 
+const indexedParses = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<boolean> => {
+  const shown = await functions.runGit(['-C', root, 'show', `:${path}`]);
+
+  return shown.ok && parseTicketFile(shown.value).ok;
+};
+
+// A path edited after it was staged is judged by its staged snapshot, so a valid snapshot (such as
+// a rename with its alias fact) is committed and only the worktree edit waits.
+const isIndexedSettled = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+  modified: Set<string>,
+): Promise<boolean> => {
+  if (isTicketPath(path) && modified.has(path)) {
+    return indexedParses(functions, root, path);
+  }
+
+  return isStagedSettled(functions, root, path);
+};
+
 const unstage = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -223,7 +248,7 @@ export const commitStore = async (
   );
 
   const indexedSettled = await Promise.all(
-    indexed.value.map((path) => isStagedSettled(functions, root, path)),
+    indexed.value.map((path) => isIndexedSettled(functions, root, path, new Set(changed.value))),
   );
 
   const unsettledIndexed = indexed.value.filter((_path, index) => indexedSettled[index] === false);
