@@ -22,7 +22,7 @@ import type {
   CommandResult,
 } from './cliEffects.ts';
 import { withStoreLock } from './taskLock.ts';
-import { readCriteriaFile, requireCriteria } from './ticketCriteria.ts';
+import { readCriteriaFile } from './ticketCriteria.ts';
 import { checkSessionTree } from './ticketStatus.ts';
 import { showAfterRefresh, storeFailure } from './ticketView.ts';
 
@@ -167,12 +167,6 @@ const buildFrontMatter = (input: FrontMatterInput): Result<TicketFrontMatter, Cl
 
   if (!frontMatter.success) {
     return invalidArguments(frontMatter.error.issues.map((issue) => issue.message).join('\n'));
-  }
-
-  const required = requireCriteria(frontMatter.data);
-
-  if (!required.ok) {
-    return required;
   }
 
   return { ok: true, value: frontMatter.data };

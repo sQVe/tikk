@@ -48,6 +48,12 @@ afterEach(async () => {
 const textOf = ({ kind, status, parent, archived }: StoreTicket): string => {
   const lines = ['---', `kind: ${kind}`, 'title: A title', 'project: tikk', `status: ${status}`];
 
+  const isPlanned = kind === 'plan' || kind === 'slice';
+
+  if (isPlanned && status === 'open') {
+    lines.push('criteria:', '  - id: works', '    check: Run it.', '    expected: It works.');
+  }
+
   if (parent !== undefined) {
     lines.push(`parent: ${parent}`);
   }

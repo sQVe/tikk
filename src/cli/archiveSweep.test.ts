@@ -17,11 +17,18 @@ import type { FakeSession } from './cliHarness.ts';
 type Kind = CliTicket['frontMatter']['kind'];
 type Status = CliTicket['frontMatter']['status'];
 
+const criteria = [{ id: 'works', check: 'Run it.', expected: 'It works.' }];
+
 const ticketOf = (id: string, kind: Kind, status: Status, parent?: string): CliTicket => {
   const base = makeTicket(id);
   const parentField = parent === undefined ? {} : { parent: ticketIdOf(parent) };
 
-  return makeTicket(id, { frontMatter: { ...base.frontMatter, kind, status, ...parentField } });
+  const planned = kind === 'plan' || kind === 'slice';
+  const withCriteria = planned ? { criteria } : {};
+
+  return makeTicket(id, {
+    frontMatter: { ...base.frontMatter, kind, status, ...withCriteria, ...parentField },
+  });
 };
 
 const plan = ticketOf('demo-3467', 'plan', 'canceled');

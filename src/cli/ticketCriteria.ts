@@ -1,5 +1,4 @@
 import type { Result } from '../result.ts';
-import type { TicketFrontMatter } from '../ticket/ticket.ts';
 import { invalidArguments } from './cliArguments.ts';
 import type { CliEffects, CliFailure } from './cliEffects.ts';
 
@@ -33,22 +32,4 @@ export const readCriteriaFile = async (
   }
 
   return { ok: true, value: criteria };
-};
-
-const needsCriteria = (frontMatter: TicketFrontMatter): boolean => {
-  const isPlanOrSlice = frontMatter.kind === 'plan' || frontMatter.kind === 'slice';
-
-  return isPlanOrSlice && frontMatter.status === 'open';
-};
-
-export const requireCriteria = (frontMatter: TicketFrontMatter): Result<undefined, CliFailure> => {
-  const hasCriteria = (frontMatter.criteria ?? []).length > 0;
-
-  if (needsCriteria(frontMatter) && !hasCriteria) {
-    return invalidArguments(
-      `An open ${frontMatter.kind} needs at least one criterion. Pass --criteria-file or --status draft.`,
-    );
-  }
-
-  return { ok: true, value: undefined };
 };

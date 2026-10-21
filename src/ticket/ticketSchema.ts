@@ -45,6 +45,19 @@ export const ticketFrontMatterSchema = z
     { message: 'Criteria are only valid for a plan or a slice.', path: ['criteria'] },
   )
   .refine(
+    (frontMatter) => {
+      const isPlanOrSlice = frontMatter.kind === 'plan' || frontMatter.kind === 'slice';
+      const needsCriteria = isPlanOrSlice && frontMatter.status === 'open';
+
+      return !needsCriteria || (frontMatter.criteria ?? []).length > 0;
+    },
+    {
+      message:
+        'An open plan or slice needs at least one criterion. Pass --criteria-file or --status draft.',
+      path: ['criteria'],
+    },
+  )
+  .refine(
     (frontMatter) =>
       frontMatter.covers === undefined ||
       frontMatter.kind === 'slice' ||

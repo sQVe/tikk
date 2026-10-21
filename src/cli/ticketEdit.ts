@@ -10,7 +10,7 @@ import {
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { fileErrorFailure, withStoreLock } from './taskLock.ts';
-import { readCriteriaFile, requireCriteria } from './ticketCriteria.ts';
+import { readCriteriaFile } from './ticketCriteria.ts';
 import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
@@ -124,12 +124,6 @@ const buildFrontMatter = (
 
   if (!frontMatter.success) {
     return invalidArguments(frontMatter.error.issues.map((issue) => issue.message).join('\n'));
-  }
-
-  const required = requireCriteria(frontMatter.data);
-
-  if (!required.ok) {
-    return required;
   }
 
   return { ok: true, value: frontMatter.data };
