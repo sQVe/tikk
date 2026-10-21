@@ -111,17 +111,19 @@ const connectExistingStore = async (
   if (current.ok) {
     const currentUrl = current.value.trim();
 
-    return currentUrl === url
-      ? { ok: true, value: result }
-      : failed(`The store at ${root} already syncs with ${currentUrl}, not ${url}.`);
+    if (currentUrl !== url) {
+      return failed(`The store at ${root} already syncs with ${currentUrl}, not ${url}.`);
+    }
+  } else {
+    const origin = await addOrigin(functions, root, url);
+
+    if (!origin.ok) {
+      return origin;
+    }
   }
 
-  const origin = await addOrigin(functions, root, url);
-
-  if (!origin.ok) {
-    return origin;
-  }
-
+  // A matching origin may come from an earlier run that was offline and never joined the histories,
+  // so the first sync runs again.
   const synced = await syncStore(functions, root, { allowUnrelatedHistories: true });
 
   return synced.ok ? { ok: true, value: result } : synced;

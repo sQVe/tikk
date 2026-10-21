@@ -1,9 +1,10 @@
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { Result } from '../result.ts';
 import { commitArguments } from '../store/store.ts';
 import { parseProjectName, parseTicketFileName, parseTicketId } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
+import { isSettledTicket } from './syncCommit.ts';
 import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 
 export interface SyncClashFunctions extends SyncCommitFunctions {
@@ -37,9 +38,23 @@ interface DatedFile {
   addedAt: number | undefined;
 }
 
+interface MovedPath {
+  from: string;
+  to: string;
+  settled: boolean;
+}
+
 interface ProjectRenames {
   aliases: SyncAlias[];
-  factPaths: string[];
+  // Paths to commit with the alias facts: the alias fact files and settled renamed tickets.
+  commitPaths: string[];
+  // Renamed tickets that no commit added yet.
+  untracked: MovedPath[];
+}
+
+export interface ClashResolution {
+  aliases: SyncAlias[];
+  untracked: MovedPath[];
 }
 
 const maxIdAttempts = 100;
@@ -137,7 +152,7 @@ const newerClashingFiles = async (
   root: string,
   project: ProjectName,
   files: ProjectFile[],
-): Promise<ProjectFile[]> => {
+): Promise<DatedFile[]> => {
   const groups = new Map<string, ProjectFile[]>();
 
   for (const file of files) {
@@ -150,12 +165,7 @@ const newerClashingFiles = async (
     clashes.map((group) => datedGroup(functions, root, project, group)),
   );
 
-  return dated.flatMap((group) =>
-    group
-      .toSorted(byAge)
-      .slice(1)
-      .map((entry) => entry.file),
-  );
+  return dated.flatMap((group) => group.toSorted(byAge).slice(1));
 };
 
 const freeId = (
@@ -230,6 +240,25 @@ const commitAliases = async (
   return committed.ok ? { ok: true, value: undefined } : failed(committed.reason.message);
 };
 
+// A renamed ticket that no commit added is committed with its alias only when it is settled.
+// Otherwise it stays pending under its new path, for a later sync.
+const placeUntracked = async (
+  functions: SyncClashFunctions,
+  root: string,
+  file: ProjectFile,
+  alias: SyncAlias,
+  renames: ProjectRenames,
+): Promise<void> => {
+  const settled = await isSettledTicket(functions, root, alias.path);
+  const from = join(dirname(alias.path), file.fileName);
+
+  if (settled) {
+    renames.commitPaths.push(alias.path);
+  }
+
+  renames.untracked.push({ from, to: alias.path, settled });
+};
+
 const renameClashes = async (
   functions: SyncClashFunctions,
   root: string,
@@ -238,9 +267,9 @@ const renameClashes = async (
   const files = await listProjectFiles(functions, root, project);
   const taken = new Set<string>(files.map((file) => file.id));
   const clashing = await newerClashingFiles(functions, root, project, files);
-  const renames: ProjectRenames = { aliases: [], factPaths: [] };
+  const renames: ProjectRenames = { aliases: [], commitPaths: [], untracked: [] };
 
-  for (const file of clashing) {
+  for (const { file, addedAt: addedTime } of clashing) {
     const to = freeId(functions, project, taken);
 
     if (to === undefined) {
@@ -258,7 +287,12 @@ const renameClashes = async (
     }
 
     renames.aliases.push(renamed.value.alias);
-    renames.factPaths.push(renamed.value.factPath);
+    renames.commitPaths.push(renamed.value.factPath);
+
+    if (addedTime === undefined) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Same reason as the rename.
+      await placeUntracked(functions, root, file, renamed.value.alias, renames);
+    }
   }
 
   return { ok: true, value: renames };
@@ -269,11 +303,11 @@ const renameClashes = async (
 export const resolveIdClashes = async (
   functions: SyncClashFunctions,
   root: string,
-): Promise<Result<SyncAlias[], SyncReason>> => {
+): Promise<Result<ClashResolution, SyncReason>> => {
   const names = await listNames(functions, join(root, 'tickets'));
   const projects = names.map((name) => parseProjectName(name)).filter((parsed) => parsed.ok);
-  const aliases: SyncAlias[] = [];
-  const factPaths = new Set<string>();
+  const resolution: ClashResolution = { aliases: [], untracked: [] };
+  const commitPaths = new Set<string>();
 
   for (const project of projects) {
     // Projects run one at a time, so a failed rename stops the rest.
@@ -284,18 +318,19 @@ export const resolveIdClashes = async (
       return renames;
     }
 
-    aliases.push(...renames.value.aliases);
+    resolution.aliases.push(...renames.value.aliases);
+    resolution.untracked.push(...renames.value.untracked);
 
-    for (const factPath of renames.value.factPaths) {
-      factPaths.add(factPath);
+    for (const path of renames.value.commitPaths) {
+      commitPaths.add(path);
     }
   }
 
-  if (aliases.length === 0) {
-    return { ok: true, value: aliases };
+  if (resolution.aliases.length === 0) {
+    return { ok: true, value: resolution };
   }
 
-  const committed = await commitAliases(functions, root, [...factPaths]);
+  const committed = await commitAliases(functions, root, [...commitPaths]);
 
-  return committed.ok ? { ok: true, value: aliases } : committed;
+  return committed.ok ? { ok: true, value: resolution } : committed;
 };

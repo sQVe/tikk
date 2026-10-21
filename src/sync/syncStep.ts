@@ -127,7 +127,22 @@ const runLockedSteps = async (
     return clashes;
   }
 
-  return { ok: true, value: { ...commit.value, aliases: clashes.value, merged: true } };
+  const moved = new Map(clashes.value.untracked.map((entry) => [entry.from, entry]));
+
+  const pending = commit.value.pending.flatMap((path) => {
+    const entry = moved.get(path);
+
+    if (entry === undefined) {
+      return [path];
+    }
+
+    return entry.settled ? [] : [entry.to];
+  });
+
+  return {
+    ok: true,
+    value: { ...commit.value, pending, aliases: clashes.value.aliases, merged: true },
+  };
 };
 
 const lockAndRun = async (
@@ -162,18 +177,12 @@ export const fetchOrigin = async (functions: SyncFunctions, root: string): Promi
   }
 };
 
-// The caller holds the store lock. A conflict is aborted and left for the next sync to report.
-export const mergeFetched = async (
-  functions: SyncFunctions,
-  root: string,
-): Promise<Result<undefined, SyncReason>> => {
-  if (!(await hasOrigin(functions, root))) {
-    return { ok: true, value: undefined };
+// The caller holds the store lock. A conflict is aborted and left for the next sync to report, so
+// the result is dropped.
+export const mergeFetched = async (functions: SyncFunctions, root: string): Promise<void> => {
+  if (await hasOrigin(functions, root)) {
+    await runLockedSteps(functions, root, true, { allowUnrelatedHistories: false });
   }
-
-  const steps = await runLockedSteps(functions, root, true, { allowUnrelatedHistories: false });
-
-  return steps.ok ? { ok: true, value: undefined } : steps;
 };
 
 export const syncStore = async (

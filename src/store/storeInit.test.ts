@@ -305,3 +305,41 @@ it('commits with the configured Git identity when one is set', async () => {
   expect(commit).toBeDefined();
   expect(commit).not.toContain('user.email=tikk@localhost');
 });
+
+const failingOn =
+  (subcommand: string, calls: string[][]): StoreInitEffects['runGit'] =>
+  (args) => {
+    calls.push(args);
+
+    return args.includes(subcommand)
+      ? Promise.resolve({ ok: false, reason: { message: `${subcommand} failed` } })
+      : effects.runGit(args);
+  };
+
+it('fails init and goes no further when the first commit fails', async () => {
+  const root = join(base, 'store');
+  const calls: string[][] = [];
+
+  const result = await initStore(root, { ...effects, runGit: failingOn('commit', calls) });
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toBe('commit failed');
+  expect(calls.at(-1)).toContain('commit');
+  expect((await gitOutput(root, ['rev-list', '--all'])).trim()).toBe('');
+});
+
+it('fails init on an existing store when the branch rename fails, before any later step', async () => {
+  const root = join(base, 'store');
+
+  await mkdir(root);
+  await gitOutput(root, ['init', '--quiet', '--initial-branch=master']);
+  await writeFile(join(root, 'tikk.json'), '{"version": 1}\n');
+
+  const calls: string[][] = [];
+  const result = await initStore(root, { ...effects, runGit: failingOn('branch', calls) });
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toBe('branch failed');
+  expect(calls.at(-1)).toContain('branch');
+  expect(existsSync(join(root, '.gitattributes'))).toBe(false);
+});

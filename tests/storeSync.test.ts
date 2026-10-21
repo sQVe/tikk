@@ -418,3 +418,80 @@ it('the next sync commits changes a failed commit left staged', async () => {
   expect(report.committed).toBe(true);
   expect(await gitOutput(fixture.storePath, ['status', '--porcelain'])).toBe('');
 });
+
+it('a second init --remote after an offline one joins the histories and pushes', async () => {
+  const { first, second } = clonePair();
+  const lateRemote = join(first.home, 'late.git');
+
+  await first.runChecked(['init']);
+
+  const firstTask = await createSettledTask(first, 'First task');
+
+  await first.runChecked(['sync']);
+  await first.runChecked(['init', '--remote', lateRemote]);
+  await gitOutput(first.home, ['init', '--bare', '--initial-branch=main', lateRemote]);
+  await second.runChecked(['init', '--remote', lateRemote]);
+
+  const secondTask = await createSettledTask(second, 'Second task');
+
+  await second.runChecked(['sync']);
+  await first.runChecked(['init', '--remote', lateRemote]);
+
+  const tree = await remoteTree(lateRemote);
+
+  expect(tree).toContain(relative(first.storePath, firstTask.path));
+  expect(tree).toContain(relative(second.storePath, secondTask.path));
+
+  const merged = await gitOutput(first.storePath, ['merge-base', 'HEAD', 'origin/main']);
+
+  expect(merged.trim()).not.toBe('');
+});
+
+it('a staged ticket that is fresh or does not parse stays out of the commit and is pending', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const settled = await createSettledTask(fixture, 'Settled task');
+  const fresh = await fixture.runJson<ShownTask>(['new', 'task', 'Fresh task']);
+  const brokenCopy = join(dirname(settled.path), 'broken.md');
+
+  await writeFile(brokenCopy, 'no front matter here\n');
+  await ageFile(brokenCopy);
+
+  const freshPath = relative(fixture.storePath, fresh.path);
+  const brokenRelative = relative(fixture.storePath, brokenCopy);
+
+  await gitOutput(fixture.storePath, ['add', '--', freshPath, brokenRelative]);
+
+  const report = await fixture.runJson<SyncReport>(['sync']);
+  const tracked = await gitOutput(fixture.storePath, ['ls-tree', '-r', '--name-only', 'HEAD']);
+
+  expect(report.committed).toBe(true);
+  expect(report.pending.toSorted()).toEqual([brokenRelative, freshPath].toSorted());
+  expect(tracked).toContain(relative(fixture.storePath, settled.path));
+  expect(tracked).not.toContain(freshPath);
+  expect(tracked).not.toContain(brokenRelative);
+});
+
+const syncClashWithNewTicket = async (aged: boolean) => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+  await writeHandTicket(first, 'demo-aaaa-old.md');
+  await first.runChecked(['sync']);
+  await writeHandTicket(second, 'demo-aaaa-new.md', aged);
+
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+
+  return { report, remotePath, alias: report.aliases[0] };
+};
+
+it('an unsettled ticket renamed by a clash is pending under its new path', async () => {
+  const { report, remotePath, alias } = await syncClashWithNewTicket(false);
+
+  expect(alias?.path).toBeDefined();
+  expect(report.pending).toEqual([alias?.path ?? '']);
+  expect(await remoteTree(remotePath)).not.toContain('-new.md');
+});

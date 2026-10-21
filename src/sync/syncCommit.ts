@@ -78,7 +78,7 @@ const listStagedPaths = async (
 
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
 // not changed for two seconds.
-const isSettledTicket = async (
+export const isSettledTicket = async (
   functions: SyncCommitFunctions,
   root: string,
   path: string,
@@ -118,6 +118,40 @@ export const settlingPaths = async (
 };
 
 const isTicketPath = (path: string): boolean => path.startsWith('tickets/');
+
+// A staged deletion has no file left to check, and is committed.
+const isStagedSettled = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<boolean> => {
+  if (!isTicketPath(path)) {
+    return true;
+  }
+
+  const exists = await functions.stat(join(root, path)).then(
+    () => true,
+    () => false,
+  );
+
+  return exists ? isSettledTicket(functions, root, path) : true;
+};
+
+const unstage = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  paths: string[],
+): Promise<Result<undefined, SyncReason>> => {
+  if (paths.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  const reset = await functions.runGit(['-C', root, 'reset', '--quiet', '--', ...paths]);
+
+  return reset.ok
+    ? { ok: true, value: undefined }
+    : { ok: false, reason: { kind: 'failed', message: reset.reason.message } };
+};
 
 const commitStaged = async (
   functions: SyncCommitFunctions,
@@ -184,13 +218,30 @@ export const commitStore = async (
     ),
   );
 
+  const indexedSettled = await Promise.all(
+    indexed.value.map((path) => isStagedSettled(functions, root, path)),
+  );
+
+  const unsettledIndexed = indexed.value.filter((_path, index) => indexedSettled[index] === false);
+  const unstaged = await unstage(functions, root, unsettledIndexed);
+
+  if (!unstaged.ok) {
+    return unstaged;
+  }
+
+  const unsettledStaged = new Set(unsettledIndexed);
   const pending = candidates.filter((_path, index) => settled[index] === false);
-  const pendingPaths = new Set(pending);
+
+  for (const path of unsettledIndexed) {
+    if (!pending.includes(path)) {
+      pending.push(path);
+    }
+  }
 
   const staged = new Set([
     ...deletedPaths,
     ...candidates.filter((_path, index) => settled[index] === true),
-    ...indexed.value.filter((path) => !pendingPaths.has(path)),
+    ...indexed.value.filter((path) => !unsettledStaged.has(path)),
   ]);
 
   if (staged.size === 0) {
