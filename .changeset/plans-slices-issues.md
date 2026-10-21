@@ -6,7 +6,8 @@ Add plans, slices, and issues. `tikk new` creates every kind with criteria, rank
 refuses a parent the tree does not allow or a link to a ticket that does not exist. `tikk close`
 closes an issue, and `tikk cancel` cancels a plan, slice, task, or issue.
 `tikk edit --kind slice|plan` turns an issue into a slice or plan in place, with `--parent` for a
-slice. Every status change tikk writes appends a `status` fact.
+slice and `--criteria-file` for its criteria. An open plan or slice needs criteria. Every status
+change tikk writes appends a `status` fact.
 
 tikk now archives a plan or stand-alone ticket 14 days after it finishes. It sets `archived: <date>`
 on the ticket and on the plan's slices and tasks, and files never move. `ls` and `ready` leave

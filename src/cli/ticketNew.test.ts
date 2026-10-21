@@ -317,8 +317,21 @@ const criteriaRefusals: [string, string[]][] = [
   ['an open plan without criteria', ['plan', 'Plan']],
   ['an open slice without criteria', ['slice', 'Slice']],
   ['criteria on a task', ['task', 'Title', '--criteria-file', '/criteria.yaml']],
-  ['a criteria file that is not a list', ['plan', 'Plan', '--criteria-file', '/notList.yaml']],
-  ['a missing criteria file', ['plan', 'Plan', '--criteria-file', '/missing.yaml']],
+  [
+    'a criteria file that is not a list',
+    ['plan', 'Plan', '--status', 'draft', '--criteria-file', '/notList.yaml'],
+  ],
+  [
+    'a missing criteria file',
+    ['plan', 'Plan', '--status', 'draft', '--criteria-file', '/missing.yaml'],
+  ],
+  [
+    'a criteria file that is not YAML',
+    ['plan', 'Plan', '--status', 'draft', '--criteria-file', '/broken.yaml'],
+  ],
+  ['a blank rank', ['task', 'Title', '--rank', ' ']],
+  ['a blockedBy ID that is not valid', ['task', 'Title', '--blocked-by', 'Not An ID']],
+  ['a discoveredFrom ID that is not valid', ['task', 'Title', '--discovered-from', 'Not An ID']],
   ['covers on a plan', ['plan', 'Plan', '--criteria-file', '/criteria.yaml', '--covers', 'works']],
   ['a rank that is not a number', ['task', 'Title', '--rank', 'high']],
 ];
@@ -326,7 +339,11 @@ const criteriaRefusals: [string, string[]][] = [
 for (const [name, args] of criteriaRefusals) {
   it(`refuses ${name} and writes no file`, async () => {
     const { fakeSession, result } = create(args, {
-      files: { '/criteria.yaml': criteriaYaml, '/notList.yaml': 'id: works\n' },
+      files: {
+        '/criteria.yaml': criteriaYaml,
+        '/notList.yaml': 'id: works\n',
+        '/broken.yaml': '- [unclosed\n',
+      },
     });
 
     expect(failureOf(await result).code).toBe('invalidArguments');
@@ -376,4 +393,15 @@ it('writes rank, edges, and covers into the front matter', async () => {
     discoveredFrom: ['demo-3469'],
     covers: ['works'],
   });
+});
+
+it('returns a storeError and creates nothing when the refresh under the lock fails', async () => {
+  const { fakeSession, result } = create(
+    ['task', 'Title'],
+    {},
+    { refresh: () => failed('The cache failed.') },
+  );
+
+  expect(failureOf(await result).code).toBe('storeError');
+  expect(fakeSession.creates).toEqual([]);
 });

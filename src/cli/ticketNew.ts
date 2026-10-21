@@ -22,6 +22,7 @@ import type {
   CommandResult,
 } from './cliEffects.ts';
 import { withStoreLock } from './taskLock.ts';
+import { readCriteriaFile, requireCriteria } from './ticketCriteria.ts';
 import { checkSessionTree } from './ticketStatus.ts';
 import { showAfterRefresh, storeFailure } from './ticketView.ts';
 
@@ -127,57 +128,6 @@ const parseRank = (values: ParsedArguments['values']): Result<number | undefined
   }
 
   return { ok: true, value: rank };
-};
-
-const readCriteria = async (
-  effects: CliEffects,
-  values: ParsedArguments['values'],
-): Promise<Result<unknown, CliFailure>> => {
-  const path = stringValue(values, 'criteria-file');
-
-  if (path === undefined) {
-    return { ok: true, value: undefined };
-  }
-
-  const text = await effects.readTextFile(path);
-
-  if (text === undefined) {
-    return invalidArguments(`Cannot read the criteria file ${path}.`);
-  }
-
-  let criteria: unknown;
-
-  try {
-    criteria = Bun.YAML.parse(text);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-
-    return invalidArguments(`The criteria file ${path} is not valid YAML: ${detail}`);
-  }
-
-  if (!Array.isArray(criteria)) {
-    return invalidArguments(`The criteria file ${path} must hold a YAML list.`);
-  }
-
-  return { ok: true, value: criteria };
-};
-
-const needsCriteria = (frontMatter: TicketFrontMatter): boolean => {
-  const isPlanOrSlice = frontMatter.kind === 'plan' || frontMatter.kind === 'slice';
-
-  return isPlanOrSlice && frontMatter.status === 'open';
-};
-
-const requireCriteria = (frontMatter: TicketFrontMatter): Result<undefined, CliFailure> => {
-  const hasCriteria = (frontMatter.criteria ?? []).length > 0;
-
-  if (needsCriteria(frontMatter) && !hasCriteria) {
-    return invalidArguments(
-      `An open ${frontMatter.kind} needs at least one criterion. Pass --criteria-file or --status draft.`,
-    );
-  }
-
-  return { ok: true, value: undefined };
 };
 
 const buildFrontMatter = (input: FrontMatterInput): Result<TicketFrontMatter, CliFailure> => {
@@ -287,7 +237,7 @@ export const ticketNew = async (input: CommandInput): Promise<CommandResult> => 
     return project;
   }
 
-  const criteria = await readCriteria(effects, values);
+  const criteria = await readCriteriaFile(effects, stringValue(values, 'criteria-file'));
 
   if (!criteria.ok) {
     return criteria;

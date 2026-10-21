@@ -10,6 +10,7 @@ import {
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { fileErrorFailure, withStoreLock } from './taskLock.ts';
+import { readCriteriaFile, requireCriteria } from './ticketCriteria.ts';
 import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
@@ -20,10 +21,11 @@ interface FieldEdit {
   kind: string | undefined;
   parent: string | undefined;
   bodyPath: string | undefined;
+  criteriaPath: string | undefined;
 }
 
 const usage =
-  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--body-file <f>] --json, or tikk edit <id>';
+  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] --json, or tikk edit <id>';
 
 const missingTicket = (rawId: string): CommandResult => ({
   ok: false,
@@ -59,7 +61,7 @@ const kindChange = (
   const { kind: current } = ticket.frontMatter;
   const { kind, parent } = edit;
 
-  if (kind === undefined && parent !== undefined) {
+  if (parent !== undefined && kind !== 'slice') {
     return invalidArguments('--parent is only allowed with --kind slice.');
   }
 
@@ -75,10 +77,6 @@ const kindChange = (
     return invalidArguments(
       `Ticket ${ticket.id} is a ${current}, and only an issue can change its kind.`,
     );
-  }
-
-  if (parent !== undefined && kind !== 'slice') {
-    return invalidArguments('--parent is only allowed with --kind slice.');
   }
 
   return { ok: true, value: kind };
@@ -101,6 +99,7 @@ const parentChange = (edit: FieldEdit): Result<TicketFrontMatter['parent'], CliF
 const buildFrontMatter = (
   ticket: CliTicket,
   edit: FieldEdit,
+  criteria: unknown,
 ): Result<TicketFrontMatter, CliFailure> => {
   const kind = kindChange(ticket, edit);
 
@@ -120,10 +119,17 @@ const buildFrontMatter = (
     parent: parent.value ?? ticket.frontMatter.parent,
     title: edit.title ?? ticket.frontMatter.title,
     status: edit.status ?? ticket.frontMatter.status,
+    criteria: criteria ?? ticket.frontMatter.criteria,
   });
 
   if (!frontMatter.success) {
     return invalidArguments(frontMatter.error.issues.map((issue) => issue.message).join('\n'));
+  }
+
+  const required = requireCriteria(frontMatter.data);
+
+  if (!required.ok) {
+    return required;
   }
 
   return { ok: true, value: frontMatter.data };
@@ -138,7 +144,13 @@ const applyEdit = async (
     return fileErrorFailure(ticket);
   }
 
-  const frontMatter = buildFrontMatter(ticket, edit);
+  const criteria = await readCriteriaFile(input.effects, edit.criteriaPath);
+
+  if (!criteria.ok) {
+    return criteria;
+  }
+
+  const frontMatter = buildFrontMatter(ticket, edit, criteria.value);
 
   if (!frontMatter.ok) {
     return frontMatter;
@@ -185,12 +197,14 @@ const readFieldEdit = (
   const kind = stringValue(values, 'kind');
   const parent = stringValue(values, 'parent');
   const bodyPath = stringValue(values, 'body-file');
+  const criteriaPath = stringValue(values, 'criteria-file');
   const hash = stringValue(values, 'hash');
-  const hasField = [title, status, kind, parent, bodyPath].some((field) => field !== undefined);
+  const fields = [title, status, kind, parent, bodyPath, criteriaPath];
+  const hasField = fields.some((field) => field !== undefined);
 
   if (!hasField && json) {
     return invalidArguments(
-      `Give at least one of --title, --status, --kind, --parent, or --body-file. ${usage}`,
+      `Give at least one of --title, --status, --kind, --parent, --criteria-file, or --body-file. ${usage}`,
     );
   }
 
@@ -202,7 +216,7 @@ const readFieldEdit = (
     return invalidArguments(`Give --hash. ${usage}`);
   }
 
-  return { ok: true, value: { hash, title, status, kind, parent, bodyPath } };
+  return { ok: true, value: { hash, title, status, kind, parent, bodyPath, criteriaPath } };
 };
 
 export const ticketEdit = async (input: CommandInput): Promise<CommandResult> => {
@@ -212,6 +226,7 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     status: { type: 'string' },
     kind: { type: 'string' },
     parent: { type: 'string' },
+    'criteria-file': { type: 'string' },
     'body-file': { type: 'string' },
   });
 
