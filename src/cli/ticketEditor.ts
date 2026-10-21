@@ -26,5 +26,7 @@ export const ticketEditor = async (input: CommandInput, rawId: string): Promise<
     return storeFailure(edited.reason.message);
   }
 
+  await input.effects.scheduleSync();
+
   return showAfterRefresh(input.session, input.effects.now(), id.value);
 };

@@ -553,3 +553,30 @@ it('a clash that renames a tracked ticket with a pending edit reports the new pa
   expect(alias?.path).toContain('-b.md');
   expect(report.pending).toEqual([alias?.path ?? '']);
 });
+
+it('the next sync commits a ticket deletion that a failed commit left staged', async () => {
+  const { first, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+
+  const task = await createSettledTask(first, 'Doomed task');
+  const relativePath = relative(first.storePath, task.path);
+
+  await first.runChecked(['sync']);
+  await rm(task.path);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+  await writeFile(hook, '#!/bin/sh\nexit 1\n');
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  await rm(hook);
+  await first.runChecked(['sync']);
+
+  expect(await remoteTree(remotePath)).not.toContain(relativePath);
+});

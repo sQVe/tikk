@@ -110,3 +110,31 @@ it('does not look up the path of an invalid ID', async () => {
   expect(lookups).toHaveLength(0);
   expect(fakeEffects.editorPaths).toHaveLength(0);
 });
+
+it('schedules one background sync after the editor succeeds', async () => {
+  const { fakeEffects, result } = open(
+    'demo-3467',
+    {},
+    {
+      overrides: { runEditor: () => Promise.resolve({ ok: true, value: undefined }) },
+    },
+  );
+
+  await result;
+
+  expect(fakeEffects.scheduleCalls()).toBe(1);
+});
+
+it('schedules no background sync when the editor fails', async () => {
+  const { fakeEffects, result } = open(
+    'demo-3467',
+    {},
+    {
+      overrides: { runEditor: () => failed('Editor exited for /store.') },
+    },
+  );
+
+  await result;
+
+  expect(fakeEffects.scheduleCalls()).toBe(0);
+});

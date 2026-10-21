@@ -159,10 +159,13 @@ const commitStaged = async (
   root: string,
   paths: string[],
 ): Promise<Result<undefined, SyncReason>> => {
-  const added = await functions.runGit(['-C', root, 'add', '-A', '--', ...paths]);
+  // Paths already in the index are left out, since `git add` fails on a staged deletion.
+  if (paths.length > 0) {
+    const added = await functions.runGit(['-C', root, 'add', '-A', '--', ...paths]);
 
-  if (!added.ok) {
-    return { ok: false, reason: { kind: 'failed', message: added.reason.message } };
+    if (!added.ok) {
+      return { ok: false, reason: { kind: 'failed', message: added.reason.message } };
+    }
   }
 
   const commitOptions = await functions.commitArguments(root);
@@ -242,10 +245,11 @@ export const commitStore = async (
   const staged = new Set([
     ...deletedPaths,
     ...candidates.filter((_path, index) => settled[index] === true),
-    ...indexed.value.filter((path) => !unsettledStaged.has(path)),
   ]);
 
-  if (staged.size === 0) {
+  const hasIndexed = indexed.value.some((path) => !unsettledStaged.has(path));
+
+  if (staged.size === 0 && !hasIndexed) {
     return { ok: true, value: { committed: false, pending } };
   }
 
