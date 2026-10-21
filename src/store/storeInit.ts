@@ -121,6 +121,22 @@ const ensureFirstCommit = async (
   return committed.ok ? { ok: true, value: undefined } : committed;
 };
 
+// Sync pushes `main`, so an existing store on another branch is renamed.
+const ensureMainBranch = async (
+  root: string,
+  effects: StoreInitEffects,
+): Promise<Result<undefined, StoreReason>> => {
+  const current = await effects.runGit(['-C', root, 'symbolic-ref', '--short', 'HEAD']);
+
+  if (current.ok && current.value.trim() === 'main') {
+    return { ok: true, value: undefined };
+  }
+
+  const renamed = await effects.runGit(['-C', root, 'branch', '-m', 'main']);
+
+  return renamed.ok ? { ok: true, value: undefined } : renamed;
+};
+
 // The union driver merges fact lines from two machines, so `facts/` never conflicts.
 const ensureHistory = async (
   root: string,
@@ -142,6 +158,12 @@ export const initStore = async (
   const existing = await openStore(root, effects);
 
   if (existing.ok) {
+    const branch = await ensureMainBranch(root, effects);
+
+    if (!branch.ok) {
+      return branch;
+    }
+
     const history = await ensureHistory(root, effects);
 
     return history.ok ? { ok: true, value: { store: existing.value, created: false } } : history;

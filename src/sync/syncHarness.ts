@@ -22,6 +22,8 @@ export interface FakeSyncOptions {
   git?: (args: string[]) => GitReply | undefined;
   files?: Record<string, { text: string; mtimeMs: number }>;
   folder?: string[] | 'missing';
+  // Entries per directory path; a directory not listed here uses `folder`.
+  folders?: Record<string, string[]>;
   lockFails?: boolean;
   now?: number;
 }
@@ -89,11 +91,18 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       return file === undefined ? missingFile() : Promise.resolve(file.text);
     },
     now: () => options.now ?? defaultNow,
-    readdir: () => {
+    readdir: (directory) => {
+      const listed = options.folders?.[directory];
+
+      if (listed !== undefined) {
+        return Promise.resolve(listed);
+      }
+
       const folder = options.folder ?? 'missing';
 
       return folder === 'missing' ? missingFile() : Promise.resolve(folder);
     },
+    rename: () => Promise.resolve(),
     randomIdSuffix: () => 'zzzz',
     appendAlias: () => Promise.resolve({ ok: true, value: { path: 'facts/fake/2026-10.jsonl' } }),
     initStore: () => {

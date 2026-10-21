@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
@@ -274,14 +274,21 @@ it('a burst of writes on a store with a remote reaches the remote with no explic
   expect(count).toBeGreaterThan(baseline);
 }, 30_000);
 
-const writeHandTicket = async (fixture: CliFixture, fileName: string): Promise<void> => {
+const writeHandTicket = async (
+  fixture: CliFixture,
+  fileName: string,
+  aged = true,
+): Promise<void> => {
   const directory = join(fixture.storePath, 'tickets', 'demo');
   const path = join(directory, fileName);
   const text = '---\nkind: task\ntitle: By hand\nproject: demo\nblockedBy: []\nstatus: open\n---\n';
 
   await mkdir(directory, { recursive: true });
   await writeFile(path, text);
-  await ageFile(path);
+
+  if (aged) {
+    await ageFile(path);
+  }
 };
 
 it('an ID clash found at merge gives the newer ticket a new ID and writes an alias fact', async () => {
@@ -315,4 +322,99 @@ it('an ID clash found at merge gives the newer ticket a new ID and writes an ali
   expect(facts).toContain('"from":"demo-aaaa"');
   expect(facts).toContain(`"ticket":"${alias?.to}"`);
   expect(await gitOutput(second.storePath, ['status', '--porcelain'])).toBe('');
+});
+
+const remoteTree = (remotePath: string): Promise<string> =>
+  gitOutput(remotePath, ['ls-tree', '-r', '--name-only', 'main']);
+
+const waitForRemoteFile = async (remotePath: string, relativePath: string): Promise<boolean> => {
+  const deadline = Date.now() + 15_000;
+
+  while (Date.now() < deadline) {
+    const tree = await remoteTree(remotePath).catch(() => '');
+
+    if (tree.includes(relativePath)) {
+      return true;
+    }
+
+    await Bun.sleep(200);
+  }
+
+  return false;
+};
+
+it('a ticket written just before the background sync reaches the remote with no further write', async () => {
+  const { first, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await first.runJson<ShownTask>(['new', 'task', 'Early task']);
+  await Bun.sleep(2200);
+
+  const late = await first.runJson<ShownTask>(['new', 'task', 'Late task']);
+  const lateRelative = relative(first.storePath, late.path);
+
+  expect(await waitForRemoteFile(remotePath, lateRelative)).toBe(true);
+}, 40_000);
+
+it('init renames a master branch to main, and a following sync pushes to the remote main', async () => {
+  const { first, remotePath } = clonePair();
+
+  await first.runChecked(['init']);
+  await gitOutput(first.storePath, ['branch', '-m', 'master']);
+  await gitOutput(first.storePath, ['remote', 'add', 'origin', remotePath]);
+  await first.runChecked(['init']);
+
+  const branch = await gitOutput(first.storePath, ['branch', '--show-current']);
+  const report = await first.runJson<SyncReport>(['sync']);
+
+  expect(branch.trim()).toBe('main');
+  expect(report.pushed).toBe(true);
+  expect(await remoteTree(remotePath)).toContain('tikk.json');
+});
+
+it('an uncommitted ticket that clashes with a committed one gets the new ID', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  await writeHandTicket(first, 'demo-aaaa-old.md');
+  await first.runChecked(['sync']);
+  await writeHandTicket(second, 'demo-aaaa-new.md', false);
+
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+  const directory = join(second.storePath, 'tickets', 'demo');
+
+  expect(report.aliases).toHaveLength(1);
+  expect(alias?.from).toBe('demo-aaaa');
+  expect(alias?.path).toContain(`${alias?.to}-new.md`);
+  expect(existsSync(join(directory, 'demo-aaaa-old.md'))).toBe(true);
+  expect(existsSync(join(directory, 'demo-aaaa-new.md'))).toBe(false);
+  expect(existsSync(join(directory, `${alias?.to}-new.md`))).toBe(true);
+});
+
+it('the next sync commits changes a failed commit left staged', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+  await createSettledTask(fixture, 'Staged task');
+
+  const hook = join(fixture.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+  await writeFile(hook, '#!/bin/sh\nexit 1\n');
+  await chmod(hook, 0o755);
+
+  const failed = await fixture.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+  expect(await gitOutput(fixture.storePath, ['diff', '--cached', '--name-only'])).not.toBe('');
+
+  await rm(hook);
+
+  const report = await fixture.runJson<SyncReport>(['sync']);
+
+  expect(report.committed).toBe(true);
+  expect(await gitOutput(fixture.storePath, ['status', '--porcelain'])).toBe('');
 });

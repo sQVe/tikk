@@ -49,6 +49,7 @@ import {
   initRemoteStore,
   mergeFetched,
   runBackgroundSync,
+  settlingPaths,
   scheduleSync,
   syncStore,
 } from './sync/sync.ts';
@@ -296,6 +297,7 @@ const syncFunctions: SyncFunctions = {
   readFile: (path) => readFile(path, 'utf8'),
   now: () => Date.now(),
   readdir: (directory) => readdir(directory),
+  rename: (from, to) => rename(from, to),
   randomIdSuffix: () => newIdSuffix(),
   appendAlias: async (alias) => {
     const machine = await resolveMachine(projectEffects);
@@ -379,7 +381,17 @@ const runBackground: CliEffects['runBackgroundSync'] = async () => {
   const store = await openStore(storeRoot, storeFiles);
 
   if (store.ok) {
-    await runBackgroundSync(scheduleFunctions, store.value.root, () => runSync());
+    await runBackgroundSync(scheduleFunctions, store.value.root, async () => {
+      const synced = await runSync();
+
+      if (!synced.ok) {
+        return false;
+      }
+
+      const settling = await settlingPaths(syncFunctions, store.value.root, synced.value.pending);
+
+      return settling.length > 0;
+    });
   }
 };
 

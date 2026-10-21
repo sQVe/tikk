@@ -148,7 +148,7 @@ it('waits, frees the marker, and syncs while it holds the running file', async (
   await runBackgroundSync(fake.functions, root, () => {
     seen.push(`marker ${fake.files.has(marker)} running ${fake.files.get(running)}`);
 
-    return Promise.resolve();
+    return Promise.resolve(false);
   });
 
   expect(fake.sleeps[0]).toBeGreaterThanOrEqual(3000);
@@ -156,7 +156,7 @@ it('waits, frees the marker, and syncs while it holds the running file', async (
   expect(fake.files.has(running)).toBe(false);
 });
 
-const failingSync = (): Promise<void> => {
+const failingSync = (): Promise<boolean> => {
   throw new Error('boom');
 };
 
@@ -173,7 +173,72 @@ it('leaves a marker that another process owns', async () => {
 
   fake.files.set(marker, '777\n');
 
-  await runBackgroundSync(fake.functions, root, () => Promise.resolve());
+  await runBackgroundSync(fake.functions, root, () => Promise.resolve(false));
 
   expect(fake.files.get(marker)).toBe('777\n');
+});
+
+it('starts one more background sync when the sync left a settling file', async () => {
+  const fake = makeFake({ pid: 555 });
+
+  await runBackgroundSync(fake.functions, root, () => Promise.resolve(true));
+
+  expect(fake.started()).toBe(1);
+  expect(fake.files.get(marker)).toBe('555\n');
+});
+
+it('starts no further sync when nothing is settling', async () => {
+  const fake = makeFake({ pid: 555 });
+
+  await runBackgroundSync(fake.functions, root, () => Promise.resolve(false));
+
+  expect(fake.started()).toBe(0);
+});
+
+it('gives up on a running file held by a live process after 600 checks, and never syncs', async () => {
+  const fake = makeFake({ pid: 555, alive: [777] });
+  let syncs = 0;
+
+  fake.files.set(running, '777\n');
+
+  await runBackgroundSync(fake.functions, root, () => {
+    syncs += 1;
+
+    return Promise.resolve(false);
+  });
+
+  const pollSleeps = fake.sleeps.slice(1);
+
+  expect(syncs).toBe(0);
+  expect(pollSleeps).toHaveLength(599);
+  expect(fake.files.get(running)).toBe('777\n');
+});
+
+it('syncs when the running file is freed on the last check', async () => {
+  const fake = makeFake({ pid: 555, alive: [777] });
+  let syncs = 0;
+  let sleepCount = 0;
+
+  fake.files.set(running, '777\n');
+
+  const functions: SyncScheduleFunctions = {
+    ...fake.functions,
+    sleep: async (milliseconds) => {
+      sleepCount += 1;
+      await fake.functions.sleep(milliseconds);
+
+      // The first sleep is the debounce, and the 599th poll sleep is the last one before the final check.
+      if (sleepCount === 600) {
+        fake.files.delete(running);
+      }
+    },
+  };
+
+  await runBackgroundSync(functions, root, () => {
+    syncs += 1;
+
+    return Promise.resolve(false);
+  });
+
+  expect(syncs).toBe(1);
 });

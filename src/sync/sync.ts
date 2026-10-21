@@ -1,3 +1,4 @@
+export { settlingPaths } from './syncCommit.ts';
 export type { SyncReason } from './syncCommit.ts';
 
 export { fetchOrigin, mergeFetched, syncStore } from './syncStep.ts';

@@ -53,6 +53,29 @@ const listPaths = async (
   return { ok: true, value: splitPaths(listed.value) };
 };
 
+// A failed commit leaves its changes in the index, where `ls-files --modified` does not list them.
+const listStagedPaths = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<string[], SyncReason>> => {
+  const listed = await functions.runGit([
+    '-C',
+    root,
+    'diff',
+    '--cached',
+    '--name-only',
+    '-z',
+    '--',
+    ...storePathspecs,
+  ]);
+
+  if (!listed.ok) {
+    return { ok: false, reason: { kind: 'failed', message: listed.reason.message } };
+  }
+
+  return { ok: true, value: splitPaths(listed.value) };
+};
+
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
 // not changed for two seconds.
 const isSettledTicket = async (
@@ -73,6 +96,25 @@ const isSettledTicket = async (
   } catch {
     return false;
   }
+};
+
+// A fresh file that parses will settle by itself, so a later sync can commit it.
+export const settlingPaths = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  pending: string[],
+): Promise<string[]> => {
+  const parsed = await Promise.all(
+    pending.map(async (path) => {
+      try {
+        return parseTicketFile(await functions.readFile(join(root, path))).ok;
+      } catch {
+        return false;
+      }
+    }),
+  );
+
+  return pending.filter((_path, index) => parsed[index] === true);
 };
 
 const isTicketPath = (path: string): boolean => path.startsWith('tickets/');
@@ -127,6 +169,12 @@ export const commitStore = async (
     return changed;
   }
 
+  const indexed = await listStagedPaths(functions, root);
+
+  if (!indexed.ok) {
+    return indexed;
+  }
+
   const deletedPaths = new Set(deleted.value);
   const candidates = changed.value.filter((path) => !deletedPaths.has(path));
 
@@ -136,14 +184,20 @@ export const commitStore = async (
     ),
   );
 
-  const staged = [...deletedPaths, ...candidates.filter((_path, index) => settled[index] === true)];
   const pending = candidates.filter((_path, index) => settled[index] === false);
+  const pendingPaths = new Set(pending);
 
-  if (staged.length === 0) {
+  const staged = new Set([
+    ...deletedPaths,
+    ...candidates.filter((_path, index) => settled[index] === true),
+    ...indexed.value.filter((path) => !pendingPaths.has(path)),
+  ]);
+
+  if (staged.size === 0) {
     return { ok: true, value: { committed: false, pending } };
   }
 
-  const committed = await commitStaged(functions, root, staged);
+  const committed = await commitStaged(functions, root, [...staged]);
 
   return committed.ok ? { ok: true, value: { committed: true, pending } } : committed;
 };

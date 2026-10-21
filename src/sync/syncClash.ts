@@ -8,6 +8,7 @@ import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 
 export interface SyncClashFunctions extends SyncCommitFunctions {
   readdir: (directory: string) => Promise<string[]>;
+  rename: (from: string, to: string) => Promise<void>;
   randomIdSuffix: () => string;
   appendAlias: (alias: AliasRecord) => Promise<Result<{ path: string }, { message: string }>>;
 }
@@ -32,7 +33,8 @@ interface ProjectFile {
 
 interface DatedFile {
   file: ProjectFile;
-  addedAt: number;
+  // `undefined` when no commit added the file yet, which makes it the newest.
+  addedAt: number | undefined;
 }
 
 interface ProjectRenames {
@@ -78,7 +80,7 @@ const addedAt = async (
   functions: SyncClashFunctions,
   root: string,
   path: string,
-): Promise<number> => {
+): Promise<number | undefined> => {
   const log = await functions.runGit([
     '-C',
     root,
@@ -90,13 +92,26 @@ const addedAt = async (
   ]);
 
   const first = log.ok ? log.value.split('\n')[0] : undefined;
+
+  if (first === undefined || first === '') {
+    return undefined;
+  }
+
   const seconds = Number(first);
 
-  return Number.isFinite(seconds) ? seconds : 0;
+  return Number.isFinite(seconds) ? seconds : undefined;
 };
 
 const byAge = (left: DatedFile, right: DatedFile): number => {
   if (left.addedAt !== right.addedAt) {
+    if (left.addedAt === undefined) {
+      return 1;
+    }
+
+    if (right.addedAt === undefined) {
+      return -1;
+    }
+
     return left.addedAt - right.addedAt;
   }
 
@@ -177,8 +192,13 @@ const renameFile = async (
   const from = join('tickets', project, file.fileName);
   const moved = await functions.runGit(['-C', root, 'mv', '--', from, path]);
 
+  // `git mv` refuses a file that is not yet tracked, so that file moves on disk.
   if (!moved.ok) {
-    return failed(moved.reason.message);
+    try {
+      await functions.rename(join(root, from), join(root, path));
+    } catch {
+      return failed(moved.reason.message);
+    }
   }
 
   return { ok: true, value: { alias: { from: file.id, to, path }, factPath: appended.value.path } };

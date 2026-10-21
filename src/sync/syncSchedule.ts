@@ -165,11 +165,12 @@ const acquireRunning = async (
   return acquireRunning(functions, path, attemptsLeft - 1);
 };
 
-// Writes made while the child waits are part of its sync.
+// Writes made while the child waits are part of its sync. `sync` returns true when it left a file
+// that is still settling, and then one more background sync follows.
 export const runBackgroundSync = async (
   functions: SyncScheduleFunctions,
   root: string,
-  sync: () => Promise<unknown>,
+  sync: () => Promise<boolean>,
 ): Promise<void> => {
   await functions.sleep(debounceMilliseconds);
   await removeOwnFile(functions, markerPath(root));
@@ -180,9 +181,15 @@ export const runBackgroundSync = async (
     return;
   }
 
+  let settling = false;
+
   try {
-    await sync();
+    settling = await sync();
   } finally {
     await removeOwnFile(functions, path);
+  }
+
+  if (settling) {
+    await scheduleSync(functions, root);
   }
 };
