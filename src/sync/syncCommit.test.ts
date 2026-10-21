@@ -169,16 +169,18 @@ it('keeps committed alias lines whose ticket is gone from HEAD when a line is ap
   expect(fake.blobs).toEqual([aliasLine + newLine]);
 });
 
-it('stages a fact file unfiltered when it does not start with its HEAD bytes', async () => {
+it('holds back an unplaced alias that sits before the committed lines of a fact file', async () => {
   const factPath = 'facts/laptop/2026-10.jsonl';
   const aliasLine = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
+  const committedLine = '{"version":1,"kind":"log"}\n';
 
   const fake = makeSync({
-    git: (args) => (args.includes('show') ? gitOutput('other\n') : listing([], [factPath])(args)),
-    files: { [`/store/${factPath}`]: { text: aliasLine, mtimeMs: 0 } },
+    git: (args) =>
+      args.includes('show') ? gitOutput(committedLine) : listing([], [factPath])(args),
+    files: { [`/store/${factPath}`]: { text: aliasLine + committedLine, mtimeMs: 0 } },
   });
 
   await commitStore(fake.functions, root);
 
-  expect(fake.blobs).toEqual([aliasLine]);
+  expect(fake.blobs).toEqual([committedLine]);
 });

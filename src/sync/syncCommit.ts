@@ -154,9 +154,18 @@ export const stageRemoval = async (
 const isFactPath = (path: string): boolean => path.startsWith('facts/');
 
 // A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
-// waits for the clash commit. Other lines and the committed bytes stay as they are.
-const withoutUnplacedAliases = (text: string, headNames: string[]): string => {
+// waits for the clash commit. A line that `HEAD` already holds is never dropped, since facts are
+// append-only.
+const withoutUnplacedAliases = (
+  text: string,
+  headNames: string[],
+  committedLines: Set<string>,
+): string => {
   const kept = text.split('\n').filter((line) => {
+    if (committedLines.has(line)) {
+      return true;
+    }
+
     try {
       const fact: unknown = JSON.parse(line);
 
@@ -176,8 +185,8 @@ const withoutUnplacedAliases = (text: string, headNames: string[]): string => {
   return kept.join('\n');
 };
 
-// Fact files are append-only, so the `HEAD` bytes are a prefix of the file and are kept as they
-// are. Only the lines after them can wait.
+// An ordinary commit can land while an alias waits, so the committed lines need not be a prefix
+// of the file.
 const filterFactText = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -186,16 +195,11 @@ const filterFactText = async (
   headNames: string[],
 ): Promise<string> => {
   const head = await functions.runGit(['-C', root, 'show', `HEAD:${path}`]);
+  const headText = head.ok ? head.value : '';
 
-  if (!head.ok) {
-    return withoutUnplacedAliases(text, headNames);
-  }
+  const committedLines = new Set(headText.split('\n').filter((line) => line !== ''));
 
-  if (!text.startsWith(head.value)) {
-    return text;
-  }
-
-  return head.value + withoutUnplacedAliases(text.slice(head.value.length), headNames);
+  return withoutUnplacedAliases(text, headNames, committedLines);
 };
 
 const listHeadTicketNames = async (
