@@ -4,8 +4,8 @@ import type { Result } from '../result.ts';
 import { collectTicketTree, groupTicketChildren, serializeTicketFile } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { fileErrorFailure } from './taskLock.ts';
-import { resolveMachine, withLockedTicket } from './ticketStatus.ts';
+import { fileErrorFailure, refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { resolveMachine } from './ticketStatus.ts';
 import { showAfterRefresh } from './ticketView.ts';
 
 type ArchiveCommand = 'archive' | 'unarchive';
@@ -156,7 +156,9 @@ const changeArchive = (input: CommandInput, command: ArchiveCommand): Promise<Co
     return Promise.resolve(invalidArguments(`Usage: tikk ${command} <id> [--json]`));
   }
 
-  return withLockedTicket(input, rawId, (root) => changeLocked(input, root, command));
+  return withLockedTicket(input, rawId, refuseFileErrors, (root) =>
+    changeLocked(input, root, command),
+  );
 };
 
 export const ticketArchive = (input: CommandInput): Promise<CommandResult> =>

@@ -1,10 +1,9 @@
 import { deriveTaskState } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
-import { serializeTicketFile } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { conflict } from './taskLock.ts';
-import { withLockedTicket, writeTicketWithStatus } from './ticketStatus.ts';
+import { conflict, refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { writeTicketWithStatus } from './ticketStatus.ts';
 import { showAfterRefresh, showOutput, storeFailure, taskOutput } from './ticketView.ts';
 
 const writeCanceled = async (
@@ -12,13 +11,11 @@ const writeCanceled = async (
   ticket: CliTicket,
 ): Promise<Result<CliTicket, CliFailure>> => {
   const frontMatter = { ...ticket.frontMatter, status: 'canceled' as const };
-  const text = serializeTicketFile({ frontMatter, body: ticket.body });
 
   const written = await writeTicketWithStatus(input, {
     expectedHash: ticket.hash,
-    text,
-    status: 'canceled',
     ticket,
+    frontMatter,
   });
 
   if (!written.ok) {
@@ -89,7 +86,7 @@ export const ticketCancel = async (input: CommandInput): Promise<CommandResult> 
     return invalidArguments('Usage: tikk cancel <id> [--json]');
   }
 
-  return withLockedTicket(input, rawId, (ticket) =>
+  return withLockedTicket(input, rawId, refuseFileErrors, (ticket) =>
     ticket.frontMatter.kind === 'task' ? cancelTask(input, ticket) : cancelOther(input, ticket),
   );
 };

@@ -31,12 +31,9 @@ const edit = (
   const fakeSession = makeSession({ tickets: [target], ...sessionOptions });
   const fakeEffects = makeEffects({ session: fakeSession, ...effectsOptions });
 
-  const result = ticketEdit({
-    args,
-    json,
-    effects: fakeEffects.effects,
-    session: fakeSession.session,
-  });
+  const { effects } = fakeEffects;
+  const { session } = fakeSession;
+  const result = ticketEdit({ args, json, effects, session });
 
   return { fakeSession, fakeEffects, result };
 };
@@ -184,67 +181,6 @@ it('maps other write failures to storeError', async () => {
   }
 });
 
-it('opens the editor on the ticket path without --json and shows the edited file', async () => {
-  const fakeSession = makeSession({ tickets: [target] });
-
-  const fakeEffects = makeEffects({
-    session: fakeSession,
-    overrides: {
-      runEditor: () => {
-        fakeSession.changeOnDisk(makeTicket('demo-3467', { hash: 'hash-edited' }));
-
-        return Promise.resolve({ ok: true, value: undefined });
-      },
-    },
-  });
-
-  const output = successOf(
-    await ticketEdit({
-      args: ['demo-3467'],
-      json: false,
-      effects: fakeEffects.effects,
-      session: fakeSession.session,
-    }),
-  );
-
-  expect(output.json).toMatchObject({ id: 'demo-3467', hash: 'hash-edited' });
-  expect(fakeSession.writes).toEqual([]);
-});
-
-it('does not open the editor for an unknown ticket', async () => {
-  const { fakeEffects, result } = edit(['demo-3468'], false);
-  const reason = failureOf(await result);
-
-  expect(reason.code).toBe('notFound');
-  expect(reason.message).toContain('demo-3468');
-  expect(fakeEffects.editorPaths).toEqual([]);
-});
-
-it('does not open the editor for an invalid ID', async () => {
-  const { fakeEffects, result } = edit(['nonsense'], false);
-  const reason = failureOf(await result);
-
-  expect(reason.code).toBe('notFound');
-  expect(reason.message).toContain('nonsense');
-  expect(fakeEffects.editorPaths).toEqual([]);
-});
-
-it('returns a storeError when the editor fails', async () => {
-  const { result } = edit(
-    ['demo-3467'],
-    false,
-    {},
-    {
-      overrides: { runEditor: () => failed('Editor exited for /store.') },
-    },
-  );
-
-  const reason = failureOf(await result);
-
-  expect(reason.code).toBe('storeError');
-  expect(reason.message).toContain('/store');
-});
-
 it('names --hash when a field edit has no hash', async () => {
   const { result } = edit(['demo-3467', '--title', 'New'], false);
 
@@ -257,25 +193,6 @@ it('names the fields to give when json mode has none', async () => {
 
   expect(message).toContain('--title');
   expect(message).toContain('--body-file');
-});
-
-it('does not look up the path of an invalid ID', async () => {
-  const lookups: string[] = [];
-
-  const { fakeEffects, result } = edit(['nonsense'], false, {
-    overrides: {
-      findTicketPath: (id) => {
-        lookups.push(id);
-
-        return { ok: false, reason: { message: 'missing' } };
-      },
-    },
-  });
-
-  await result;
-
-  expect(lookups).toHaveLength(0);
-  expect(fakeEffects.editorPaths).toHaveLength(0);
 });
 
 it('writes a JSON edit under the store lock after a refresh', async () => {

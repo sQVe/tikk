@@ -1,4 +1,3 @@
-import { serializeTicketFile } from '../ticket/ticket.ts';
 import {
   forceOptions,
   invalidArguments,
@@ -6,8 +5,8 @@ import {
   readForce,
 } from './cliArguments.ts';
 import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { conflict } from './taskLock.ts';
-import { checkSessionTree, withLockedTicket, writeTicketWithStatus } from './ticketStatus.ts';
+import { conflict, refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
 import { showAfterRefresh, showOutput } from './ticketView.ts';
 
 const closeLocked = async (
@@ -38,14 +37,12 @@ const closeLocked = async (
   }
 
   const closed = { ...frontMatter, status: 'closed' as const };
-  const text = serializeTicketFile({ frontMatter: closed, body: ticket.body });
 
   const written = await writeTicketWithStatus(input, {
     expectedHash: ticket.hash,
-    text,
-    status: 'closed',
-    forced,
     ticket,
+    frontMatter: closed,
+    forced,
   });
 
   if (!written.ok) {
@@ -74,5 +71,7 @@ export const ticketClose = async (input: CommandInput): Promise<CommandResult> =
     return forced;
   }
 
-  return withLockedTicket(input, rawId, (ticket) => closeLocked(input, ticket, forced.value));
+  return withLockedTicket(input, rawId, refuseFileErrors, (ticket) =>
+    closeLocked(input, ticket, forced.value),
+  );
 };

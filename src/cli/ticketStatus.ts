@@ -1,28 +1,18 @@
 import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
-import { checkTicketTree } from '../ticket/ticket.ts';
+import { checkTicketTree, serializeTicketFile } from '../ticket/ticket.ts';
 import type { TicketFrontMatter, TicketLookup } from '../ticket/ticket.ts';
 import { invalidArguments } from './cliArguments.ts';
-import type {
-  CliFailure,
-  CliSession,
-  CliTicket,
-  CommandInput,
-  CommandResult,
-} from './cliEffects.ts';
-import { fileErrorFailure, withStoreLock } from './taskLock.ts';
-import { findTicket, storeFailure } from './ticketView.ts';
-
-type Status = CliTicket['frontMatter']['status'];
+import type { CliFailure, CliSession, CliTicket, CommandInput } from './cliEffects.ts';
 
 interface StatusWrite {
+  ticket: CliTicket;
   expectedHash: string;
-  text: string;
-  // The status fact to append after the write. Absent when the status does not change.
-  status: Status | undefined;
+  frontMatter: TicketFrontMatter;
+  // Replaces the body of the loaded ticket when present.
+  body?: string;
   // The reason given with --force, recorded on the status fact.
   forced?: string | undefined;
-  ticket: CliTicket;
 }
 
 export const resolveMachine = async (input: CommandInput): Promise<Result<string, CliFailure>> => {
@@ -63,14 +53,16 @@ export const writeTicketWithStatus = async (
   input: CommandInput,
   write: StatusWrite,
 ): Promise<Result<{ hash: string }, CliFailure>> => {
-  const { ticket, status } = write;
+  const { ticket, frontMatter } = write;
+  const status = frontMatter.status === ticket.frontMatter.status ? undefined : frontMatter.status;
   const machine = status === undefined ? undefined : await resolveMachine(input);
 
   if (machine !== undefined && !machine.ok) {
     return machine;
   }
 
-  const written = await input.session.writeTicketFile(ticket.path, write.expectedHash, write.text);
+  const text = serializeTicketFile({ frontMatter, body: write.body ?? ticket.body });
+  const written = await input.session.writeTicketFile(ticket.path, write.expectedHash, text);
 
   if (!written.ok) {
     const code = written.reason.kind === 'changedOnDisk' ? 'changedOnDisk' : 'storeError';
@@ -102,30 +94,3 @@ export const writeTicketWithStatus = async (
 
   return written;
 };
-
-// A ticket whose file has an error is refused: the cache keeps its last good front matter, which a
-// status change must not use.
-export const withLockedTicket = (
-  input: CommandInput,
-  rawId: string,
-  work: (ticket: CliTicket) => Promise<CommandResult>,
-): Promise<CommandResult> =>
-  withStoreLock(input, async () => {
-    const refreshed = await input.session.refresh();
-
-    if (!refreshed.ok) {
-      return storeFailure(refreshed.reason.message);
-    }
-
-    const found = findTicket(input.session, rawId);
-
-    if (!found.ok) {
-      return found;
-    }
-
-    if (found.value.error !== null) {
-      return fileErrorFailure(found.value);
-    }
-
-    return work(found.value);
-  });

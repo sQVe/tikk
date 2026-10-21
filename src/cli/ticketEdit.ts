@@ -1,5 +1,5 @@
 import type { Result } from '../result.ts';
-import { parseTicketId, serializeTicketFile, ticketFrontMatterSchema } from '../ticket/ticket.ts';
+import { parseTicketId, ticketFrontMatterSchema } from '../ticket/ticket.ts';
 import type { TicketFrontMatter } from '../ticket/ticket.ts';
 import {
   invalidArguments,
@@ -9,10 +9,11 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { fileErrorFailure, withStoreLock } from './taskLock.ts';
+import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
 import { readCriteriaFile } from './ticketCriteria.ts';
+import { ticketEditor } from './ticketEditor.ts';
 import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
-import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
+import { showAfterRefresh } from './ticketView.ts';
 
 interface FieldEdit {
   hash: string;
@@ -26,33 +27,6 @@ interface FieldEdit {
 
 const usage =
   'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] --json, or tikk edit <id>';
-
-const missingTicket = (rawId: string): CommandResult => ({
-  ok: false,
-  reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
-});
-
-const editInEditor = async (input: CommandInput, rawId: string): Promise<CommandResult> => {
-  const id = parseTicketId(rawId);
-
-  if (!id.ok) {
-    return missingTicket(rawId);
-  }
-
-  const path = input.session.findTicketPath(id.value);
-
-  if (!path.ok) {
-    return missingTicket(rawId);
-  }
-
-  const edited = await input.effects.runEditor(path.value);
-
-  if (!edited.ok) {
-    return storeFailure(edited.reason.message);
-  }
-
-  return showAfterRefresh(input.session, input.effects.now(), id.value);
-};
 
 const kindChange = (
   ticket: CliTicket,
@@ -134,10 +108,6 @@ const applyEdit = async (
   ticket: CliTicket,
   edit: FieldEdit,
 ): Promise<CommandResult> => {
-  if (ticket.error !== null) {
-    return fileErrorFailure(ticket);
-  }
-
   const criteria = await readCriteriaFile(input.effects, edit.criteriaPath);
 
   if (!criteria.ok) {
@@ -165,14 +135,11 @@ const applyEdit = async (
     return body;
   }
 
-  const text = serializeTicketFile({ frontMatter: frontMatter.value, body: body.value });
-  const changesStatus = frontMatter.value.status !== ticket.frontMatter.status;
-
   const written = await writeTicketWithStatus(input, {
-    expectedHash: edit.hash,
-    text,
-    status: changesStatus ? frontMatter.value.status : undefined,
     ticket,
+    expectedHash: edit.hash,
+    frontMatter: frontMatter.value,
+    body: body.value,
   });
 
   if (!written.ok) {
@@ -241,24 +208,12 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
   }
 
   if (edit.value === undefined) {
-    return editInEditor(input, rawId);
+    return ticketEditor(input, rawId);
   }
 
   const fieldEdit = edit.value;
 
-  return withStoreLock(input, async () => {
-    const refreshed = await input.session.refresh();
-
-    if (!refreshed.ok) {
-      return storeFailure(refreshed.reason.message);
-    }
-
-    const found = findTicket(input.session, rawId);
-
-    if (!found.ok) {
-      return found;
-    }
-
-    return applyEdit(input, found.value, fieldEdit);
-  });
+  return withLockedTicket(input, rawId, refuseFileErrors, (ticket) =>
+    applyEdit(input, ticket, fieldEdit),
+  );
 };
