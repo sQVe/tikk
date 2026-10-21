@@ -50,6 +50,7 @@ export interface CliSession extends Disposable {
   findTicketPath: (id: TicketId) => Result<string, CliMessage>;
   listTickets: (options: { includeArchived: boolean }) => CliTicket[];
   listErrors: () => { path: string; message: string }[];
+  listFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listStateFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   lockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
   appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FactAppendReason>>;

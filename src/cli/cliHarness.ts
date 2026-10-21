@@ -157,6 +157,11 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       );
     },
     listErrors: () => options.errors ?? [],
+    listFacts: (ticketIds) =>
+      Promise.resolve({
+        ok: true,
+        value: facts.filter((fact) => ticketIds === undefined || ticketIds.includes(fact.ticket)),
+      }),
     listStateFacts: (ticketIds) =>
       Promise.resolve({
         ok: true,

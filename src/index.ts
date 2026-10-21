@@ -152,12 +152,13 @@ const readConfigFile = async (path: string): Promise<ConfigRead> => {
 
 // A stored fact that does not decode means the cache is damaged. The fact tables are cleared and
 // indexed again from the files once. A second failure is reported, not retried.
-const listStateFactsRecovering = async (
+const listFactsRecovering = async (
   cache: TicketCache,
   files: CacheFiles,
+  read: (ticketIds?: TicketId[]) => ReturnType<TicketCache['listFacts']>,
   ticketIds?: TicketId[],
-): ReturnType<CliSession['listStateFacts']> => {
-  const first = cache.listStateFacts(ticketIds);
+): ReturnType<CliSession['listFacts']> => {
+  const first = read(ticketIds);
 
   if (first.ok) {
     return first;
@@ -169,7 +170,7 @@ const listStateFactsRecovering = async (
     return refreshed;
   }
 
-  const second = cache.listStateFacts(ticketIds);
+  const second = read(ticketIds);
 
   return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
 };
@@ -188,7 +189,10 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     findTicketPath: (id) => cache.findTicketPath(id),
     listTickets: (options) => cache.listTickets(options),
     listErrors: () => cache.listErrors(),
-    listStateFacts: (ticketIds) => listStateFactsRecovering(cache, files, ticketIds),
+    listFacts: (ticketIds) =>
+      listFactsRecovering(cache, files, (ids) => cache.listFacts(ids), ticketIds),
+    listStateFacts: (ticketIds) =>
+      listFactsRecovering(cache, files, (ids) => cache.listStateFacts(ids), ticketIds),
     lockStore: () => acquireStoreLock(storeLock, store),
     appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
     createTicketFile: (project, title, text) =>
