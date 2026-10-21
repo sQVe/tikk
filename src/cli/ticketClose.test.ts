@@ -119,6 +119,36 @@ it('refuses to close an issue blocked by a ticket that does not exist and change
   expect(fakeSession.appends).toEqual([]);
 });
 
+const blockedByBroken = (): ReturnType<typeof makeKindTicket>[] => {
+  const blocker = { ...makeKindTicket('demo-6789', 'issue'), error: 'Broken.' };
+
+  const blocked = {
+    ...issue,
+    frontMatter: { ...issue.frontMatter, blockedBy: [ticketIdOf('demo-6789')] },
+  };
+
+  return [blocked, blocker];
+};
+
+it('refuses to close an issue blocked by a ticket whose file has an error', async () => {
+  const { fakeSession, result } = await close(['demo-3467'], { tickets: blockedByBroken() });
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-6789');
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('closes past a blocker whose file has an error with --force --reason', async () => {
+  const { fakeSession, result } = await close(['demo-3467', '--force', '--reason', 'Known'], {
+    tickets: blockedByBroken(),
+  });
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
+});
+
 it('refuses an issue whose file has an error', async () => {
   const broken = { ...issue, error: 'Duplicate ID.' };
   const { fakeSession, result } = await close(['demo-3467'], { tickets: [broken] });

@@ -42,7 +42,11 @@ export const checkSessionTree = (
   const lookup: TicketLookup = (id) => {
     const found = session.getTicket(id);
 
-    return found.ok ? { kind: found.value.frontMatter.kind } : undefined;
+    if (!found.ok) {
+      return undefined;
+    }
+
+    return { kind: found.value.frontMatter.kind, hasFileError: found.value.error !== null };
   };
 
   const checked = checkTicketTree(frontMatter, lookup);

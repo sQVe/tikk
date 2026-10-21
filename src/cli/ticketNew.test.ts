@@ -245,6 +245,18 @@ const treeRefusals: [string, string[], SessionOptions, string][] = [
     {},
     'demo-3469',
   ],
+  [
+    'a task whose parent file has an error',
+    ['task', 'Title', '--parent', 'demo-3468'],
+    { tickets: [{ ...ticketOfKind('demo-3468', 'slice'), error: 'Broken.' }] },
+    'demo-3468',
+  ],
+  [
+    'a blocked-by target whose file has an error',
+    ['task', 'Title', '--blocked-by', 'demo-3468'],
+    { tickets: [{ ...ticketOfKind('demo-3468', 'task'), error: 'Broken.' }] },
+    'demo-3468',
+  ],
   ['a missing blocked-by target', ['task', 'Title', '--blocked-by', 'demo-3473'], {}, 'demo-3473'],
   [
     'a missing discovered-from target',
@@ -269,6 +281,8 @@ for (const [name, args, sessionOptions, mention] of treeRefusals) {
     expect(reason.code).toBe('invalidArguments');
     expect(reason.message).toContain(mention);
     expect(fakeSession.creates).toEqual([]);
+    expect(fakeSession.writes).toEqual([]);
+    expect(fakeSession.appends).toEqual([]);
   });
 }
 

@@ -8,7 +8,9 @@ interface TreeFailure {
 
 type TicketKind = TicketFrontMatter['kind'];
 
-export type TicketLookup = (id: TicketId) => { kind: TicketKind } | undefined;
+export type TicketLookup = (
+  id: TicketId,
+) => { kind: TicketKind; hasFileError: boolean } | undefined;
 
 interface TreeTicket {
   id: TicketId;
@@ -49,6 +51,10 @@ const checkParent = (
     return fail(`The parent ${parent} does not exist.`);
   }
 
+  if (found.hasFileError) {
+    return fail(`The parent ${parent} has a file error. Fix it first.`);
+  }
+
   if (found.kind !== allowedKind) {
     return fail(
       `The parent ${parent} is a ${found.kind}, but the parent of a ${kind} must be a ${allowedKind}.`,
@@ -64,8 +70,14 @@ const checkEdges = (
   lookup: TicketLookup,
 ): Result<undefined, TreeFailure> => {
   for (const target of targets) {
-    if (lookup(target) === undefined) {
+    const found = lookup(target);
+
+    if (found === undefined) {
       return fail(`The ${name} target ${target} does not exist.`);
+    }
+
+    if (found.hasFileError) {
+      return fail(`The ${name} target ${target} has a file error. Fix it first.`);
     }
   }
 

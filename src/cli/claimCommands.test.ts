@@ -64,6 +64,8 @@ const run = async (command: Command, args: string[], options: RunOptions = {}) =
 
 const expectNothingWritten = (fakeSession: FakeSession): void => {
   expect(fakeSession.appends).toEqual([]);
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.creates).toEqual([]);
   expect(fakeSession.lockHeld()).toBe(false);
 };
 
@@ -489,6 +491,36 @@ it('refuses to claim a task whose parent does not exist and appends nothing', as
 
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('demo-4789');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses to claim a task whose parent file has an error and appends nothing', async () => {
+  const parent = { ...makeTicket('demo-4789'), error: 'Broken.' };
+
+  parent.frontMatter = { ...parent.frontMatter, kind: 'slice' };
+
+  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+    tickets: [parentOnly(), parent],
+  });
+
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-4789');
+  expectNothingWritten(fakeSession);
+});
+
+it('refuses to claim a task blocked by a ticket whose file has an error', async () => {
+  const blocker = { ...makeTicket('demo-6789'), error: 'Broken.' };
+
+  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+    tickets: [blockedOnly(), blocker],
+  });
+
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-6789');
   expectNothingWritten(fakeSession);
 });
 
