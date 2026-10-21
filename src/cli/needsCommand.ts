@@ -30,10 +30,16 @@ const itemView = (item: NeedItem<CliTicket>): Record<string, unknown> => ({
   since: item.since,
   ageSeconds: item.ageSeconds,
   ...(item.holder === undefined ? {} : { holder: item.holder }),
+  ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
 });
 
-const itemLine = (item: NeedItem<CliTicket>): string =>
-  `${item.ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${item.ticket.frontMatter.title}\n`;
+const itemLine = (item: NeedItem<CliTicket>): string => {
+  const { ticket } = item;
+  const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${ticket.frontMatter.title}`;
+  const suffix = ticket.error === null ? '' : `  parseError ${ticket.path}`;
+
+  return `${line}${suffix}\n`;
+};
 
 export const needsCommand = async ({
   args,
@@ -51,14 +57,13 @@ export const needsCommand = async ({
   }
 
   const tickets = session.listTickets({ includeArchived: false });
-  const readable = tickets.filter((ticket) => ticket.error === null);
   const facts = await session.listFacts();
 
   if (!facts.ok) {
     return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
-  const items = selectNeeds(readable, facts.value, effects.now());
+  const items = selectNeeds(tickets, facts.value, effects.now());
 
   return {
     ok: true,

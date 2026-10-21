@@ -66,3 +66,15 @@ it('refuses a positional argument', async () => {
 
   expect(failure.code).toBe('invalidArguments');
 });
+
+it('still lists a question on a task whose file no longer parses', async () => {
+  const broken = makeTicket('demo-3467', { error: 'Bad front matter.' });
+  const question = makeFact({ kind: 'log', type: 'question', text: 'Why?' });
+  const output = successOf(await needs([], [broken], [question]));
+
+  expect(output.json).toMatchObject({
+    items: [{ id: 'demo-3467', reason: 'question', parseError: broken.path }],
+  });
+
+  expect(output.text.endsWith(`  parseError ${broken.path}\n`)).toBe(true);
+});
