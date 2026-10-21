@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Result } from '../result.ts';
 import { parseProjectName, parseTicketFile, parseTicketFileName } from '../ticket/ticket.ts';
 import type { TicketFile } from '../ticket/ticket.ts';
+import type { FactCacheFiles } from './factScan.ts';
 
 interface CacheFileEntry {
   path: string;
@@ -23,7 +24,7 @@ export interface CacheFileReason {
   message: string;
 }
 
-export interface CacheFiles {
+export interface CacheFiles extends FactCacheFiles {
   listTicketFiles: () => Promise<Result<CacheFileEntry[], CacheFileReason>>;
   readTicketFile: (path: string) => Promise<Result<CacheFileContent, CacheFileReason>>;
 }
@@ -36,6 +37,8 @@ interface ParsedTicket {
   id: string;
   file: TicketFile;
 }
+
+type Pass = 'applied' | 'conflict';
 
 const forceRescan = { mtimeMs: -1, hash: '' };
 
@@ -66,6 +69,9 @@ const loadRows = (database: Database): Map<string, StoredRow> => {
 
   return stored;
 };
+
+const isSameRow = (left: StoredRow | undefined, right: StoredRow | undefined): boolean =>
+  left?.mtime_ms === right?.mtime_ms && left?.size === right?.size && left?.hash === right?.hash;
 
 const isUnchanged = (row: StoredRow | undefined, entry: CacheFileEntry): boolean =>
   row?.mtime_ms === entry.mtimeMs && row.size === entry.size;
@@ -227,11 +233,11 @@ const applyContent = (
 
 const applyOutcome = (
   database: Database,
-  stored: Map<string, StoredRow>,
+  basis: StoredRow | undefined,
   outcome: ReadOutcome,
 ): void => {
   if (outcome.kind === 'content') {
-    applyContent(database, stored.get(outcome.entry.path), outcome.entry, outcome.content);
+    applyContent(database, basis, outcome.entry, outcome.content);
 
     return;
   }
@@ -241,16 +247,25 @@ const applyOutcome = (
   recordError(database, entry, forceRescan.hash, outcome.message);
 };
 
+const maximumPasses = 5;
+
 const deleteMissing = (
   database: Database,
-  present: Set<string>,
+  deleted: string[],
   stored: Map<string, StoredRow>,
-) => {
-  for (const path of stored.keys()) {
-    if (!present.has(path)) {
+  current: Map<string, StoredRow>,
+): Pass => {
+  let pass: Pass = 'applied';
+
+  for (const path of deleted) {
+    if (isSameRow(current.get(path), stored.get(path))) {
       database.run('DELETE FROM tickets WHERE path = ?', [path]);
+    } else {
+      pass = 'conflict';
     }
   }
+
+  return pass;
 };
 
 const markDuplicates = (database: Database): void => {
@@ -287,10 +302,13 @@ const markDuplicates = (database: Database): void => {
   }
 };
 
-export const refresh = async (
+const refreshOnce = async (
   database: Database,
   files: CacheFiles,
-): Promise<Result<undefined, CacheFileReason>> => {
+): Promise<Result<Pass, CacheFileReason>> => {
+  // The rows load before the listing, so a row written by another process after this point is not
+  // in the basis, and this refresh does not overwrite or delete it.
+  const stored = loadRows(database);
   const listed = await files.listTicketFiles();
 
   if (!listed.ok) {
@@ -298,7 +316,6 @@ export const refresh = async (
   }
 
   const entries = listed.value.toSorted((left, right) => left.path.localeCompare(right.path));
-  const stored = loadRows(database);
   const { outcomes, vanished } = await readChanged(files, entries, stored);
   const present = new Set(entries.map((entry) => entry.path));
 
@@ -306,14 +323,61 @@ export const refresh = async (
     present.delete(path);
   }
 
-  database.transaction(() => {
-    for (const outcome of outcomes) {
-      applyOutcome(database, stored, outcome);
+  const deleted = [...stored.keys()].filter((path) => !present.has(path));
+
+  if (outcomes.length === 0 && deleted.length === 0) {
+    return { ok: true, value: 'applied' };
+  }
+
+  // Another process may refresh the same cache at the same time. A change applies only when the
+  // row still matches the one this refresh started from, so an older refresh never undoes a newer
+  // one.
+  const pass = database
+    .transaction((): Pass => {
+      const current = loadRows(database);
+      let applied: Pass = 'applied';
+
+      for (const outcome of outcomes) {
+        const basis = stored.get(outcome.entry.path);
+
+        if (isSameRow(current.get(outcome.entry.path), basis)) {
+          applyOutcome(database, basis, outcome);
+        } else {
+          applied = 'conflict';
+        }
+      }
+
+      const deletions = deleteMissing(database, deleted, stored, current);
+
+      markDuplicates(database);
+
+      return deletions === 'conflict' ? deletions : applied;
+    })
+    .immediate();
+
+  return { ok: true, value: pass };
+};
+
+// A refresh that skipped a moved row did not see the newest file, so it reads again instead of
+// reporting success on stale rows.
+export const refresh = async (
+  database: Database,
+  files: CacheFiles,
+): Promise<Result<undefined, CacheFileReason>> => {
+  for (let attempt = 0; attempt < maximumPasses; attempt += 1) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each pass depends on the rows the last one left.
+    const pass = await refreshOnce(database, files);
+
+    if (!pass.ok) {
+      return pass;
     }
 
-    deleteMissing(database, present, stored);
-    markDuplicates(database);
-  })();
+    if (pass.value === 'applied') {
+      return { ok: true, value: undefined };
+    }
+  }
 
-  return { ok: true, value: undefined };
+  const message = `The ticket cache kept changing in another process after ${maximumPasses} reads.`;
+
+  return { ok: false, reason: { kind: 'failed', message } };
 };

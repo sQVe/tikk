@@ -1,3 +1,5 @@
+import { deriveTaskState } from '../fact/fact.ts';
+import type { TaskClaim, TaskStateName } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
@@ -17,6 +19,11 @@ export interface TicketView {
   archived: string | null;
   body?: string;
   error: string | null;
+}
+
+export interface TaskView extends TicketView {
+  state: TaskStateName;
+  claim: TaskClaim | null;
 }
 
 export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => {
@@ -44,8 +51,26 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
   return view;
 };
 
-export const ticketText = (ticket: CliTicket): string => {
-  const heading = `${ticket.id}  ${ticket.frontMatter.status}  ${ticket.frontMatter.title}`;
+const taskView = (ticket: CliTicket, state: TaskStateName, claim: TaskClaim | null): TaskView => ({
+  ...ticketView(ticket, true),
+  state,
+  claim,
+});
+
+export const taskOutput = (
+  ticket: CliTicket,
+  state: TaskStateName,
+  claim: TaskClaim | null,
+): CommandResult => ({
+  ok: true,
+  value: {
+    json: taskView(ticket, state, claim),
+    text: `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
+  },
+});
+
+export const ticketText = (ticket: CliTicket, state: string): string => {
+  const heading = `${ticket.id}  ${state}  ${ticket.frontMatter.title}`;
 
   if (ticket.error === null) {
     return `${heading}\n${ticket.body}`;
@@ -59,13 +84,38 @@ export const storeFailure = (message: string): CommandResult => ({
   reason: { code: 'storeError', message },
 });
 
-const showTicket = (ticket: CliTicket): CommandResult => ({
-  ok: true,
-  value: { json: ticketView(ticket, true), text: ticketText(ticket) },
-});
+export const showOutput = async (
+  session: CliSession,
+  now: Date,
+  ticket: CliTicket,
+): Promise<CommandResult> => {
+  if (ticket.frontMatter.kind !== 'task') {
+    return {
+      ok: true,
+      value: {
+        json: ticketView(ticket, true),
+        text: ticketText(ticket, ticket.frontMatter.status),
+      },
+    };
+  }
+
+  const facts = await session.listStateFacts([ticket.id]);
+
+  if (!facts.ok) {
+    return storeFailure(facts.reason.message);
+  }
+
+  const { state, claim } = deriveTaskState(ticket, facts.value, now);
+
+  return {
+    ok: true,
+    value: { json: taskView(ticket, state, claim), text: ticketText(ticket, state) },
+  };
+};
 
 export const showAfterRefresh = async (
   session: CliSession,
+  now: Date,
   id: TicketId,
 ): Promise<CommandResult> => {
   const refreshed = await session.refresh();
@@ -80,7 +130,7 @@ export const showAfterRefresh = async (
     return storeFailure(ticket.reason.message);
   }
 
-  return showTicket(ticket.value);
+  return showOutput(session, now, ticket.value);
 };
 
 export const findTicket = (session: CliSession, rawId: string): Result<CliTicket, CliFailure> => {

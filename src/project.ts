@@ -17,13 +17,21 @@ export interface ProjectEffects {
   runGit: (args: string[]) => Promise<GitOutcome>;
   readConfigFile: (path: string) => Promise<ConfigRead>;
   homeDirectory: string;
+  hostName: string;
 }
 
 export interface ProjectReason {
   message: string;
 }
 
-const configSchema = z.object({ projects: z.record(z.string(), z.string()) });
+const configSchema = z.object({
+  projects: z.record(z.string(), z.string()).optional(),
+  machine: z.string().optional(),
+});
+
+type Config = z.infer<typeof configSchema>;
+
+const machinePattern = /^[a-z0-9][a-z0-9._-]*$/;
 
 const personalProject = 'personal';
 
@@ -44,15 +52,12 @@ const parseRepository = (url: string): { owner: string; name: string } | undefin
   return undefined;
 };
 
-const readMappings = async (
-  effects: ProjectEffects,
-): Promise<Result<Map<string, string>, ProjectReason>> => {
+const readConfig = async (effects: ProjectEffects): Promise<Result<Config, ProjectReason>> => {
   const configPath = join(effects.homeDirectory, '.config', 'tikk', 'config.json');
   const read = await effects.readConfigFile(configPath);
-  const mappings = new Map<string, string>();
 
   if (read.kind === 'missing') {
-    return { ok: true, value: mappings };
+    return { ok: true, value: {} };
   }
 
   if (read.kind === 'failed') {
@@ -72,15 +77,56 @@ const readMappings = async (
   if (!parsed.success) {
     return {
       ok: false,
-      reason: { message: `${configPath} must be {"projects": {"<owner>/<name>": "<project>"}}.` },
+      reason: {
+        message: `${configPath} must be {"projects": {"<owner>/<name>": "<project>"}, "machine": "<name>"}.`,
+      },
     };
   }
 
-  for (const [key, value] of Object.entries(parsed.data.projects)) {
+  return { ok: true, value: parsed.data };
+};
+
+const readMappings = async (
+  effects: ProjectEffects,
+): Promise<Result<Map<string, string>, ProjectReason>> => {
+  const config = await readConfig(effects);
+  const mappings = new Map<string, string>();
+
+  if (!config.ok) {
+    return config;
+  }
+
+  for (const [key, value] of Object.entries(config.value.projects ?? {})) {
     mappings.set(key.toLowerCase(), value);
   }
 
   return { ok: true, value: mappings };
+};
+
+export const resolveMachine = async (
+  effects: ProjectEffects,
+): Promise<Result<string, ProjectReason>> => {
+  const config = await readConfig(effects);
+
+  if (!config.ok) {
+    return config;
+  }
+
+  const configured = config.value.machine;
+  const machine = (configured ?? effects.hostName).toLowerCase();
+
+  if (machinePattern.test(machine)) {
+    return { ok: true, value: machine };
+  }
+
+  const source = configured === undefined ? 'The host name' : 'The "machine" config';
+
+  return {
+    ok: false,
+    reason: {
+      message: `${source} "${machine}" is not a valid machine name. Set "machine" in ~/.config/tikk/config.json to a name that matches ${machinePattern.source}.`,
+    },
+  };
 };
 
 const personalResult = (): Result<ProjectName, ProjectReason> => parseProjectName(personalProject);

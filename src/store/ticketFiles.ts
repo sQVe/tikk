@@ -57,9 +57,11 @@ interface NewTicket {
   text: string;
 }
 
+type DirectoryFunctions = Pick<TicketFileFunctions, 'readdir' | 'stat'>;
+
 type ExclusiveWrite = 'created' | 'exists' | 'failed';
 
-type EntryStats = Awaited<ReturnType<TicketFileFunctions['stat']>>;
+type EntryStats = Awaited<ReturnType<DirectoryFunctions['stat']>>;
 
 const idAlphabet = '346789abcdefghijkmnpqrtwxyz';
 const idLength = 4;
@@ -79,7 +81,7 @@ const failed = (message: string): { ok: false; reason: TicketFileReason } => ({
 });
 
 const listDirectory = async (
-  files: TicketFileFunctions,
+  files: DirectoryFunctions,
   directory: string,
 ): Promise<Result<string[], TicketFileReason>> => {
   try {
@@ -95,7 +97,7 @@ const listDirectory = async (
 
 // A vanished entry gives undefined, so a list never fails on a file deleted mid-scan.
 const statEntry = async (
-  files: TicketFileFunctions,
+  files: DirectoryFunctions,
   path: string,
 ): Promise<Result<EntryStats | undefined, TicketFileReason>> => {
   try {
@@ -126,8 +128,9 @@ const firstFailure = <Value>(
 };
 
 const listProjectFiles = async (
-  files: TicketFileFunctions,
+  files: DirectoryFunctions,
   directory: string,
+  extension: string,
 ): Promise<Result<TicketFileEntry[], TicketFileReason>> => {
   const names = await listDirectory(files, directory);
 
@@ -135,7 +138,7 @@ const listProjectFiles = async (
     return names;
   }
 
-  const markdownNames = names.value.filter((name) => name.endsWith('.md'));
+  const markdownNames = names.value.filter((name) => name.endsWith(extension));
 
   const checked = await Promise.all(
     markdownNames.map(
@@ -165,12 +168,13 @@ const listProjectFiles = async (
   return { ok: true, value: entries.value.filter((entry) => entry !== undefined) };
 };
 
-export const listTicketFiles = async (
-  files: TicketFileFunctions,
-  store: Store,
+// Lists the files with `extension` in each folder directly under `root`.
+export const listFolderFiles = async (
+  files: DirectoryFunctions,
+  root: string,
+  extension: string,
 ): Promise<Result<TicketFileEntry[], TicketFileReason>> => {
-  const ticketsRoot = ticketsDirectory(store);
-  const projects = await listDirectory(files, ticketsRoot);
+  const projects = await listDirectory(files, root);
 
   if (!projects.ok) {
     return projects;
@@ -178,7 +182,7 @@ export const listTicketFiles = async (
 
   const checked = await Promise.all(
     projects.value.map(async (project): Promise<Result<string | undefined, TicketFileReason>> => {
-      const path = join(ticketsRoot, project);
+      const path = join(root, project);
       const stats = await statEntry(files, path);
 
       if (!stats.ok) {
@@ -198,7 +202,7 @@ export const listTicketFiles = async (
   const projectFolders = folders.value.filter((path) => path !== undefined);
 
   const lists = firstFailure(
-    await Promise.all(projectFolders.map((path) => listProjectFiles(files, path))),
+    await Promise.all(projectFolders.map((path) => listProjectFiles(files, path, extension))),
   );
 
   if (!lists.ok) {
@@ -207,6 +211,12 @@ export const listTicketFiles = async (
 
   return { ok: true, value: lists.value.flat() };
 };
+
+export const listTicketFiles = (
+  files: TicketFileFunctions,
+  store: Store,
+): Promise<Result<TicketFileEntry[], TicketFileReason>> =>
+  listFolderFiles(files, ticketsDirectory(store), '.md');
 
 export const readTicketFile = async (
   files: TicketFileFunctions,

@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 
-import { resolveProject } from './project.ts';
+import { resolveMachine, resolveProject } from './project.ts';
 import type { ConfigRead, GitOutcome } from './project.ts';
 
 const configPath = '/home/me/.config/tikk/config.json';
@@ -19,6 +19,7 @@ const resolveWith = (git: GitOutcome, config?: string | ConfigRead) =>
       return typeof config === 'object' ? config : configRead(config);
     },
     homeDirectory: '/home/me',
+    hostName: 'Build-Host',
   });
 
 it('gives personal outside a Git repository', async () => {
@@ -98,6 +99,7 @@ it('asks git for the origin URL of the working folder', async () => {
     },
     readConfigFile: async () => ({ kind: 'missing' }),
     homeDirectory: '/home/me',
+    hostName: 'host',
   });
 
   expect(calls).toEqual([['-C', '/work/repo', 'remote', 'get-url', 'origin']]);
@@ -107,4 +109,51 @@ it('gives personal for an origin it cannot read as a repository', async () => {
   const result = await resolveWith({ kind: 'output', stdout: 'not a remote url' });
 
   expect(result).toMatchObject({ ok: true, value: 'personal' });
+});
+
+const machineWith = (config: string | undefined, hostName = 'Build-Host') =>
+  resolveMachine({
+    runGit: async () => ({ kind: 'failed' }),
+    readConfigFile: async () => configRead(config),
+    homeDirectory: '/home/me',
+    hostName,
+  });
+
+it('reads the machine from config', async () => {
+  const config = JSON.stringify({ machine: 'Laptop-1' });
+
+  expect(await machineWith(config)).toEqual({ ok: true, value: 'laptop-1' });
+});
+
+it('accepts a config that has only a machine and no projects', async () => {
+  const config = JSON.stringify({ machine: 'laptop' });
+
+  expect(await machineWith(config)).toEqual({ ok: true, value: 'laptop' });
+});
+
+it.each([undefined, '{}', JSON.stringify({ projects: { 'a/b': 'c' } })])(
+  'defaults the machine to the lowercased host name for config %j',
+  async (config) => {
+    expect(await machineWith(config)).toEqual({ ok: true, value: 'build-host' });
+  },
+);
+
+it.each(['bad name', '-start', '', 'a/b'])('fails on the invalid machine name %j', async (name) => {
+  const result = await machineWith(JSON.stringify({ machine: name }));
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toContain('machine');
+});
+
+it('fails when the host name is not a valid machine name', async () => {
+  expect(await machineWith(undefined, 'my host')).toMatchObject({ ok: false });
+});
+
+it('still resolves a project when the config has only a machine', async () => {
+  const origin: GitOutcome = { kind: 'output', stdout: 'git@github.com:sQVe/tikk.git' };
+
+  expect(await resolveWith(origin, JSON.stringify({ machine: 'laptop' }))).toMatchObject({
+    ok: true,
+    value: 'tikk',
+  });
 });

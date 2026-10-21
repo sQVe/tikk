@@ -9,6 +9,7 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { fileErrorFailure, withStoreLock } from './taskLock.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
 interface FieldEdit {
@@ -45,7 +46,7 @@ const editInEditor = async (input: CommandInput, rawId: string): Promise<Command
     return storeFailure(edited.reason.message);
   }
 
-  return showAfterRefresh(input.session, id.value);
+  return showAfterRefresh(input.session, input.effects.now(), id.value);
 };
 
 const buildFrontMatter = (
@@ -71,10 +72,7 @@ const applyEdit = async (
   edit: FieldEdit,
 ): Promise<CommandResult> => {
   if (ticket.error !== null) {
-    return {
-      ok: false,
-      reason: { code: 'parseError', message: `${ticket.path} has an error: ${ticket.error}` },
-    };
+    return fileErrorFailure(ticket);
   }
 
   const frontMatter = buildFrontMatter(ticket, edit);
@@ -101,7 +99,7 @@ const applyEdit = async (
     return { ok: false, reason: { code, message: written.reason.message } };
   }
 
-  return showAfterRefresh(input.session, ticket.id);
+  return showAfterRefresh(input.session, input.effects.now(), ticket.id);
 };
 
 const readFieldEdit = (
@@ -157,11 +155,21 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     return editInEditor(input, rawId);
   }
 
-  const found = findTicket(input.session, rawId);
+  const fieldEdit = edit.value;
 
-  if (!found.ok) {
-    return found;
-  }
+  return withStoreLock(input, async () => {
+    const refreshed = await input.session.refresh();
 
-  return applyEdit(input, found.value, edit.value);
+    if (!refreshed.ok) {
+      return storeFailure(refreshed.reason.message);
+    }
+
+    const found = findTicket(input.session, rawId);
+
+    if (!found.ok) {
+      return found;
+    }
+
+    return applyEdit(input, found.value, fieldEdit);
+  });
 };

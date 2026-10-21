@@ -1,10 +1,14 @@
 import type { Database } from 'bun:sqlite';
 
+import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { openDatabase } from './cacheSchema.ts';
 import type { CacheOpenReason } from './cacheSchema.ts';
+import { hasValidFactErrorRows, listFactErrors, listFacts, listStateFacts } from './factQueries.ts';
+import type { FactDamage } from './factQueries.ts';
+import { hasValidFactCursors, rebuildFacts, refreshFacts } from './factScan.ts';
 import {
   findTicketPath,
   getTicket,
@@ -23,6 +27,7 @@ import type { CacheFileReason, CacheFiles } from './ticketScan.ts';
 
 export type {
   CacheOpenReason,
+  FactDamage,
   CachedError,
   CachedTicket,
   CacheFileReason,
@@ -31,8 +36,14 @@ export type {
   TicketNotFound,
 };
 
-const hasValidCache = (database: Database): boolean =>
+const hasValidTickets = (database: Database): boolean =>
   hasValidScanRows(database) && hasValidRows(database);
+
+const hasValidFacts = (database: Database): boolean =>
+  hasValidFactCursors(database) && hasValidFactErrorRows(database);
+
+const hasValidCache = (database: Database): boolean =>
+  hasValidTickets(database) && hasValidFacts(database);
 
 const isSqliteError = (error: unknown): error is Error =>
   error instanceof Error && 'code' in error && String(error.code).startsWith('SQLITE');
@@ -46,13 +57,31 @@ export class TicketCache implements Disposable {
 
   async refresh(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
     try {
-      if (!hasValidCache(this.#database)) {
+      if (!hasValidTickets(this.#database)) {
         this.#database.run('DELETE FROM tickets');
+      }
+
+      if (!hasValidFacts(this.#database)) {
+        const rebuilt = await rebuildFacts(this.#database, files);
+
+        if (!rebuilt.ok) {
+          return rebuilt;
+        }
       }
 
       const refreshed = await refresh(this.#database, files);
 
-      if (refreshed.ok && !hasValidCache(this.#database)) {
+      if (!refreshed.ok) {
+        return refreshed;
+      }
+
+      const refreshedFacts = await refreshFacts(this.#database, files);
+
+      if (!refreshedFacts.ok) {
+        return refreshedFacts;
+      }
+
+      if (!hasValidCache(this.#database)) {
         return {
           ok: false,
           reason: {
@@ -85,8 +114,31 @@ export class TicketCache implements Disposable {
     return listTickets(this.#database, options);
   }
 
+  listFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
+    return listFacts(this.#database, ticketIds);
+  }
+
+  // The facts that decide a task's state, in order. This skips notes, which are most of a history.
+  listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
+    return listStateFacts(this.#database, ticketIds);
+  }
+
+  // Replaces every fact row from the files in one transaction.
+  async rebuildFacts(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
+    try {
+      return await rebuildFacts(this.#database, files);
+    } catch (error) {
+      invariant(isSqliteError(error), 'A rebuild failed for a reason other than SQLite.');
+
+      return {
+        ok: false,
+        reason: { kind: 'failed', message: `The cache failed: ${error.message}` },
+      };
+    }
+  }
+
   listErrors(): CachedError[] {
-    return listErrors(this.#database);
+    return [...listErrors(this.#database), ...listFactErrors(this.#database)];
   }
 
   [Symbol.dispose](): void {
@@ -94,8 +146,11 @@ export class TicketCache implements Disposable {
   }
 }
 
-export const openCache = (path: string): Result<TicketCache, CacheOpenReason> => {
-  const database = openDatabase(path);
+export const openCache = (
+  path: string,
+  busyTimeoutMilliseconds?: number,
+): Result<TicketCache, CacheOpenReason> => {
+  const database = openDatabase(path, busyTimeoutMilliseconds);
 
   if (!database.ok) {
     return database;

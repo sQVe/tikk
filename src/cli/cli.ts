@@ -1,6 +1,9 @@
 import packageJson from '../../package.json' with { type: 'json' };
+import { taskAccept, taskClaim, taskLog, taskRelease, taskSubmit } from './claimCommands.ts';
 import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
+import { readyCommand } from './readyCommand.ts';
+import { ticketCancel } from './ticketCancel.ts';
 import { ticketEdit } from './ticketEdit.ts';
 import { ticketList } from './ticketList.ts';
 import { ticketNew } from './ticketNew.ts';
@@ -20,9 +23,17 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['show', ticketShow],
   ['ls', ticketList],
   ['edit', ticketEdit],
+  ['claim', taskClaim],
+  ['release', taskRelease],
+  ['log', taskLog],
+  ['submit', taskSubmit],
+  ['accept', taskAccept],
+  ['cancel', ticketCancel],
+  ['ready', readyCommand],
 ]);
 
-const usage = 'Usage: tikk <init|new|show|ls|edit> [arguments] [--json]';
+const usage =
+  'Usage: tikk <init|new|show|ls|edit|claim|release|log|submit|accept|cancel|ready> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

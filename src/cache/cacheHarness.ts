@@ -5,7 +5,9 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
+import type { TicketId } from '../ticket/ticket.ts';
 import { openCache } from './cache.ts';
 import type { CacheFiles, TicketCache } from './cache.ts';
 
@@ -19,8 +21,17 @@ export interface FakeFiles {
   files: CacheFiles;
   set: (path: string, text: string, mtimeMs?: number) => void;
   remove: (path: string) => void;
+  setFactFile: (path: string, text: string, mtimeMs?: number) => void;
+  removeFactFile: (path: string) => void;
+  factReads: () => { path: string; fromByte: number }[];
   reads: () => number;
   readPaths: () => string[];
+}
+
+interface Gate {
+  reached: Promise<void>;
+  open: () => void;
+  wait: () => Promise<void>;
 }
 
 export interface TicketTextOptions {
@@ -30,6 +41,19 @@ export interface TicketTextOptions {
   rank?: number;
   blockedBy?: string[];
 }
+
+export const factPath = (machine = 'laptop', month = '2026-10'): string =>
+  `/fake/facts/${machine}/${month}.jsonl`;
+
+export const factText = (
+  ticket: string,
+  extra?: Record<string, unknown>,
+  at = '2026-10-20T10:00:00.000Z',
+): string => {
+  const body = extra ?? { kind: 'accept' };
+
+  return `${JSON.stringify({ version: 1, ticket, at, machine: 'laptop', ...body })}\n`;
+};
 
 export const ticketPath = (id: string, project = 'tikk'): string =>
   `/fake/tickets/${project}/${id}-slug.md`;
@@ -69,6 +93,8 @@ export const createFakeFiles = (): FakeFiles => {
   let clock = 0;
   let readCount = 0;
   const paths: string[] = [];
+  const factFiles = new Map<string, { bytes: Buffer; mtimeMs: number }>();
+  const factReads: { path: string; fromByte: number }[] = [];
 
   const files: CacheFiles = {
     listTicketFiles: () =>
@@ -97,6 +123,29 @@ export const createFakeFiles = (): FakeFiles => {
 
       return Promise.resolve({ ok: true, value: { text: file.text, hash } });
     },
+    listFactFiles: () =>
+      Promise.resolve({
+        ok: true,
+        value: [...factFiles].map(([path, file]) => ({
+          path,
+          mtimeMs: file.mtimeMs,
+          size: file.bytes.length,
+        })),
+      }),
+    readFactFile: (path, fromByte) => {
+      factReads.push({ path, fromByte });
+
+      const file = factFiles.get(path);
+
+      if (file === undefined) {
+        return Promise.resolve({
+          ok: false,
+          reason: { kind: 'notFound', message: `${path} is missing.` },
+        });
+      }
+
+      return Promise.resolve({ ok: true, value: file.bytes.subarray(fromByte) });
+    },
   };
 
   return {
@@ -108,6 +157,14 @@ export const createFakeFiles = (): FakeFiles => {
     remove: (path) => {
       stored.delete(path);
     },
+    setFactFile: (path, text, mtimeMs) => {
+      clock += 1;
+      factFiles.set(path, { bytes: Buffer.from(text), mtimeMs: mtimeMs ?? clock });
+    },
+    removeFactFile: (path) => {
+      factFiles.delete(path);
+    },
+    factReads: () => factReads,
     reads: () => readCount,
     readPaths: () => paths,
   };
@@ -133,6 +190,14 @@ export const openTestCache = (databasePath: string): TicketCache => {
   return opened.value;
 };
 
+export const factsOf = (cache: TicketCache, ticketIds?: TicketId[]): Fact[] => {
+  const listed = cache.listFacts(ticketIds);
+
+  invariant(listed.ok, 'The test facts must decode.');
+
+  return listed.value;
+};
+
 export const runSql = (databasePath: string, sql: string): void => {
   const database = new Database(databasePath);
 
@@ -150,4 +215,22 @@ export const rewriteDatabaseText = (databasePath: string, from: string, to: stri
 
   bytes.write(to, offset);
   writeFileSync(databasePath, bytes);
+};
+
+// Pauses a fake file call until the test opens the gate, so two refreshes can interleave.
+export const makeGate = (): Gate => {
+  const reached = Promise.withResolvers<undefined>();
+  const opened = Promise.withResolvers<undefined>();
+
+  return {
+    reached: reached.promise,
+    open: () => {
+      opened.resolve(undefined);
+    },
+    wait: () => {
+      reached.resolve(undefined);
+
+      return opened.promise;
+    },
+  };
 };

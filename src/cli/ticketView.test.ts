@@ -57,8 +57,8 @@ it('adds the body only when asked', () => {
 });
 
 it('renders the heading and body, with the error line only for a broken ticket', () => {
-  expect(ticketText(makeTicket('demo-3467'))).toBe('demo-3467  open  A title\nA body\n');
-  const broken = ticketText(full);
+  expect(ticketText(makeTicket('demo-3467'), 'open')).toBe('demo-3467  open  A title\nA body\n');
+  const broken = ticketText(full, 'open');
 
   expect(broken).toContain(full.path);
   expect(broken).toContain('A body');
@@ -74,16 +74,22 @@ it('builds a storeError failure', () => {
 
 it('shows a ticket after a refresh', async () => {
   const fake = makeSession({ tickets: [makeTicket('demo-3467')] });
-  const result = await showAfterRefresh(fake.session, ticketIdOf('demo-3467'));
+
+  fake.changeOnDisk(makeTicket('demo-3467', { hash: 'hash-after-write' }));
+
+  const result = await showAfterRefresh(fake.session, new Date(), ticketIdOf('demo-3467'));
 
   expect(result.ok).toBe(true);
 
   if (result.ok) {
-    expect(result.value.json).toMatchObject({ id: 'demo-3467', body: 'A body\n' });
+    expect(result.value.json).toMatchObject({
+      id: 'demo-3467',
+      hash: 'hash-after-write',
+      body: 'A body\n',
+    });
+
     expect(result.value.text).toContain('demo-3467');
   }
-
-  expect(fake.refreshes()).toBe(1);
 });
 
 it('returns a storeError when the refresh fails', async () => {
@@ -93,7 +99,7 @@ it('returns a storeError when the refresh fails', async () => {
     },
   });
 
-  const result = await showAfterRefresh(fake.session, ticketIdOf('demo-3467'));
+  const result = await showAfterRefresh(fake.session, new Date(), ticketIdOf('demo-3467'));
 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason.code).toBe('storeError');
@@ -102,7 +108,7 @@ it('returns a storeError when the refresh fails', async () => {
 
 it('returns a storeError naming the ID when the ticket is missing after refresh', async () => {
   const fake = makeSession();
-  const result = await showAfterRefresh(fake.session, ticketIdOf('demo-3467'));
+  const result = await showAfterRefresh(fake.session, new Date(), ticketIdOf('demo-3467'));
 
   expect(result.ok).toBe(false);
 

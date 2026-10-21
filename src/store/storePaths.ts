@@ -30,3 +30,13 @@ export const ticketFilePath = (
   id: TicketId,
   slug: string,
 ): string => join(projectDirectory(store, project), `${id}-${slug}.md`);
+
+export const lockFilePath = (store: Store): string => join(store.root, '.git', 'tikk.lock');
+
+export const breakerFilePath = (store: Store): string =>
+  join(store.root, '.git', 'tikk.lock.break');
+
+export const factsDirectory = (store: Store): string => join(store.root, 'facts');
+
+export const factFilePath = (store: Store, machine: string, month: string): string =>
+  join(factsDirectory(store), machine, `${month}.jsonl`);

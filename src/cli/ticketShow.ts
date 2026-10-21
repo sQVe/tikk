@@ -1,9 +1,9 @@
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { findTicket, ticketText, ticketView } from './ticketView.ts';
+import { findTicket, showOutput } from './ticketView.ts';
 
-export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
-  const parsed = parseCommandArguments(args, {});
+export const ticketShow = async (input: CommandInput): Promise<CommandResult> => {
+  const parsed = parseCommandArguments(input.args, {});
 
   if (!parsed.ok) {
     return parsed;
@@ -15,14 +15,11 @@ export const ticketShow = ({ args, session }: CommandInput): CommandResult => {
     return invalidArguments('Usage: tikk show <id> [--json]');
   }
 
-  const ticket = findTicket(session, rawId);
+  const ticket = findTicket(input.session, rawId);
 
   if (!ticket.ok) {
     return ticket;
   }
 
-  return {
-    ok: true,
-    value: { json: ticketView(ticket.value, true), text: ticketText(ticket.value) },
-  };
+  return showOutput(input.session, input.effects.now(), ticket.value);
 };

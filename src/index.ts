@@ -1,27 +1,49 @@
 #!/usr/bin/env bun
 import { existsSync } from 'node:fs';
-import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import {
+  appendFile,
+  link,
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
-import type { TicketCache } from './cache/cache.ts';
+import type { CacheFiles, TicketCache } from './cache/cache.ts';
 import { runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
-import { resolveProject } from './project.ts';
-import type { ConfigRead, GitOutcome } from './project.ts';
+import { resolveMachine, resolveProject } from './project.ts';
+import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
 import {
+  acquireStoreLock,
+  appendFact,
   createTicketFile,
   initStore,
+  listFactFiles,
   listTicketFiles,
   newIdSuffix,
   openStore,
+  readFactFile,
   readTicketFile,
   resolveStoreRoot,
   writeTicketFile,
 } from './store/store.ts';
-import type { Store, StoreInitEffects, TicketFileFunctions } from './store/store.ts';
+import type {
+  FactFileFunctions,
+  Store,
+  StoreInitEffects,
+  StoreLockFunctions,
+  TicketFileFunctions,
+} from './store/store.ts';
+import type { TicketId } from './ticket/ticket.ts';
 
 const homeDirectory = homedir();
 const storeRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
@@ -81,6 +103,34 @@ const ticketFiles: TicketFileFunctions = {
   randomIdSuffix: () => newIdSuffix(),
 };
 
+const factFiles: FactFileFunctions = {
+  readdir: ticketFiles.readdir,
+  stat: ticketFiles.stat,
+  mkdir: ticketFiles.mkdir,
+  readFileFrom: (path, fromByte) => Bun.file(path).slice(fromByte).bytes(),
+  appendFile: (path, text) => appendFile(path, text),
+};
+
+const storeLock: StoreLockFunctions = {
+  pid: process.pid,
+  writeFile: (path, text) => writeFile(path, text),
+  link: (existingPath, newPath) => link(existingPath, newPath),
+  randomSuffix: () => crypto.randomUUID(),
+  readFile: (path) => readFile(path, 'utf8'),
+  unlink: ticketFiles.unlink,
+  isProcessAlive: (pid) => {
+    try {
+      process.kill(pid, 0);
+
+      return true;
+    } catch (error) {
+      return !(error instanceof Error && 'code' in error && error.code === 'ESRCH');
+    }
+  },
+  sleep: (milliseconds) => Bun.sleep(milliseconds),
+  now: () => Date.now(),
+};
+
 const storeFiles: Pick<StoreInitEffects, 'readFile' | 'mkdir' | 'writeFile'> = {
   readFile: (path) => readFile(path, 'utf8'),
   mkdir: ticketFiles.mkdir,
@@ -100,24 +150,56 @@ const readConfigFile = async (path: string): Promise<ConfigRead> => {
   }
 };
 
-const sessionFor = (store: Store, cache: TicketCache): CliSession => ({
-  refresh: () =>
-    cache.refresh({
-      listTicketFiles: () => listTicketFiles(ticketFiles, store),
-      readTicketFile: (path) => readTicketFile(ticketFiles, path),
-    }),
-  getTicket: (id) => cache.getTicket(id),
-  findTicketPath: (id) => cache.findTicketPath(id),
-  listTickets: (options) => cache.listTickets(options),
-  listErrors: () => cache.listErrors(),
-  createTicketFile: (project, title, text) =>
-    createTicketFile(ticketFiles, store, project, title, text),
-  writeTicketFile: (path, expectedHash, text) =>
-    writeTicketFile(ticketFiles, path, expectedHash, text),
-  [Symbol.dispose]: () => {
-    cache[Symbol.dispose]();
-  },
-});
+// A stored fact that does not decode means the cache is damaged. The fact tables are cleared and
+// indexed again from the files once. A second failure is reported, not retried.
+const listStateFactsRecovering = async (
+  cache: TicketCache,
+  files: CacheFiles,
+  ticketIds?: TicketId[],
+): ReturnType<CliSession['listStateFacts']> => {
+  const first = cache.listStateFacts(ticketIds);
+
+  if (first.ok) {
+    return first;
+  }
+
+  const refreshed = await cache.rebuildFacts(files);
+
+  if (!refreshed.ok) {
+    return refreshed;
+  }
+
+  const second = cache.listStateFacts(ticketIds);
+
+  return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
+};
+
+const sessionFor = (store: Store, cache: TicketCache): CliSession => {
+  const files: CacheFiles = {
+    listTicketFiles: () => listTicketFiles(ticketFiles, store),
+    readTicketFile: (path) => readTicketFile(ticketFiles, path),
+    listFactFiles: () => listFactFiles(factFiles, store),
+    readFactFile: (path, fromByte) => readFactFile(factFiles, path, fromByte),
+  };
+
+  return {
+    refresh: () => cache.refresh(files),
+    getTicket: (id) => cache.getTicket(id),
+    findTicketPath: (id) => cache.findTicketPath(id),
+    listTickets: (options) => cache.listTickets(options),
+    listErrors: () => cache.listErrors(),
+    listStateFacts: (ticketIds) => listStateFactsRecovering(cache, files, ticketIds),
+    lockStore: () => acquireStoreLock(storeLock, store),
+    appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
+    createTicketFile: (project, title, text) =>
+      createTicketFile(ticketFiles, store, project, title, text),
+    writeTicketFile: (path, expectedHash, text) =>
+      writeTicketFile(ticketFiles, path, expectedHash, text),
+    [Symbol.dispose]: () => {
+      cache[Symbol.dispose]();
+    },
+  };
+};
 
 const openSession: CliEffects['openSession'] = async () => {
   const store = await openStore(storeRoot, storeFiles);
@@ -161,6 +243,13 @@ const runEditor = async (path: string): Promise<Result<undefined, { message: str
   }
 };
 
+const projectEffects: ProjectEffects = {
+  runGit: spawnGit,
+  readConfigFile,
+  homeDirectory,
+  hostName: hostname(),
+};
+
 const effects: CliEffects = {
   initStore: async () => {
     const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
@@ -174,10 +263,11 @@ const effects: CliEffects = {
     return { ok: true, value: { store: store.root, created } };
   },
   openSession,
-  resolveProject: () =>
-    resolveProject(process.cwd(), { runGit: spawnGit, readConfigFile, homeDirectory }),
+  resolveProject: () => resolveProject(process.cwd(), projectEffects),
+  resolveMachine: () => resolveMachine(projectEffects),
   readTextFile,
   runEditor,
+  now: () => new Date(),
 };
 
 // The mutation test runner imports this file into its test process, where the CLI must not run.
