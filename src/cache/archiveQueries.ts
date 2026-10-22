@@ -39,7 +39,17 @@ const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
       AND julianday(f.at) > tree.finish + ${slackDays})
   LIMIT 1`;
 
+// A root finishes by a closed or canceled status, or by an accept fact on a task. Without either,
+// no root has a finish time and none is final, so the larger query cannot find work.
+const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'closed'))
+  OR EXISTS (SELECT 1 FROM facts WHERE kind = 'accept')`;
+
 // False only when no root is due and every finished root has a fact that dates its finish. True
 // means the sweep must load the tickets and facts to decide.
-export const mayHaveArchiveWork = (database: Database, now: Date): boolean =>
-  database.query(archiveWorkSql).get(now.toISOString()) !== null;
+export const mayHaveArchiveWork = (database: Database, now: Date): boolean => {
+  if (database.query(finishedSql).get() === null) {
+    return false;
+  }
+
+  return database.query(archiveWorkSql).get(now.toISOString()) !== null;
+};

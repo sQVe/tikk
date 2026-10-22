@@ -52,8 +52,18 @@ const hasValidTickets = (database: Database): boolean =>
 const hasValidFacts = (database: Database): boolean =>
   hasValidFactCursors(database) && hasValidFactErrorRows(database);
 
-const hasValidCache = (database: Database): boolean =>
-  hasValidTickets(database) && hasValidFacts(database);
+// Moves when this connection writes (total_changes) or another connection commits (data_version).
+const writeMarker = (database: Database): string => {
+  const changes = database
+    .query<{ changes: number }, []>('SELECT total_changes() AS changes')
+    .get();
+
+  const version = database.query<{ data_version: number }, []>('PRAGMA data_version').get();
+
+  invariant(changes !== null && version !== null, 'The write marker is missing.');
+
+  return `${changes.changes}:${version.data_version}`;
+};
 
 const isSqliteError = (error: unknown): error is Error =>
   error instanceof Error && 'code' in error && String(error.code).startsWith('SQLITE');
@@ -67,7 +77,10 @@ export class TicketCache implements Disposable {
 
   async refresh(files: CacheFiles): Promise<Result<undefined, CacheFileReason>> {
     try {
-      if (!hasValidTickets(this.#database)) {
+      const markerBefore = writeMarker(this.#database);
+      const ticketsWereValid = hasValidTickets(this.#database);
+
+      if (!ticketsWereValid) {
         this.#database.run('DELETE FROM tickets');
       }
 
@@ -91,7 +104,12 @@ export class TicketCache implements Disposable {
         return refreshedFacts;
       }
 
-      if (!hasValidCache(this.#database)) {
+      // Rows that passed the check before the refresh are still valid when nothing wrote to the
+      // database since, from this connection or another one.
+      const ticketsUntouched = ticketsWereValid && writeMarker(this.#database) === markerBefore;
+      const ticketsValid = ticketsUntouched || hasValidTickets(this.#database);
+
+      if (!ticketsValid || !hasValidFacts(this.#database)) {
         return {
           ok: false,
           reason: {

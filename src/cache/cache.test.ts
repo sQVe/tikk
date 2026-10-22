@@ -609,3 +609,45 @@ it('returns the failure and keeps the facts when an automatic rebuild cannot rea
   expect(refreshed).toMatchObject({ ok: false, reason: { message: 'Cannot read.' } });
   expect(stateFactTickets(cache)).toEqual(['tikk-3a4b']);
 });
+
+it('does not report success when another handle damages a ticket row during the file listing', async () => {
+  const fake = await seedOneTicket();
+
+  using cache = openTestCache(databasePath);
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    listTicketFiles: async () => {
+      runSql(databasePath, "UPDATE tickets SET blocked_by = 'not json'");
+
+      return fake.files.listTicketFiles();
+    },
+  });
+
+  expect(refreshed.ok).toBe(false);
+});
+
+it('does not report success when another handle damages a ticket row during an automatic fact rebuild', async () => {
+  const fake = await seedOneTicket();
+
+  fake.setFactFile(factPath(), factText('me-3a4b', liveClaim));
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  runSql(databasePath, "UPDATE fact_files SET bytes_read = 'abc'");
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    readFactFile: async (factFile, fromByte) => {
+      const read = await fake.files.readFactFile(factFile, fromByte);
+
+      runSql(databasePath, "UPDATE tickets SET blocked_by = 'not json'");
+
+      return read;
+    },
+  });
+
+  expect(refreshed.ok).toBe(false);
+});

@@ -21,6 +21,14 @@ export interface TicketOutline {
   frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
 }
 
+interface ListColumns {
+  blockedBy: unknown;
+  discoveredFrom: unknown;
+  related: unknown;
+  criteria: unknown;
+  covers: unknown;
+}
+
 export interface CachedError {
   path: string;
   message: string;
@@ -35,16 +43,6 @@ export interface ListTicketsOptions {
   includeArchived: boolean;
 }
 
-const parseJson = (text: string, context: z.RefinementCtx): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    context.addIssue({ code: 'custom', message: 'A list column is not JSON.' });
-
-    return z.NEVER;
-  }
-};
-
 const ticketRowSchema = z.object({
   id: z.string(),
   path: z.string(),
@@ -55,11 +53,11 @@ const ticketRowSchema = z.object({
   project: z.string(),
   parent: z.string().nullable(),
   rank: z.number().nullable(),
-  blocked_by: z.string().transform(parseJson),
-  discovered_from: z.string().transform(parseJson),
-  related: z.string().transform(parseJson),
-  criteria: z.string().transform(parseJson).nullable(),
-  covers: z.string().transform(parseJson).nullable(),
+  blocked_by: z.string(),
+  discovered_from: z.string(),
+  related: z.string(),
+  criteria: z.string().nullable(),
+  covers: z.string().nullable(),
   status: z.string(),
   archived: z.string().nullable(),
   body: z.string(),
@@ -71,6 +69,24 @@ const errorRowSchema = z.object({ path: z.string(), error: z.string() });
 
 const ticketColumns =
   'id, path, hash, error, kind, title, project, parent, rank, blocked_by, discovered_from, related, criteria, covers, status, archived, body';
+
+const parseOptionalJson = (text: string | null): unknown =>
+  text === null ? undefined : (JSON.parse(text) ?? undefined);
+
+// The list columns hold JSON text. A column that is not JSON means the row is damaged.
+const parseListColumns = (row: z.output<typeof ticketRowSchema>): ListColumns | undefined => {
+  try {
+    return {
+      blockedBy: JSON.parse(row.blocked_by),
+      discoveredFrom: JSON.parse(row.discovered_from),
+      related: JSON.parse(row.related),
+      criteria: parseOptionalJson(row.criteria),
+      covers: parseOptionalJson(row.covers),
+    };
+  } catch {
+    return undefined;
+  }
+};
 
 const parseCachedTicket = (raw: unknown): CachedTicket | undefined => {
   const row = ticketRowSchema.safeParse(raw);
@@ -85,17 +101,23 @@ const parseCachedTicket = (raw: unknown): CachedTicket | undefined => {
     return undefined;
   }
 
+  const lists = parseListColumns(row.data);
+
+  if (lists === undefined) {
+    return undefined;
+  }
+
   const frontMatter = ticketFrontMatterSchema.safeParse({
     kind: row.data.kind,
     title: row.data.title,
     project: row.data.project,
     parent: row.data.parent ?? undefined,
     rank: row.data.rank ?? undefined,
-    blockedBy: row.data.blocked_by,
-    discoveredFrom: row.data.discovered_from,
-    related: row.data.related,
-    criteria: row.data.criteria ?? undefined,
-    covers: row.data.covers ?? undefined,
+    blockedBy: lists.blockedBy,
+    discoveredFrom: lists.discoveredFrom,
+    related: lists.related,
+    criteria: lists.criteria,
+    covers: lists.covers,
     status: row.data.status,
     archived: row.data.archived ?? undefined,
   });
