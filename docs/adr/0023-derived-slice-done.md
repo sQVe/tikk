@@ -17,10 +17,14 @@ shows as merged but unverified.
 
 Open tasks at merge stay open and flag the slice until each is accepted or canceled with a reason.
 
-PR facts come from `tikk reconcile`. It runs on `ready`, `status`, TUI refresh, and after PR
-actions. It checks every PR that tikk last saw as open, so a merge is never missed. A `pr` fact with
-a merge commit wins over one without. Each derived state shows the age of its oldest input. Items
-with stale facts stay out of "needs you" and show as unknown.
+PR facts come from `tikk reconcile`. It runs on `ready` and `needs`, and after `tikk pr link`. It
+checks every PR that tikk last saw as open, so a merge is never missed. A PR merged into another
+branch counts only once its work reaches trunk. A `pr` fact with a merge commit wins over one
+without. Each derived state shows the age of its oldest input. Items with stale facts stay out of
+"needs you" and show as unknown.
+
+`tikk audit <slice> --head <sha> --base <sha> --verdicts-file <path>` records one verdict for each
+criterion of the slice. An audit counts only when its head matches the PR head at merge.
 
 ## Consequences
 

@@ -14,6 +14,8 @@ export interface CliRun {
 export interface CliFixtureOptions {
   machine?: string;
   remotePath?: string;
+  // A folder that goes first on PATH, such as one that holds a fake gh.
+  pathPrefix?: string;
 }
 
 export interface CliFixture {
@@ -82,9 +84,15 @@ export const createCliFixture = async (
   }
 
   const run = async (args: string[]): Promise<CliRun> => {
+    const environment = cliEnvironment(home, storePath);
+
+    if (options.pathPrefix !== undefined) {
+      environment.PATH = `${options.pathPrefix}:${Bun.env.PATH ?? ''}`;
+    }
+
     const child = Bun.spawn(['bun', 'run', entryPath, ...args, '--json'], {
       cwd: work,
-      env: cliEnvironment(home, storePath),
+      env: environment,
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
