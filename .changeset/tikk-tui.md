@@ -9,3 +9,4 @@ keys or `j` and `k` to move.
 
 The TUI reloads when tickets or facts change, also when another process writes them. Press `e` to
 open the selected ticket in `$EDITOR`. The TUI resumes after the editor exits and shows the edit.
+Queued editors run one at a time. Shutdown cancels queued editors without resuming the TUI.
