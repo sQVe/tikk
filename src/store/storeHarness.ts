@@ -65,7 +65,10 @@ export const nodeFactFiles: FactFileFunctions = {
 
 export const nodeLogFiles: LogFileFunctions = {
   mkdir: nodeTicketFiles.mkdir,
-  writeFileExclusive: nodeTicketFiles.writeFileExclusive,
+  writeFile: nodeTicketFiles.writeFile,
+  rename: nodeTicketFiles.rename,
+  unlink: nodeTicketFiles.unlink,
+  randomIdSuffix: nodeTicketFiles.randomIdSuffix,
 };
 
 export const nodeStoreLock: StoreLockFunctions = {

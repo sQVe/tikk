@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -54,14 +54,39 @@ it('stores a redacted text without the token', async () => {
   expect(text).not.toContain(token);
 });
 
+it('replaces a partial log left by an interrupted write', async () => {
+  const first = await storeLog(nodeLogFiles, store, 'complete log text\n');
+  const hash = first.ok ? first.value.hash : '';
+  const path = join(store.root, 'logs', `${hash}.log`);
+
+  await writeFile(path, 'compl');
+
+  const second = await storeLog(nodeLogFiles, store, 'complete log text\n');
+
+  expect(second).toEqual(first);
+  expect(await readFile(path, 'utf8')).toBe('complete log text\n');
+  expect(await readdir(join(store.root, 'logs'))).toEqual([`${hash}.log`]);
+});
+
 it('returns a failure when the write fails', async () => {
   const stored = await storeLog(
-    { ...nodeLogFiles, writeFileExclusive: () => Promise.reject(new Error('disk full')) },
+    { ...nodeLogFiles, writeFile: () => Promise.reject(new Error('disk full')) },
     store,
     'text',
   );
 
   expect(stored.ok).toBe(false);
+});
+
+it('leaves no file behind when the rename fails', async () => {
+  const stored = await storeLog(
+    { ...nodeLogFiles, rename: () => Promise.reject(new Error('rename failed')) },
+    store,
+    'text',
+  );
+
+  expect(stored.ok).toBe(false);
+  expect(await readdir(join(store.root, 'logs'))).toEqual([]);
 });
 
 it('returns a failure when the folder cannot be created', async () => {

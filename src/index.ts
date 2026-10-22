@@ -166,7 +166,10 @@ const ticketFiles: TicketFileFunctions = {
 
 const logFiles: LogFileFunctions = {
   mkdir: ticketFiles.mkdir,
-  writeFileExclusive: ticketFiles.writeFileExclusive,
+  writeFile: ticketFiles.writeFile,
+  rename: ticketFiles.rename,
+  unlink: ticketFiles.unlink,
+  randomIdSuffix: ticketFiles.randomIdSuffix,
 };
 
 const factFiles: FactFileFunctions = {
