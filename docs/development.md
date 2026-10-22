@@ -24,6 +24,18 @@ bun run build
 
 `bun run build` compiles `src/index.ts` into the `dist/tikk` binary.
 
+## Install the command
+
+```sh
+bun run install:local
+```
+
+This compiles tikk and copies the binary to `~/.local/bin/tikk`. Set `TIKK_INSTALL_DIR` to use
+another folder. The folder must be on your `PATH`. Run the command again to update the installed
+`tikk`.
+
+The binary finds its store from `TIKK_HOME` or `~/.local/share/tikk`, never from the checkout.
+
 ## Check changes
 
 | Command                                     | Use                                                                       |
