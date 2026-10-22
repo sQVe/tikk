@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, it } from 'bun:test';
+import { afterEach, beforeEach, expect, it, setDefaultTimeout } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { chmod, mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
@@ -25,6 +25,9 @@ interface SyncReport {
 interface AliasSyncReport extends SyncReport {
   aliases: { from: string; to: string; path: string }[];
 }
+
+// Each test runs the CLI and Git in child processes, which takes seconds on a busy machine.
+setDefaultTimeout(30_000);
 
 let clones: CloneFixtures | undefined;
 let single: CliFixture | undefined;
@@ -272,7 +275,7 @@ it('a burst of writes on a store with a remote reaches the remote with no explic
   const count = await waitForRemoteCommits(remotePath, baseline + 1);
 
   expect(count).toBeGreaterThan(baseline);
-}, 30_000);
+});
 
 const writeHandTicket = async (
   fixture: CliFixture,
