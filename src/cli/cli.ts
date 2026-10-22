@@ -1,5 +1,4 @@
 import packageJson from '../../package.json' with { type: 'json' };
-import { sweepArchive } from './archiveSweep.ts';
 import { checkCommand } from './checkCommand.ts';
 import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
@@ -11,6 +10,7 @@ import { reconcileCommand } from './prReconcile.ts';
 import { qaCommand } from './qaCommand.ts';
 import { readyCommand } from './readyCommand.ts';
 import { reviewCommand } from './reviewCommand.ts';
+import { refreshSession } from './sessionRefresh.ts';
 import { sliceAudit } from './sliceAudit.ts';
 import { syncCommand } from './syncCommand.ts';
 import { taskClaim, taskRelease } from './taskClaim.ts';
@@ -24,7 +24,10 @@ import { ticketList } from './ticketList.ts';
 import { ticketNew } from './ticketNew.ts';
 import { ticketShow } from './ticketShow.ts';
 
-export type { CliEffects, CliSession } from './cliEffects.ts';
+export type { CliEffects, CliFailure, CliSession } from './cliEffects.ts';
+export { openNeedsSession } from './needsSession.ts';
+export type { NeedsSession } from './needsSession.ts';
+export type { NeedView, NeedsReading } from './needsCommand.ts';
 
 export interface CliStreams {
   stdout: (text: string) => void;
@@ -95,13 +98,11 @@ const runCommand = async (
 
   using session = opened.value;
 
-  const refreshed = await session.refresh();
+  const refreshed = await refreshSession(effects, session);
 
   if (!refreshed.ok) {
-    return { ok: false, reason: { code: 'storeError', message: refreshed.reason.message } };
+    return refreshed;
   }
-
-  await sweepArchive(effects, session);
 
   return await run({ args, json, effects, session });
 };

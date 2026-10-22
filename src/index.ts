@@ -19,7 +19,7 @@ import { dirname, join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
 import type { CacheFiles, TicketCache } from './cache/cache.ts';
-import { runCli } from './cli/cli.ts';
+import { openNeedsSession, runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
 import { parseFactLine } from './fact/fact.ts';
 import { resolveMachine, resolveProject } from './project.ts';
@@ -68,8 +68,8 @@ import type {
 import type { TicketId } from './ticket/ticket.ts';
 
 const homeDirectory = homedir();
-const storeRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
-const cachePath = join(homeDirectory, '.cache', 'tikk', 'index.db');
+const defaultStoreRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
+const defaultCachePath = join(homeDirectory, '.cache', 'tikk', 'index.db');
 
 const spawnGit = async (args: string[]): Promise<GitOutcome> => {
   try {
@@ -283,42 +283,6 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
   };
 };
 
-const openFailureCode = (): 'storeError' | 'notInitialized' => {
-  const configured = existsSync(join(storeRoot, 'tikk.json'));
-
-  return configured ? 'storeError' : 'notInitialized';
-};
-
-const openSession: CliEffects['openSession'] = async () => {
-  const store = await openStore(storeRoot, storeFiles);
-
-  if (store.ok) {
-    const cache = openCache(cachePath);
-
-    if (!cache.ok) {
-      return { ok: false, reason: { code: 'storeError', message: cache.reason.message } };
-    }
-
-    return { ok: true, value: sessionFor(store.value, cache.value) };
-  }
-
-  return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
-};
-
-const initLocalStore = async (): Promise<
-  Result<{ store: string; created: boolean }, { message: string }>
-> => {
-  const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
-
-  if (!initialized.ok) {
-    return initialized;
-  }
-
-  const { store, created } = initialized.value;
-
-  return { ok: true, value: { store: store.root, created } };
-};
-
 // GH_PROMPT_DISABLED makes gh fail instead of asking questions, since no one may be at the terminal.
 const runGh: CliEffects['runGh'] = async (args, signal) => {
   try {
@@ -373,174 +337,12 @@ const writeBlob: SyncFunctions['writeBlob'] = async (root, text) => {
   return { ok: false, reason: { message: `"git hash-object" failed: ${stderr.trim()}` } };
 };
 
-const listAliases: SyncFunctions['listAliases'] = async () => {
-  const machine = await resolveMachine(projectEffects);
-
-  if (!machine.ok) {
-    return [];
-  }
-
-  const directory = join(storeRoot, 'facts', machine.value);
-  const names = await readdir(directory).catch(() => []);
-
-  const jsonlNames = names.filter((name) => name.endsWith('.jsonl'));
-
-  const perFile = await Promise.all(
-    jsonlNames.map(async (name) => {
-      const text = await readFile(join(directory, name), 'utf8').catch(() => '');
-      const path = join('facts', machine.value, name);
-
-      return text
-        .split('\n')
-        .filter((line) => line !== '')
-        .flatMap((line) => {
-          const parsed = parseFactLine(line);
-
-          return parsed.ok && parsed.value.kind === 'alias'
-            ? [{ from: parsed.value.from, to: parsed.value.ticket, path }]
-            : [];
-        });
-    }),
-  );
-
-  return perFile.flat();
-};
-
-const syncFunctions: SyncFunctions = {
-  runGit: runSyncGit,
-  writeBlob,
-  listAliases,
-  commitArguments: (root) => commitArguments(runSyncGit, root),
-  lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
-  stat: (path) => stat(path),
-  readFile: (path) => readFile(path, 'utf8'),
-  now: () => Date.now(),
-  readdir: (directory) => readdir(directory),
-  rename: (from, to) => rename(from, to),
-  link: (existingPath, newPath) => link(existingPath, newPath),
-  unlink: (path) => unlink(path),
-  randomIdSuffix: () => newIdSuffix(),
-  appendAlias: async (alias) => {
-    const machine = await resolveMachine(projectEffects);
-
-    if (!machine.ok) {
-      return { ok: false, reason: { message: machine.reason.message } };
-    }
-
-    const fact = { version: 1, kind: 'alias', machine: machine.value, ...alias } as const;
-    const appended = await appendFact(factFiles, { root: storeRoot }, machine.value, fact);
-
-    return appended.ok ? appended : { ok: false, reason: { message: appended.reason.message } };
-  },
-};
-
 // A compiled binary runs itself. Otherwise the child runs this script with the same Bun.
 const backgroundCommand = (): string[] => {
   const compiled = Bun.main.startsWith('/$bunfs/');
   const entry = compiled ? [] : ['run', Bun.main];
 
   return [process.execPath, ...entry, 'sync', '--background'];
-};
-
-const startBackground = (): number | undefined => {
-  const child = Bun.spawn(backgroundCommand(), {
-    detached: true,
-    stdin: 'ignore',
-    stdout: 'ignore',
-    stderr: 'ignore',
-  });
-
-  child.unref();
-
-  return child.pid;
-};
-
-const scheduleFunctions: SyncScheduleFunctions = {
-  pid: process.pid,
-  runGit: runSyncGit,
-  writeFile: storeLock.writeFile,
-  link: storeLock.link,
-  rename: (from, to) => rename(from, to),
-  unlink: storeLock.unlink,
-  readFile: storeLock.readFile,
-  randomSuffix: storeLock.randomSuffix,
-  isProcessAlive: storeLock.isProcessAlive,
-  sleep: storeLock.sleep,
-  startBackground,
-};
-
-const remoteInitFunctions: RemoteInitFunctions = {
-  ...syncFunctions,
-  initStore: initLocalStore,
-  makeTempFolder: async (prefix) => {
-    await mkdir(dirname(prefix), { recursive: true });
-
-    return mkdtemp(prefix);
-  },
-  removeTree: (path) => rm(path, { recursive: true, force: true }),
-};
-
-const syncFailureCode = (reason: SyncReason): 'conflict' | 'locked' | 'storeError' =>
-  reason.kind === 'failed' ? 'storeError' : reason.kind;
-
-const runSync: CliEffects['syncStore'] = async () => {
-  const store = await openStore(storeRoot, storeFiles);
-
-  if (!store.ok) {
-    return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
-  }
-
-  const synced = await syncStore(syncFunctions, store.value.root, {
-    allowUnrelatedHistories: false,
-  });
-
-  if (!synced.ok) {
-    return {
-      ok: false,
-      reason: { code: syncFailureCode(synced.reason), message: synced.reason.message },
-    };
-  }
-
-  return synced;
-};
-
-const runBackground: CliEffects['runBackgroundSync'] = async () => {
-  const store = await openStore(storeRoot, storeFiles);
-
-  if (store.ok) {
-    await runBackgroundSync(scheduleFunctions, store.value.root, async () => {
-      const synced = await runSync();
-
-      if (!synced.ok) {
-        return false;
-      }
-
-      const settling = await settlingPaths(syncFunctions, store.value.root, synced.value.pending);
-
-      return settling.length > 0;
-    });
-  }
-};
-
-const runScheduleSync: CliEffects['scheduleSync'] = () =>
-  scheduleSync(scheduleFunctions, storeRoot);
-
-const runFetch: CliEffects['fetchRemote'] = () => fetchOrigin(syncFunctions, storeRoot);
-
-const runMergeFetched: CliEffects['mergeFetched'] = async () => {
-  await mergeFetched(syncFunctions, storeRoot);
-};
-
-const runRemoteInit: CliEffects['initRemoteStore'] = async (url) => {
-  const initialized = await initRemoteStore(remoteInitFunctions, storeRoot, url);
-
-  if (!initialized.ok) {
-    const { reason } = initialized;
-
-    return { ok: false, reason: { code: syncFailureCode(reason), message: reason.message } };
-  }
-
-  return initialized;
 };
 
 const runEditor = async (path: string): Promise<Result<undefined, { message: string }>> => {
@@ -557,7 +359,10 @@ const runEditor = async (path: string): Promise<Result<undefined, { message: str
     const exitCode = await child.exited;
 
     if (exitCode !== 0) {
-      return { ok: false, reason: { message: `The editor "${editor}" exited with ${exitCode}.` } };
+      return {
+        ok: false,
+        reason: { message: `The editor "${editor}" exited with ${exitCode}.` },
+      };
     }
 
     return { ok: true, value: undefined };
@@ -566,34 +371,259 @@ const runEditor = async (path: string): Promise<Result<undefined, { message: str
   }
 };
 
-const projectEffects: ProjectEffects = {
-  runGit: spawnGit,
-  readConfigFile,
-  homeDirectory,
-  hostName: hostname(),
+const syncFailureCode = (reason: SyncReason): 'conflict' | 'locked' | 'storeError' =>
+  reason.kind === 'failed' ? 'storeError' : reason.kind;
+
+export const createEffects = (storeRoot: string, cachePath: string): CliEffects => {
+  const openFailureCode = (): 'storeError' | 'notInitialized' => {
+    const configured = existsSync(join(storeRoot, 'tikk.json'));
+
+    return configured ? 'storeError' : 'notInitialized';
+  };
+
+  const openSession: CliEffects['openSession'] = async () => {
+    const store = await openStore(storeRoot, storeFiles);
+
+    if (store.ok) {
+      const cache = openCache(cachePath);
+
+      if (!cache.ok) {
+        return { ok: false, reason: { code: 'storeError', message: cache.reason.message } };
+      }
+
+      return { ok: true, value: sessionFor(store.value, cache.value) };
+    }
+
+    return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
+  };
+
+  const initLocalStore = async (): Promise<
+    Result<{ store: string; created: boolean }, { message: string }>
+  > => {
+    const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
+
+    if (!initialized.ok) {
+      return initialized;
+    }
+
+    const { store, created } = initialized.value;
+
+    return { ok: true, value: { store: store.root, created } };
+  };
+
+  const listAliases: SyncFunctions['listAliases'] = async () => {
+    const machine = await resolveMachine(projectEffects);
+
+    if (!machine.ok) {
+      return [];
+    }
+
+    const directory = join(storeRoot, 'facts', machine.value);
+    const names = await readdir(directory).catch(() => []);
+
+    const jsonlNames = names.filter((name) => name.endsWith('.jsonl'));
+
+    const perFile = await Promise.all(
+      jsonlNames.map(async (name) => {
+        const text = await readFile(join(directory, name), 'utf8').catch(() => '');
+        const path = join('facts', machine.value, name);
+
+        return text
+          .split('\n')
+          .filter((line) => line !== '')
+          .flatMap((line) => {
+            const parsed = parseFactLine(line);
+
+            return parsed.ok && parsed.value.kind === 'alias'
+              ? [{ from: parsed.value.from, to: parsed.value.ticket, path }]
+              : [];
+          });
+      }),
+    );
+
+    return perFile.flat();
+  };
+
+  const syncFunctions: SyncFunctions = {
+    runGit: runSyncGit,
+    writeBlob,
+    listAliases,
+    commitArguments: (root) => commitArguments(runSyncGit, root),
+    lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
+    stat: (path) => stat(path),
+    readFile: (path) => readFile(path, 'utf8'),
+    now: () => Date.now(),
+    readdir: (directory) => readdir(directory),
+    rename: (from, to) => rename(from, to),
+    link: (existingPath, newPath) => link(existingPath, newPath),
+    unlink: (path) => unlink(path),
+    randomIdSuffix: () => newIdSuffix(),
+    appendAlias: async (alias) => {
+      const machine = await resolveMachine(projectEffects);
+
+      if (!machine.ok) {
+        return { ok: false, reason: { message: machine.reason.message } };
+      }
+
+      const fact = { version: 1, kind: 'alias', machine: machine.value, ...alias } as const;
+      const appended = await appendFact(factFiles, { root: storeRoot }, machine.value, fact);
+
+      return appended.ok ? appended : { ok: false, reason: { message: appended.reason.message } };
+    },
+  };
+
+  const startBackground = (): number | undefined => {
+    const child = Bun.spawn(backgroundCommand(), {
+      detached: true,
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+
+    child.unref();
+
+    return child.pid;
+  };
+
+  const scheduleFunctions: SyncScheduleFunctions = {
+    pid: process.pid,
+    runGit: runSyncGit,
+    writeFile: storeLock.writeFile,
+    link: storeLock.link,
+    rename: (from, to) => rename(from, to),
+    unlink: storeLock.unlink,
+    readFile: storeLock.readFile,
+    randomSuffix: storeLock.randomSuffix,
+    isProcessAlive: storeLock.isProcessAlive,
+    sleep: storeLock.sleep,
+    startBackground,
+  };
+
+  const remoteInitFunctions: RemoteInitFunctions = {
+    ...syncFunctions,
+    initStore: initLocalStore,
+    makeTempFolder: async (prefix) => {
+      await mkdir(dirname(prefix), { recursive: true });
+
+      return mkdtemp(prefix);
+    },
+    removeTree: (path) => rm(path, { recursive: true, force: true }),
+  };
+
+  const runSync: CliEffects['syncStore'] = async () => {
+    const store = await openStore(storeRoot, storeFiles);
+
+    if (!store.ok) {
+      return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
+    }
+
+    const synced = await syncStore(syncFunctions, store.value.root, {
+      allowUnrelatedHistories: false,
+    });
+
+    if (!synced.ok) {
+      return {
+        ok: false,
+        reason: { code: syncFailureCode(synced.reason), message: synced.reason.message },
+      };
+    }
+
+    return synced;
+  };
+
+  const runBackground: CliEffects['runBackgroundSync'] = async () => {
+    const store = await openStore(storeRoot, storeFiles);
+
+    if (store.ok) {
+      await runBackgroundSync(scheduleFunctions, store.value.root, async () => {
+        const synced = await runSync();
+
+        if (!synced.ok) {
+          return false;
+        }
+
+        const settling = await settlingPaths(syncFunctions, store.value.root, synced.value.pending);
+
+        return settling.length > 0;
+      });
+    }
+  };
+
+  const runScheduleSync: CliEffects['scheduleSync'] = () =>
+    scheduleSync(scheduleFunctions, storeRoot);
+
+  const runFetch: CliEffects['fetchRemote'] = () => fetchOrigin(syncFunctions, storeRoot);
+
+  const runMergeFetched: CliEffects['mergeFetched'] = async () => {
+    await mergeFetched(syncFunctions, storeRoot);
+  };
+
+  const runRemoteInit: CliEffects['initRemoteStore'] = async (url) => {
+    const initialized = await initRemoteStore(remoteInitFunctions, storeRoot, url);
+
+    if (!initialized.ok) {
+      const { reason } = initialized;
+
+      return { ok: false, reason: { code: syncFailureCode(reason), message: reason.message } };
+    }
+
+    return initialized;
+  };
+
+  const projectEffects: ProjectEffects = {
+    runGit: spawnGit,
+    readConfigFile,
+    homeDirectory,
+    hostName: hostname(),
+  };
+
+  return {
+    initStore: initLocalStore,
+    initRemoteStore: runRemoteInit,
+    syncStore: runSync,
+    runBackgroundSync: runBackground,
+    scheduleSync: runScheduleSync,
+    fetchRemote: runFetch,
+    mergeFetched: runMergeFetched,
+    openSession,
+    resolveProject: () => resolveProject(process.cwd(), projectEffects),
+    resolveMachine: () => resolveMachine(projectEffects),
+    runGh,
+    readTextFile,
+    runEditor,
+    now: () => new Date(),
+  };
 };
 
-const effects: CliEffects = {
-  initStore: initLocalStore,
-  initRemoteStore: runRemoteInit,
-  syncStore: runSync,
-  runBackgroundSync: runBackground,
-  scheduleSync: runScheduleSync,
-  fetchRemote: runFetch,
-  mergeFetched: runMergeFetched,
-  openSession,
-  resolveProject: () => resolveProject(process.cwd(), projectEffects),
-  resolveMachine: () => resolveMachine(projectEffects),
-  runGh,
-  readTextFile,
-  runEditor,
-  now: () => new Date(),
+const runTerminal = async (effects: CliEffects): Promise<void> => {
+  const opened = await openNeedsSession(effects);
+
+  if (!opened.ok) {
+    process.stderr.write(`${opened.reason.message}\n`);
+    process.exitCode = 1;
+
+    return;
+  }
+
+  const { startTerminal } = await import('./terminal.tsx');
+
+  await startTerminal({ needs: opened.value });
 };
+
+const startsTerminal = (args: string[]): boolean =>
+  args.length === 0 && process.stdin.isTTY && process.stdout.isTTY;
 
 // The mutation test runner imports this file into its test process, where the CLI must not run.
 if (import.meta.main) {
-  process.exitCode = await runCli(process.argv.slice(2), effects, {
-    stdout: (text) => process.stdout.write(text),
-    stderr: (text) => process.stderr.write(text),
-  });
+  const args = process.argv.slice(2);
+  const effects = createEffects(defaultStoreRoot, defaultCachePath);
+
+  if (startsTerminal(args)) {
+    await runTerminal(effects);
+  } else {
+    process.exitCode = await runCli(args, effects, {
+      stdout: (text) => process.stdout.write(text),
+      stderr: (text) => process.stderr.write(text),
+    });
+  }
 }
