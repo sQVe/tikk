@@ -71,28 +71,12 @@ const compareRank = (left: TaskTicket, right: TaskTicket): number => {
   return left.id < right.id ? -1 : Number(left.id > right.id);
 };
 
-const groupByTicket = (facts: Fact[]): Map<string, Fact[]> => {
-  const grouped = new Map<string, Fact[]>();
-
-  for (const fact of facts) {
-    const own = grouped.get(fact.ticket);
-
-    if (own === undefined) {
-      grouped.set(fact.ticket, [fact]);
-    } else {
-      own.push(fact);
-    }
-  }
-
-  return grouped;
-};
-
 const deriveStates = (
   tickets: TaskTicket[],
   facts: Fact[],
   now: Date,
 ): Map<string, Consideration> => {
-  const grouped = groupByTicket(facts);
+  const grouped = Map.groupBy(facts, (fact) => fact.ticket);
   const states = new Map<string, Consideration>();
 
   for (const ticket of tickets) {
