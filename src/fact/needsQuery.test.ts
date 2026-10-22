@@ -171,6 +171,48 @@ describe('selectNeeds', () => {
 
     expect(selectNeeds(tickets, facts, now)).toEqual([]);
   });
+
+  it('lists a blocked finding on a slice and drops it after a fixed status', () => {
+    const slice = makeTicket('3467', { kind: 'slice' });
+    const target = { repository: 'r', head: 'a', base: 'main', changeHash: 'c' };
+
+    const review = makeFact('3467', {
+      kind: 'review',
+      target,
+      captureHash: 'h',
+      mode: 'm',
+      findings: [{ fingerprint: 'fp', severity: 'high', location: 'f', claim: 'Broken' }],
+    });
+
+    const blocked = makeFact('3467', {
+      kind: 'finding',
+      fingerprint: 'fp',
+      status: 'blocked',
+      actor: 'a',
+      reason: 'r',
+      at: '2026-10-20T11:00:00.000Z',
+    });
+
+    const fixed = makeFact('3467', {
+      kind: 'finding',
+      fingerprint: 'fp',
+      status: 'fixed',
+      actor: 'a',
+      reason: 'r',
+      at: '2026-10-20T11:30:00.000Z',
+    });
+
+    const [item] = selectNeeds([slice], [review, blocked], now);
+
+    expect(item).toMatchObject({
+      reason: 'blockedFinding',
+      since: '2026-10-20T11:00:00.000Z',
+      fingerprint: 'fp',
+      claim: 'Broken',
+    });
+
+    expect(selectNeeds([slice], [review, blocked, fixed], now)).toEqual([]);
+  });
 });
 
 describe('selectNeeds for slices', () => {

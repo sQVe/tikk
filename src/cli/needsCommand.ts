@@ -32,6 +32,8 @@ const itemView = (item: NeedItem<CliTicket>): Record<string, unknown> => ({
   ageSeconds: item.ageSeconds,
   ...(item.holder === undefined ? {} : { holder: item.holder }),
   ...(item.openTasks === undefined ? {} : { openTasks: item.openTasks }),
+  ...(item.fingerprint === undefined ? {} : { fingerprint: item.fingerprint }),
+  ...(item.claim === undefined ? {} : { claim: item.claim }),
   ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
 });
 

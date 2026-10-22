@@ -16,6 +16,15 @@ const auditExtra = (verdict: string): Record<string, unknown> => ({
   verdicts: [{ criterion: 'It works.', verdict, evidence: 'Ran it.' }],
 });
 
+const target = { repository: 'r', head: 'a', base: 'main', changeHash: 'c' };
+
+const reviewFinding = (fingerprint: string) => ({
+  fingerprint,
+  severity: 'low',
+  location: 'f',
+  claim: 'c',
+});
+
 describe('parseFactLine', () => {
   it('parses each fact kind', () => {
     const claim = parseFactLine(
@@ -117,5 +126,49 @@ describe('serializeFactLine', () => {
     expect(text.endsWith('\n')).toBe(true);
     expect(text.slice(0, -1)).not.toContain('\n');
     expect(parseFactLine(text.trim())).toEqual(parsed);
+  });
+
+  it('parses check, review, and finding facts', () => {
+    const check = parseFactLine(line({ kind: 'check', target, command: 'x', exitCode: 0 }));
+
+    const review = parseFactLine(
+      line({ kind: 'review', target, captureHash: 'h', mode: 'm', findings: [reviewFinding('a')] }),
+    );
+
+    const finding = parseFactLine(
+      line({ kind: 'finding', fingerprint: 'a', status: 'blocked', actor: 'x', reason: 'y' }),
+    );
+
+    expect([check.ok, review.ok, finding.ok]).toEqual([true, true, true]);
+  });
+
+  it('rejects a review with duplicate fingerprints', () => {
+    const result = parseFactLine(
+      line({
+        kind: 'review',
+        target,
+        captureHash: 'h',
+        mode: 'm',
+        findings: [reviewFinding('a'), reviewFinding('a')],
+      }),
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a finding with an unknown status', () => {
+    const result = parseFactLine(
+      line({ kind: 'finding', fingerprint: 'a', status: 'maybe', actor: 'x', reason: 'y' }),
+    );
+
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects a check log that is not a SHA-256 hash', () => {
+    const result = parseFactLine(
+      line({ kind: 'check', target, command: 'x', exitCode: 0, log: 'abc' }),
+    );
+
+    expect(result.ok).toBe(false);
   });
 });

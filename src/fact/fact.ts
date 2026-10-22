@@ -1,5 +1,8 @@
 export { archiveDateOf, findArchiveDue } from './archiveDue.ts';
 export type { ArchiveDue } from './archiveDue.ts';
+export { selectChecks } from './checkRecords.ts';
+export { selectFindings } from './findingStatus.ts';
+export { redactSecrets } from './tokenRedaction.ts';
 export { parseFactLine, serializeFactLine, validateFact } from './factLine.ts';
 export type { Fact } from './factLine.ts';
 export { selectNeeds } from './needsQuery.ts';

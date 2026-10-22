@@ -1,11 +1,18 @@
 import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
+import { selectFindings } from './findingStatus.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
 import { deriveTaskStateFromOwnFacts } from './taskState.ts';
 import type { TaskTicket } from './taskState.ts';
 
-type NeedReason = 'question' | 'submitted' | 'staleClaim' | 'mergedUnverified' | 'flagged';
+type NeedReason =
+  | 'question'
+  | 'submitted'
+  | 'staleClaim'
+  | 'mergedUnverified'
+  | 'flagged'
+  | 'blockedFinding';
 
 export interface NeedItem<Ticket extends TaskTicket> {
   ticket: Ticket;
@@ -14,6 +21,8 @@ export interface NeedItem<Ticket extends TaskTicket> {
   ageSeconds: number;
   holder?: string;
   openTasks?: TicketId[];
+  fingerprint?: string;
+  claim?: string;
 }
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
@@ -105,6 +114,34 @@ const needsOf = <Ticket extends TaskTicket>(
   return items;
 };
 
+const blockedFindingsOf = <Ticket extends TaskTicket>(
+  ticket: Ticket,
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] =>
+  selectFindings(own, ticket.id)
+    .filter((finding) => finding.status === 'blocked')
+    .flatMap((finding) => {
+      const statusFact = own.findLast(
+        (fact) => fact.kind === 'finding' && fact.fingerprint === finding.fingerprint,
+      );
+
+      if (statusFact === undefined) {
+        return [];
+      }
+
+      return [
+        {
+          ticket,
+          reason: 'blockedFinding' as const,
+          since: statusFact.at,
+          ageSeconds: ageSecondsOf(statusFact.at, now),
+          fingerprint: finding.fingerprint,
+          claim: finding.claim,
+        },
+      ];
+    });
+
 const isConsidered = (ticket: TaskTicket): boolean => {
   const { frontMatter } = ticket;
 
@@ -179,5 +216,9 @@ export const selectNeeds = <Ticket extends TaskTicket>(
     .filter(isOpenSlice)
     .flatMap((slice) => sliceNeedsOf(slice, index, now));
 
-  return [...taskItems, ...sliceItems].toSorted(byOldest);
+  const findingItems = tickets
+    .filter((ticket) => ticket.frontMatter.archived === undefined)
+    .flatMap((ticket) => blockedFindingsOf(ticket, factsByTicket.get(ticket.id) ?? [], now));
+
+  return [...taskItems, ...sliceItems, ...findingItems].toSorted(byOldest);
 };
