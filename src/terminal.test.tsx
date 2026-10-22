@@ -71,6 +71,7 @@ const start = async () => {
 
   const needs: NeedsSession = {
     load: () => Promise.resolve({ ok: true, value: { items: [], reconcileProblems: [] } }),
+    loadTree: () => Promise.resolve({ ok: true, value: [] }),
     close: async () => {
       await closing.gate;
       calls.dispose += 1;

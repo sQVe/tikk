@@ -1,3 +1,5 @@
+import { buildPlanTree } from '../fact/fact.ts';
+import type { TreeGroup } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { CliEffects, CliFailure } from './cliEffects.ts';
 import { readNeeds } from './needsCommand.ts';
@@ -6,11 +8,12 @@ import { refreshSession } from './sessionRefresh.ts';
 
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
+  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
   // Stops running work, waits for it to settle, then releases the session.
   close: () => Promise<void>;
 }
 
-// One session stays open for the TUI's lifetime. Each load reads like `tikk needs --json` does.
+// One session stays open for the TUI's lifetime. Each load reads like `tikk needs --json` does, and each tree load reads the plan tree.
 export const openNeedsSession = async (
   effects: CliEffects,
 ): Promise<Result<NeedsSession, CliFailure>> => {
@@ -39,8 +42,25 @@ export const openNeedsSession = async (
     return readNeeds({ effects: loadEffects, session });
   };
 
-  const load = (): Promise<Result<NeedsReading, CliFailure>> => {
-    const running = read().finally(() => {
+  const readTree = async (): Promise<Result<TreeGroup[], CliFailure>> => {
+    const refreshed = await refreshSession(loadEffects, session);
+
+    if (!refreshed.ok) {
+      return refreshed;
+    }
+
+    const tickets = session.listTickets({ includeArchived: true });
+    const facts = await session.listFacts();
+
+    if (!facts.ok) {
+      return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+    }
+
+    return { ok: true, value: buildPlanTree(tickets, facts.value, effects.now()) };
+  };
+
+  const track = <Value>(start: () => Promise<Value>): Promise<Value> => {
+    const running = start().finally(() => {
       pending.delete(running);
     });
 
@@ -49,11 +69,14 @@ export const openNeedsSession = async (
     return running;
   };
 
+  const load = () => track(read);
+  const loadTree = () => track(readTree);
+
   const close = async (): Promise<void> => {
     closing.abort();
     await Promise.allSettled(pending);
     session[Symbol.dispose]();
   };
 
-  return { ok: true, value: { load, close } };
+  return { ok: true, value: { load, loadTree, close } };
 };

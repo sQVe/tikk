@@ -6,7 +6,7 @@ import { testRender } from '@opentui/react/test-utils';
 import { act, useMemo } from 'react';
 import type { ReactNode } from 'react';
 
-import type { NeedView } from '../cli/cli.ts';
+import type { NeedView, TreeGroup } from '../cli/cli.ts';
 import { App } from './tui.tsx';
 import type { AppProps } from './tui.tsx';
 
@@ -35,6 +35,7 @@ const mount = async (
   items: NeedView[],
   size: { width: number; height: number },
   problems: string[] = [],
+  groups: TreeGroup[] = [],
 ) => {
   const reconcileProblems = problems.map((message) => ({
     ticket: null,
@@ -45,6 +46,7 @@ const mount = async (
 
   const effects = {
     load: () => Promise.resolve({ ok: true as const, value: { items, reconcileProblems } }),
+    loadTree: () => Promise.resolve({ ok: true as const, value: groups }),
   };
 
   const setup = await act(() =>
@@ -65,6 +67,8 @@ const press = async (setup: Setup, key: string): Promise<void> => {
   await act(async () => {
     if (key === 'up' || key === 'down') {
       setup.mockInput.pressArrow(key);
+    } else if (key === 'tab') {
+      setup.mockInput.pressTab();
     } else {
       setup.mockInput.pressKey(key);
     }
@@ -139,4 +143,74 @@ it('moves the selected row with j, k, down, and up', async () => {
 
   await press(setup, 'up');
   expect(selectedLine(setup)).toContain('First');
+});
+
+const treeGroups = (): TreeGroup[] => {
+  const planId = 'demo-3401' as NeedView['id'];
+  const activeId = 'demo-3402' as NeedView['id'];
+  const taskId = 'demo-3403' as NeedView['id'];
+
+  return [
+    {
+      plan: { id: planId, title: 'Plan title', status: 'open' },
+      slices: [
+        {
+          id: activeId,
+          title: 'Slice title',
+          state: 'active',
+          pr: 12,
+          tasks: [{ id: taskId, title: 'Task title', state: 'open' }],
+        },
+      ],
+    },
+  ];
+};
+
+it('shows the tree rows on tab and the home items on a second tab', async () => {
+  const setup = await mount([needView(0, 'First')], { width: 60, height: 8 }, [], treeGroups());
+
+  expect(setup.captureCharFrame()).toContain('First');
+
+  await press(setup, 'tab');
+
+  const tree = setup.captureCharFrame();
+
+  expect(tree).toContain('demo-3401  Plan title  open');
+  expect(tree).toContain('demo-3402  Slice title  active  #12');
+  expect(tree).toContain('demo-3403  Task title  open');
+  expect(tree).not.toContain('First');
+  expect(selectedLine(setup)).toContain('Plan title');
+
+  await press(setup, 'j');
+  expect(selectedLine(setup)).toContain('Slice title');
+
+  await press(setup, 'tab');
+
+  const home = setup.captureCharFrame();
+
+  expect(home).toContain('First');
+  expect(home).not.toContain('Plan title');
+});
+
+it('keeps the selected tree row in the frame when the tree is taller than the terminal', async () => {
+  const slices = Array.from({ length: 8 }, (_, index) => ({
+    id: `demo-${3410 + index}` as NeedView['id'],
+    title: `Slice ${index}`,
+    state: 'planned' as const,
+    pr: null,
+    tasks: [],
+  }));
+
+  const groups: TreeGroup[] = [{ plan: null, slices }];
+  const setup = await mount([], { width: 50, height: 5 }, [], groups);
+
+  await press(setup, 'tab');
+  expect(selectedLine(setup)).toContain('No plan');
+
+  for (let step = 0; step < 6; step += 1) {
+    await press(setup, 'j');
+  }
+
+  expect(selectedLine(setup)).toContain('Slice 5');
+  expect(setup.captureCharFrame()).not.toContain('No plan');
 });

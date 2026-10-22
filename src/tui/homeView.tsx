@@ -10,7 +10,7 @@ export interface HomeViewProps {
 
 export const singleLine = (text: string): string => text.replace(/\s*[\r\n\u2028\u2029]+\s*/g, ' ');
 
-const firstVisibleIndex = (selected: number, height: number): number =>
+export const firstVisibleIndex = (selected: number, height: number): number =>
   Math.max(0, selected - height + 1);
 
 const rowText = (item: NeedView, isSelected: boolean): string => {

@@ -10,6 +10,8 @@ export { parseReviewFindings } from './reviewFindings.ts';
 export type { ReviewFinding } from './reviewFindings.ts';
 export { selectNeeds } from './needsQuery.ts';
 export type { NeedItem } from './needsQuery.ts';
+export { buildPlanTree } from './planTree.ts';
+export type { TreeGroup } from './planTree.ts';
 export { selectReady } from './readyQueue.ts';
 export { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
 export type { SliceIndex, SliceState } from './sliceState.ts';
