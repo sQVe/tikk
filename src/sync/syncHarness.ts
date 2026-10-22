@@ -16,6 +16,8 @@ export interface FakeSync {
   renames: [string, string][];
   disk: Map<string, { text: string; mtimeMs: number }>;
   aliasWrites: () => number;
+  aliasRecords: { ticket: string; from: string; at: string }[];
+  suffixCalls: () => number;
   commands: () => string[];
   lockCalls: () => number;
   initCalls: () => number;
@@ -29,6 +31,11 @@ export interface FakeSyncOptions {
   // Entries per directory path; a directory not listed here uses `folder`.
   folders?: Record<string, string[]>;
   lockFails?: boolean;
+  // Replies for `randomIdSuffix` in order; the last one repeats.
+  suffixes?: string[];
+  appendAliasFails?: string;
+  blobFails?: string;
+  renameFails?: boolean;
   // Runs before each `link` call, so a test can write a file at the target.
   beforeLink?: (path: string, disk: Map<string, { text: string; mtimeMs: number }>) => void;
   aliases?: { from: string; to: string; path: string }[];
@@ -71,6 +78,8 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
   const renames: [string, string][] = [];
   const disk = new Map(Object.entries(options.files ?? {}));
+  const aliasRecords: { ticket: string; from: string; at: string }[] = [];
+  let suffixCount = 0;
   let aliasWrites = 0;
   let locked = false;
   let lockCount = 0;
@@ -96,6 +105,10 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
         : [...unsigned, '-c', 'user.name=tikk', '-c', 'user.email=tikk@localhost'];
     },
     writeBlob: (_root, text) => {
+      if (options.blobFails !== undefined) {
+        return Promise.resolve({ ok: false, reason: { message: options.blobFails } });
+      }
+
       blobs.push(text);
 
       return Promise.resolve({ ok: true, value: `blob${blobs.length}\n` });
@@ -149,6 +162,10 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       return folder === 'missing' ? missingFile() : Promise.resolve(folder);
     },
     rename: (from, to) => {
+      if (options.renameFails === true) {
+        return Promise.reject(new Error('rename failed'));
+      }
+
       renames.push([from, to]);
 
       const file = disk.get(from);
@@ -178,9 +195,21 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       return Promise.resolve();
     },
-    randomIdSuffix: () => 'zzzz',
-    appendAlias: () => {
+    randomIdSuffix: () => {
+      const list = options.suffixes ?? ['zzzz'];
+      const suffix = list[Math.min(suffixCount, list.length - 1)] ?? 'zzzz';
+
+      suffixCount += 1;
+
+      return suffix;
+    },
+    appendAlias: (alias) => {
+      if (options.appendAliasFails !== undefined) {
+        return Promise.resolve({ ok: false, reason: { message: options.appendAliasFails } });
+      }
+
       aliasWrites += 1;
+      aliasRecords.push(alias);
 
       return Promise.resolve({ ok: true, value: { path: '/store/facts/fake/2026-10.jsonl' } });
     },
@@ -198,6 +227,8 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     renames,
     disk,
     aliasWrites: () => aliasWrites,
+    aliasRecords,
+    suffixCalls: () => suffixCount,
     commands: () => gitCalls.map((call) => subcommandOf(call.args)),
     lockCalls: () => lockCount,
     initCalls: () => initCount,

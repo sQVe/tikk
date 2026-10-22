@@ -166,13 +166,9 @@ const withoutUnplacedAliases = (
 
     try {
       const fact: unknown = JSON.parse(line);
-
-      if (typeof fact !== 'object' || fact === null) {
-        return true;
-      }
-
-      const ticket = 'ticket' in fact ? fact.ticket : undefined;
-      const isAlias = 'kind' in fact && fact.kind === 'alias' && typeof ticket === 'string';
+      const fields = new Map<string, unknown>(fact instanceof Object ? Object.entries(fact) : []);
+      const ticket = fields.get('ticket');
+      const isAlias = fields.get('kind') === 'alias' && typeof ticket === 'string';
 
       return !isAlias || headNames.some((name) => name.startsWith(`${ticket}-`));
     } catch {
@@ -193,9 +189,7 @@ const filterFactText = async (
   headNames: string[],
 ): Promise<string> => {
   const head = await functions.runGit(['-C', root, 'show', `HEAD:${path}`]);
-  const headText = head.ok ? head.value : '';
-
-  const committedLines = new Set(headText.split('\n').filter((line) => line !== ''));
+  const committedLines = new Set(head.ok ? head.value.split('\n') : []);
 
   return withoutUnplacedAliases(text, headNames, committedLines);
 };
@@ -217,7 +211,7 @@ const listHeadTicketNames = async (
 
   const paths = listed.ok ? listed.value.split('\n') : [];
 
-  return paths.map((path) => path.split('/').at(-1) ?? '');
+  return paths.map((path) => path.slice(path.lastIndexOf('/') + 1));
 };
 
 // Returns the text to commit, or `undefined` when the file waits for a later sync.
@@ -287,8 +281,8 @@ const stageCandidates = async (
   const pending: string[] = [];
   const headNames = await listHeadTicketNames(functions, root);
 
-  for (const [index, checked] of texts.entries()) {
-    const path = candidates[index] ?? '';
+  for (const [index, path] of candidates.entries()) {
+    const checked = texts[index];
 
     if (checked === undefined) {
       pending.push(path);

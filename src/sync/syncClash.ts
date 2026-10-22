@@ -109,7 +109,7 @@ const addedAt = async (
 
   const first = log.ok ? log.value.split('\n')[0] : undefined;
 
-  if (first === undefined || first === '') {
+  if (first === '') {
     return undefined;
   }
 
@@ -119,16 +119,11 @@ const addedAt = async (
 };
 
 const byAge = (left: DatedFile, right: DatedFile): number => {
-  if (left.addedAt !== right.addedAt) {
-    if (left.addedAt === undefined) {
-      return 1;
-    }
+  const leftTime = left.addedAt ?? Number.POSITIVE_INFINITY;
+  const rightTime = right.addedAt ?? Number.POSITIVE_INFINITY;
 
-    if (right.addedAt === undefined) {
-      return -1;
-    }
-
-    return left.addedAt - right.addedAt;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
   }
 
   return left.file.fileName < right.file.fileName ? -1 : 1;
@@ -205,14 +200,31 @@ const reusableId = async (
   return undefined;
 };
 
-// The fact path is `undefined` for a reused alias.
+// A reused alias already has its fact, so only a new alias appends one.
+const aliasFactPath = async (
+  functions: SyncClashFunctions,
+  root: string,
+  record: { ticket: TicketId; from: TicketId; reusedPath: string | undefined },
+): Promise<Result<string, SyncReason>> => {
+  if (record.reusedPath !== undefined) {
+    return { ok: true, value: record.reusedPath };
+  }
+
+  const at = new Date(functions.now()).toISOString();
+  const appended = await functions.appendAlias({ ticket: record.ticket, from: record.from, at });
+
+  return appended.ok
+    ? { ok: true, value: relative(root, appended.value.path) }
+    : failed(appended.reason.message);
+};
+
 const renameFile = async (
   functions: SyncClashFunctions,
   root: string,
   project: ProjectName,
   file: ProjectFile,
   taken: Set<string>,
-): Promise<Result<{ alias: SyncAlias; factPath: string | undefined }, SyncReason>> => {
+): Promise<Result<{ alias: SyncAlias; factPath: string }, SyncReason>> => {
   const reused = await reusableId(functions, project, file, taken);
   const to = reused?.id ?? freeId(functions, project, taken);
 
@@ -222,17 +234,14 @@ const renameFile = async (
 
   taken.add(to);
 
-  let factPath = reused?.path;
+  const fact = await aliasFactPath(functions, root, {
+    ticket: to,
+    from: file.id,
+    reusedPath: reused?.path,
+  });
 
-  if (reused === undefined) {
-    const at = new Date(functions.now()).toISOString();
-    const appended = await functions.appendAlias({ ticket: to, from: file.id, at });
-
-    if (!appended.ok) {
-      return failed(appended.reason.message);
-    }
-
-    factPath = relative(root, appended.value.path);
+  if (!fact.ok) {
+    return fact;
   }
 
   const path = join('tickets', project, `${to}-${file.slug}.md`);
@@ -244,7 +253,7 @@ const renameFile = async (
     return failed(`Cannot rename ${from} to ${path}.`);
   }
 
-  return { ok: true, value: { alias: { from: file.id, to, path }, factPath } };
+  return { ok: true, value: { alias: { from: file.id, to, path }, factPath: fact.value } };
 };
 
 // Adds each rename to `renames` as it happens, so a failure leaves the caller a full list to undo.
@@ -277,9 +286,7 @@ const renameClashes = async (
       tracked: addedTime !== undefined,
     });
 
-    if (factPath !== undefined) {
-      renames.factPaths.push(factPath);
-    }
+    renames.factPaths.push(factPath);
   }
 
   return { ok: true, value: undefined };
@@ -394,20 +401,16 @@ const undoMoves = async (
       const to = join(root, move.to);
 
       // `link` fails when the old path exists, so a save there is never replaced.
-      const restored = await functions.link(to, join(root, move.from)).then(
-        () => true,
-        () => false,
-      );
-
-      if (restored) {
-        await functions.unlink(to).catch(() => undefined);
+      try {
+        await functions.link(to, join(root, move.from));
+      } catch {
+        return;
       }
+
+      await functions.unlink(to).catch(() => undefined);
     }),
   );
 };
-
-const hasCommitWork = (renames: Renames): boolean =>
-  renames.factPaths.length > 0 || renames.moves.some((move) => move.tracked);
 
 // The caller holds the store lock and has just merged. A new ID is free in the whole project
 // folder, so one folder never holds two files with one ID afterwards. The renames of tracked files
@@ -442,7 +445,7 @@ export const resolveIdClashes = async (
 
   const resolution = { aliases: renames.aliases, moves: renames.moves };
 
-  if (!hasCommitWork(renames)) {
+  if (renames.aliases.length === 0) {
     return { ok: true, value: resolution };
   }
 

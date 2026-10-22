@@ -3,7 +3,12 @@ import { expect, it } from 'bun:test';
 import { resolveIdClashes } from './syncClash.ts';
 import { gitFailure, gitOutput, makeSync } from './syncHarness.ts';
 
+type FakeSyncOptions = NonNullable<Parameters<typeof makeSync>[0]>;
+type GitHandler = NonNullable<FakeSyncOptions['git']>;
+
 const root = '/store';
+const oldPath = '/store/tickets/demo/demo-aaaa-b.md';
+const newPath = '/store/tickets/demo/demo-zzzz-b.md';
 const factPath = '/store/facts/fake/2026-10.jsonl';
 
 // Each file's adding commit time, or no entry for a file no commit added yet.
@@ -140,9 +145,6 @@ it('leaves a file no commit added out of the clash commit', async () => {
   expect(stagedEntries(fake)).toEqual(['--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl']);
 });
 
-const oldPath = '/store/tickets/demo/demo-aaaa-b.md';
-const newPath = '/store/tickets/demo/demo-zzzz-b.md';
-
 const withTicketBytes = (extra: Parameters<typeof makeSync>[0]) =>
   twoTickets({
     ...extra,
@@ -193,4 +195,322 @@ it('puts the renamed ticket back at the old path when nothing was saved there', 
 
   expect(fake.disk.get(oldPath)?.text).toBe('renamed ticket bytes');
   expect(fake.disk.has(newPath)).toBe(false);
+});
+
+const strictCommands = {
+  logOlder: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-a.md',
+  logNewer: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-b.md',
+  head: 'rev-parse --verify --quiet HEAD',
+  readTree: 'read-tree HEAD',
+  blob: 'rev-parse HEAD:tickets/demo/demo-aaaa-b.md',
+  addMove: 'update-index --add --cacheinfo 100644,abc123,tickets/demo/demo-zzzz-b.md',
+  removeMove: 'update-index --force-remove -- tickets/demo/demo-aaaa-b.md',
+  addFact: 'update-index --add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl',
+};
+
+const strictReplies: Record<string, string> = {
+  [strictCommands.logOlder]: '900\n',
+  [strictCommands.logNewer]: '1000\n2000\n',
+  [strictCommands.head]: '',
+  [strictCommands.readTree]: '',
+  [strictCommands.blob]: 'abc123\n',
+  [strictCommands.addMove]: '',
+  [strictCommands.removeMove]: '',
+  [strictCommands.addFact]: '',
+};
+
+const commandOf = (args: string[]): string => {
+  const index = args.indexOf('-C');
+
+  return args.slice(index + 2).join(' ');
+};
+
+// Answers only the exact Git calls of a clash, so a changed argument fails the sync.
+const strictClashGit =
+  (failOn?: string): GitHandler =>
+  (args) => {
+    const command = commandOf(args);
+
+    const isCommit = command.startsWith('commit --quiet -m ');
+
+    const failsHere = command === failOn;
+    const failsCommit = failOn === 'commit' && isCommit;
+
+    if (failsHere || failsCommit) {
+      return gitFailure('injected failure');
+    }
+
+    if (command === 'config user.email') {
+      return gitOutput('me@example.com\n');
+    }
+
+    if (isCommit) {
+      return gitOutput('');
+    }
+
+    const reply = strictReplies[command];
+
+    return reply === undefined ? gitFailure(`unexpected git call: ${command}`) : gitOutput(reply);
+  };
+
+const strictStore = (failOn?: string, extra: FakeSyncOptions = {}) =>
+  makeSync({
+    ...extra,
+    files: {
+      [factPath]: { text: 'alias line\n', mtimeMs: 0 },
+      [oldPath]: { text: 'ticket bytes', mtimeMs: 0 },
+      ...extra.files,
+    },
+    folders: {
+      '/store/tickets': ['demo'],
+      '/store/tickets/demo': ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+    },
+    git: strictClashGit(failOn),
+    now: Date.parse('2026-10-05T10:00:00.000Z'),
+  });
+
+const nonConfigCommands = (fake: ReturnType<typeof makeSync>): string[] =>
+  fake.commands().filter((command) => command !== 'config user.email');
+
+it('runs exactly the expected Git calls for a tracked clash, and commits with signing off', async () => {
+  const fake = strictStore();
+
+  const result = await resolveIdClashes(fake.functions, root);
+  const commit = fake.gitCalls.find((call) => call.args.includes('commit'));
+
+  expect(result.ok).toBe(true);
+
+  expect(nonConfigCommands(fake).filter((command) => !command.startsWith('commit'))).toEqual([
+    strictCommands.logOlder,
+    strictCommands.logNewer,
+    strictCommands.head,
+    strictCommands.readTree,
+    strictCommands.blob,
+    strictCommands.addMove,
+    strictCommands.removeMove,
+    strictCommands.addFact,
+  ]);
+
+  expect(commit?.args.slice(0, 2)).toEqual(['-c', 'commit.gpgsign=false']);
+
+  expect(fake.aliasRecords).toEqual([
+    { ticket: 'demo-zzzz', from: 'demo-aaaa', at: '2026-10-05T10:00:00.000Z' },
+  ]);
+});
+
+it.each([
+  strictCommands.readTree,
+  strictCommands.blob,
+  strictCommands.addMove,
+  strictCommands.removeMove,
+  strictCommands.addFact,
+])(
+  'fails with the Git error, commits nothing, and restores the file when %s fails',
+  async (command) => {
+    const fake = strictStore(command);
+
+    const result = await resolveIdClashes(fake.functions, root);
+
+    expect(result).toEqual({ ok: false, reason: { kind: 'failed', message: 'injected failure' } });
+    expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+    expect(fake.disk.has(oldPath)).toBe(true);
+    expect(fake.disk.has(newPath)).toBe(false);
+  },
+);
+
+it('fails, and restores the file, when the commit fails', async () => {
+  const fake = strictStore('commit');
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result).toEqual({ ok: false, reason: { kind: 'failed', message: 'injected failure' } });
+  expect(fake.disk.get(oldPath)?.text).toBe('ticket bytes');
+  expect(fake.disk.has(newPath)).toBe(false);
+});
+
+it('fails and commits nothing when the alias fact cannot be staged', async () => {
+  const fake = strictStore(undefined, { blobFails: 'blob refused' });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result).toEqual({ ok: false, reason: { kind: 'failed', message: 'blob refused' } });
+  expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+});
+
+it('fails and commits nothing when the alias fact file cannot be read', async () => {
+  const fake = strictStore();
+
+  const functions = {
+    ...fake.functions,
+    readFile: (path: string) =>
+      path === factPath ? Promise.reject(new Error('gone')) : fake.functions.readFile(path),
+  };
+
+  const result = await resolveIdClashes(functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.kind).toBe('failed');
+  expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+});
+
+it('fails before moving anything when the alias fact cannot be written', async () => {
+  const fake = strictStore(undefined, { appendAliasFails: 'no space' });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result).toEqual({ ok: false, reason: { kind: 'failed', message: 'no space' } });
+  expect(fake.renames).toEqual([]);
+  expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+});
+
+it('fails, and commits nothing, when the file cannot be renamed', async () => {
+  const fake = strictStore(undefined, { renameFails: true });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.kind).toBe('failed');
+  expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+});
+
+it('gives up after 100 tries when every new ID is taken, and changes nothing', async () => {
+  const fake = strictStore(undefined, { suffixes: ['aaaa'] });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.kind).toBe('failed');
+  expect(fake.suffixCalls()).toBe(100);
+  expect(fake.renames).toEqual([]);
+  expect(fake.aliasWrites()).toBe(0);
+});
+
+it('skips an invalid or taken ID and uses the next free one', async () => {
+  const fake = twoTickets({ suffixes: ['', 'aaaa', 'qqqq'] });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-qqqq']);
+});
+
+it('gives each of two clashing files its own new ID', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200', 'demo-aaaa-c.md': '300' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-aaaa-c.md'],
+    { suffixes: ['qqqq', 'qqqq', 'rrrr'] },
+  );
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to)).toSorted()).toEqual([
+    'demo-qqqq',
+    'demo-rrrr',
+  ]);
+});
+
+it.each([
+  ['another old ID', { from: 'demo-bbbb', to: 'demo-qqqq' }],
+  ['another project', { from: 'demo-aaaa', to: 'other-qqqq' }],
+  ['an ID that does not parse', { from: 'demo-aaaa', to: 'demo-' }],
+  ['an ID that a file uses', { from: 'demo-aaaa', to: 'demo-aaaa' }],
+])('does not reuse an alias with %s', async (_name, alias) => {
+  const fake = twoTickets({ aliases: [{ ...alias, path: 'facts/fake/2026-10.jsonl' }] });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((entry) => String(entry.to))).toEqual(['demo-zzzz']);
+  expect(fake.aliasWrites()).toBe(1);
+});
+
+it('renames the clashing files of every project', async () => {
+  const fake = makeSync({
+    folders: {
+      '/store/tickets': ['demo', 'work'],
+      '/store/tickets/demo': ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+      '/store/tickets/work': ['work-aaaa-a.md', 'work-aaaa-b.md'],
+    },
+    git: (args) =>
+      args.includes('log')
+        ? gitOutput((args.at(-1) ?? '').endsWith('-a.md') ? '100' : '200')
+        : undefined,
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.from)).toSorted()).toEqual([
+    'demo-aaaa',
+    'work-aaaa',
+  ]);
+});
+
+it('ignores files that are not tickets, and files with different IDs, without asking Git', async () => {
+  const fake = makeSync({
+    folders: {
+      '/store/tickets': ['demo'],
+      '/store/tickets/demo': ['notes.txt', 'README.md', 'demo-aaaa-a.md', 'demo-bbbb-b.md'],
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result).toEqual({ ok: true, value: { aliases: [], moves: [] } });
+  expect(fake.gitCalls).toEqual([]);
+  expect(fake.renames).toEqual([]);
+});
+
+it('treats a missing tickets folder as no clashes', async () => {
+  const fake = makeSync();
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result).toEqual({ ok: true, value: { aliases: [], moves: [] } });
+  expect(fake.gitCalls).toEqual([]);
+});
+
+const permutations = [
+  ['a', 'b', 'c'],
+  ['a', 'c', 'b'],
+  ['b', 'a', 'c'],
+  ['b', 'c', 'a'],
+  ['c', 'a', 'b'],
+  ['c', 'b', 'a'],
+];
+
+it.each(permutations)(
+  'keeps the oldest file, then the first name, whatever the listing order (%s, %s, %s)',
+  async (...order) => {
+    const fake = clashingStore(
+      { 'demo-aaaa-b.md': '100', 'demo-aaaa-c.md': '100' },
+      order.map((letter) => `demo-aaaa-${letter}.md`),
+      { suffixes: ['qqqq', 'rrrr'] },
+    );
+
+    await resolveIdClashes(fake.functions, root);
+
+    expect(movedFiles(fake).toSorted()).toEqual(['demo-aaaa-a.md', 'demo-aaaa-c.md']);
+  },
+);
+
+it('stages the fact file of every reused alias', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200', 'demo-aaaa-c.md': '300' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-aaaa-c.md'],
+    {
+      aliases: [
+        { from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/first.jsonl' },
+        { from: 'demo-aaaa', to: 'demo-rrrr', path: 'facts/fake/second.jsonl' },
+      ],
+    },
+  );
+
+  await resolveIdClashes(fake.functions, root);
+
+  expect(
+    stagedEntries(fake)
+      .filter((entry) => entry.includes('facts/'))
+      .toSorted(),
+  ).toEqual([
+    '--add --cacheinfo 100644,blob1,facts/fake/first.jsonl',
+    '--add --cacheinfo 100644,blob2,facts/fake/second.jsonl',
+  ]);
 });
