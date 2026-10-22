@@ -10,6 +10,8 @@ import type { AppProps } from './tui/tui.tsx';
 type ProcessEvent = 'SIGINT' | 'SIGTERM' | 'uncaughtException' | 'unhandledRejection';
 
 interface TerminalRenderer {
+  suspend: () => void;
+  resume: () => void;
   destroy: () => void;
 }
 
@@ -29,9 +31,78 @@ export interface TerminalEffects {
   printError: (error: unknown) => void;
 }
 
+// Calls onChange when a store file changes, and returns the function that stops watching.
+type StoreWatch = (onChange: () => void) => () => void;
+
 export interface TerminalDependencies {
   needs: NeedsSession;
+  watch: StoreWatch;
 }
+
+const changeDelayMilliseconds = 100;
+
+// Coalesces store changes into one notice per delay. While the terminal is lent, it holds changes
+// and sends one notice when the terminal comes back.
+const createChangeFeed = (watch: StoreWatch) => {
+  const listeners = new Set<() => void>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let lent = false;
+  let held = false;
+
+  const notify = () => {
+    timer = undefined;
+
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+
+  const onChange = () => {
+    if (lent) {
+      held = true;
+
+      return;
+    }
+
+    timer ??= setTimeout(notify, changeDelayMilliseconds);
+  };
+
+  const stopWatching = watch(onChange);
+
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+
+    return () => {
+      listeners.delete(listener);
+    };
+  };
+
+  const hold = () => {
+    lent = true;
+
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timer = undefined;
+      held = true;
+    }
+  };
+
+  const release = () => {
+    lent = false;
+
+    if (held) {
+      held = false;
+      notify();
+    }
+  };
+
+  const stop = () => {
+    clearTimeout(timer);
+    stopWatching();
+  };
+
+  return { subscribe, hold, release, stop };
+};
 
 const openOpenTui: TerminalEffects['open'] = async () => {
   const renderer = await createCliRenderer({ exitOnCtrlC: false, exitSignals: [] });
@@ -79,7 +150,8 @@ export const startTerminal = async (
   effects: TerminalEffects = processEffects,
 ): Promise<void> => {
   const { needs } = dependencies;
-  const removers: (() => void)[] = [];
+  const changes = createChangeFeed(dependencies.watch);
+  const removers: (() => void)[] = [changes.stop];
   let shutdownPromise: Promise<void> | undefined;
   let fatal: { error: unknown } | undefined;
   let finishing = false;
@@ -154,6 +226,25 @@ export const startTerminal = async (
     finish();
   };
 
+  // A failed resume leaves the terminal unusable, so tikk restores it through shutdown and exits.
+  const lend = async <Value,>(run: () => Promise<Value>): Promise<Value> => {
+    const { renderer } = await openPromise;
+
+    renderer.suspend();
+    changes.hold();
+
+    try {
+      return await run();
+    } finally {
+      try {
+        renderer.resume();
+        changes.release();
+      } catch (error) {
+        fail(error);
+      }
+    }
+  };
+
   removers.push(
     effects.listen('SIGINT', quit),
     effects.listen('SIGTERM', quit),
@@ -171,7 +262,13 @@ export const startTerminal = async (
     // The root renders concurrently, so without flushSync the first load would start before the
     // view has mounted.
     flushSync(() => {
-      root.render(<App effects={needs} keymap={keymap} onQuit={quit} />);
+      root.render(
+        <App
+          effects={{ ...needs, lend, onChange: changes.subscribe }}
+          keymap={keymap}
+          onQuit={quit}
+        />,
+      );
     });
   } catch (error) {
     fail(error);

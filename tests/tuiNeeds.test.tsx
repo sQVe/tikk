@@ -41,6 +41,12 @@ const WithKeymap = (props: Omit<AppProps, 'keymap'>): ReactNode => {
   return <App {...props} keymap={keymap} />;
 };
 
+const tuiEffects = (session: NeedsSession): AppProps['effects'] => ({
+  ...session,
+  lend: (run) => run(),
+  onChange: () => () => undefined,
+});
+
 const createTask = async (title: string): Promise<string> => {
   const created = await cli().runJson<{ id: string }>(['new', 'task', title]);
 
@@ -55,7 +61,7 @@ const openHome = async () => {
   needs = opened.value;
 
   const setup = await act(() =>
-    testRender(<WithKeymap effects={opened.value} onQuit={() => undefined} />, {
+    testRender(<WithKeymap effects={tuiEffects(opened.value)} onQuit={() => undefined} />, {
       width: 100,
       height: 20,
     }),

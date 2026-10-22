@@ -20,7 +20,8 @@ export const ticketEditor = async (input: CommandInput, rawId: string): Promise<
     return missingTicket(rawId);
   }
 
-  const edited = await input.effects.runEditor(path.value);
+  // The editor runs until the user exits it. A caller that must stop it wraps runEditor.
+  const edited = await input.effects.runEditor(path.value, new AbortController().signal);
 
   if (!edited.ok) {
     return storeFailure(edited.reason.message);

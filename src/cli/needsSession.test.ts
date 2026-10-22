@@ -160,3 +160,158 @@ it('keeps a slice active when an archived accepted task is its only started task
     expect(group?.slices[0]?.tasks.map((task) => String(task.id))).toEqual(['demo-3469']);
   }
 });
+
+it('runs one load at a time, so a second load starts only after the first settles', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact],
+  });
+
+  const firstGh = Promise.withResolvers<undefined>();
+  const ghCalls: string[][] = [];
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: async (args) => {
+      ghCalls.push(args);
+
+      if (ghCalls.length === 1) {
+        await firstGh.promise;
+      }
+
+      return { ok: false, reason: { message: 'gh is offline.' } };
+    },
+  });
+
+  const opened = await openNeedsSession(fakeEffects.effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const first = opened.value.load();
+  const second = opened.value.load();
+
+  await waitFor(() => ghCalls.length > 0);
+  await Bun.sleep(30);
+
+  expect(ghCalls).toHaveLength(1);
+
+  firstGh.resolve(undefined);
+  await Promise.all([first, second]);
+  await opened.value.close();
+
+  expect(ghCalls.length).toBeGreaterThan(1);
+});
+
+it('opens the editor on the ticket file and waits for it before it closes', async () => {
+  const target = makeTicket('demo-3467');
+  const fakeSession = makeSession({ tickets: [target] });
+  const editorDone = Promise.withResolvers<undefined>();
+  const editorPaths: string[] = [];
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    overrides: {
+      runEditor: async (path) => {
+        editorPaths.push(path);
+        await editorDone.promise;
+
+        return { ok: true, value: undefined };
+      },
+    },
+  });
+
+  const opened = await openNeedsSession(fakeEffects.effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const editing = opened.value.edit('demo-3467');
+  const closing = opened.value.close();
+
+  await Bun.sleep(30);
+
+  expect(editorPaths).toEqual([target.path]);
+  expect(fakeSession.disposed()).toBe(false);
+
+  editorDone.resolve(undefined);
+
+  expect(await editing).toEqual({ ok: true, value: undefined });
+
+  await closing;
+
+  expect(fakeSession.disposed()).toBe(true);
+});
+
+it('returns the editor failure', async () => {
+  const fakeSession = makeSession({ tickets: [makeTicket('demo-3467')] });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    overrides: {
+      runEditor: () =>
+        Promise.resolve({ ok: false, reason: { message: 'The editor "vi" exited with 1.' } }),
+    },
+  });
+
+  const opened = await openNeedsSession(fakeEffects.effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const edited = await opened.value.edit('demo-3467');
+
+  await opened.value.close();
+
+  expect(edited.ok).toBe(false);
+
+  if (!edited.ok) {
+    expect(edited.reason.message).toContain('exited with 1');
+  }
+});
+
+it('stops the editor of a pending edit when the session closes', async () => {
+  const fakeSession = makeSession({ tickets: [makeTicket('demo-3467')] });
+  const signals: AbortSignal[] = [];
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    overrides: {
+      runEditor: (_path, signal) => {
+        signals.push(signal);
+
+        return new Promise((resolve) => {
+          signal.addEventListener('abort', () => {
+            resolve({ ok: false, reason: { message: 'The editor was stopped.' } });
+          });
+        });
+      },
+    },
+  });
+
+  const opened = await openNeedsSession(fakeEffects.effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const editing = opened.value.edit('demo-3467');
+
+  await waitFor(() => signals.length > 0);
+  await opened.value.close();
+
+  expect(signals[0]?.aborted).toBe(true);
+  expect((await editing).ok).toBe(false);
+  expect(fakeSession.disposed()).toBe(true);
+});

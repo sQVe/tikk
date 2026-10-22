@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import {
   appendFile,
   link,
@@ -345,7 +345,10 @@ const backgroundCommand = (): string[] => {
   return [process.execPath, ...entry, 'sync', '--background'];
 };
 
-const runEditor = async (path: string): Promise<Result<undefined, { message: string }>> => {
+const editorKillDelayMilliseconds = 2000;
+
+// An aborted editor gets SIGTERM, and SIGKILL if it is still running after the delay.
+const runEditor: CliEffects['runEditor'] = async (path, signal) => {
   const editor = Bun.env['EDITOR'] ?? 'vi';
   const command = editor.split(/\s+/).filter((part) => part !== '');
 
@@ -356,7 +359,30 @@ const runEditor = async (path: string): Promise<Result<undefined, { message: str
       stderr: 'inherit',
     });
 
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const stop = () => {
+      child.kill('SIGTERM');
+
+      killTimer = setTimeout(() => {
+        child.kill('SIGKILL');
+      }, editorKillDelayMilliseconds);
+    };
+
+    signal.addEventListener('abort', stop, { once: true });
+
+    if (signal.aborted) {
+      stop();
+    }
+
     const exitCode = await child.exited;
+
+    signal.removeEventListener('abort', stop);
+    clearTimeout(killTimer);
+
+    if (signal.aborted) {
+      return { ok: false, reason: { message: `The editor "${editor}" was stopped.` } };
+    }
 
     if (exitCode !== 0) {
       return {
@@ -595,6 +621,29 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
   };
 };
 
+const watchedFolders = new Set(['tickets', 'facts']);
+
+const isWatchedPath = (path: string | null): boolean => {
+  const [folder] = (path ?? '').split(/[\\/]/);
+
+  return folder !== undefined && watchedFolders.has(folder);
+};
+
+// The store root is watched because `tickets/` and `facts/` appear only with their first file.
+export const watchStore =
+  (storeRoot: string) =>
+  (onChange: () => void): (() => void) => {
+    const watcher = watch(storeRoot, { recursive: true }, (_event, path) => {
+      if (isWatchedPath(path)) {
+        onChange();
+      }
+    });
+
+    return () => {
+      watcher.close();
+    };
+  };
+
 const runTerminal = async (effects: CliEffects): Promise<void> => {
   const opened = await openNeedsSession(effects);
 
@@ -607,7 +656,7 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
 
   const { startTerminal } = await import('./terminal.tsx');
 
-  await startTerminal({ needs: opened.value });
+  await startTerminal({ needs: opened.value, watch: watchStore(defaultStoreRoot) });
 };
 
 const startsTerminal = (args: string[]): boolean =>

@@ -1,4 +1,4 @@
-export type ViewIntent = 'quit' | 'moveUp' | 'moveDown' | 'switchView';
+export type ViewIntent = 'quit' | 'moveUp' | 'moveDown' | 'switchView' | 'edit';
 
 interface ViewCommand {
   intent: ViewIntent;
@@ -10,4 +10,5 @@ export const viewCommands: readonly ViewCommand[] = [
   { intent: 'moveUp', keys: ['up', 'k'] },
   { intent: 'moveDown', keys: ['down', 'j'] },
   { intent: 'switchView', keys: ['tab'] },
+  { intent: 'edit', keys: ['e'] },
 ];

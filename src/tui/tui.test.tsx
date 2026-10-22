@@ -3,7 +3,7 @@ import { afterEach, expect, it } from 'bun:test';
 import { createDefaultOpenTuiKeymap } from '@opentui/keymap/opentui';
 import { useRenderer } from '@opentui/react';
 import { testRender } from '@opentui/react/test-utils';
-import { act, useMemo } from 'react';
+import { act, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import type { NeedView, TreeGroup } from '../cli/cli.ts';
@@ -15,12 +15,43 @@ type Setup = Awaited<ReturnType<typeof testRender>>;
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 
 const openSetups: Setup[] = [];
+const changeListeners = new Set<() => void>();
+const edited: string[] = [];
+
+// Keys that the probe presses in the commit of the next reload, before passive effects run.
+const keysAtCommit: string[] = [];
+const probe = { reloaded: (): void => undefined };
+
+// Renders after the app, so its layout effect runs after the app's commit and before any passive
+// effect of that commit.
+const CommitProbe = ({ setup }: { setup: () => Setup | undefined }): ReactNode => {
+  const [reloads, setReloads] = useState(0);
+
+  probe.reloaded = () => {
+    setReloads((current) => current + 1);
+  };
+
+  useLayoutEffect(() => {
+    const mounted = setup();
+
+    for (const key of keysAtCommit.splice(0)) {
+      mounted?.mockInput.pressKey(key);
+    }
+  }, [reloads, setup]);
+
+  return null;
+};
 
 const WithKeymap = (props: Omit<AppProps, 'keymap'>): ReactNode => {
   const renderer = useRenderer();
   const keymap = useMemo(() => createDefaultOpenTuiKeymap(renderer), [renderer]);
 
-  return <App {...props} keymap={keymap} />;
+  return (
+    <>
+      <App {...props} keymap={keymap} />
+      <CommitProbe setup={() => openSetups.at(-1)} />
+    </>
+  );
 };
 
 const needView = (index: number, title: string): NeedView => ({
@@ -36,6 +67,7 @@ const mount = async (
   size: { width: number; height: number },
   problems: string[] = [],
   groups: TreeGroup[] = [],
+  overrides: Partial<AppProps['effects']> = {},
 ) => {
   const reconcileProblems = problems.map((message) => ({
     ticket: null,
@@ -44,9 +76,41 @@ const mount = async (
     message,
   }));
 
-  const effects = {
-    load: () => Promise.resolve({ ok: true as const, value: { items, reconcileProblems } }),
-    loadTree: () => Promise.resolve({ ok: true as const, value: groups }),
+  // Tests change items and groups in place, then call storeChanged to reload.
+  const effects: AppProps['effects'] = {
+    load: () => {
+      const loaded = Promise.resolve({
+        ok: true as const,
+        value: { items: [...items], reconcileProblems },
+      });
+
+      return loaded.then((result) => {
+        probe.reloaded();
+
+        return result;
+      });
+    },
+    loadTree: () => {
+      const loaded = Promise.resolve({ ok: true as const, value: structuredClone(groups) });
+
+      return loaded.then((result) => {
+        probe.reloaded();
+
+        return result;
+      });
+    },
+    edit: (rawId) => {
+      edited.push(rawId);
+
+      return Promise.resolve({ ok: true, value: undefined });
+    },
+    lend: (run) => run(),
+    onChange: (listener) => {
+      changeListeners.add(listener);
+
+      return () => changeListeners.delete(listener);
+    },
+    ...overrides,
   };
 
   const setup = await act(() =>
@@ -82,6 +146,21 @@ const press = async (setup: Setup, key: string): Promise<void> => {
   });
 };
 
+const storeChanged = async (setup: Setup): Promise<void> => {
+  await act(async () => {
+    for (const listener of changeListeners) {
+      listener();
+    }
+
+    await Bun.sleep(20);
+    await setup.renderOnce();
+  });
+
+  await act(async () => {
+    await setup.renderOnce();
+  });
+};
+
 const selectedLine = (setup: Setup): string | undefined =>
   setup
     .captureCharFrame()
@@ -89,6 +168,10 @@ const selectedLine = (setup: Setup): string | undefined =>
     .find((line) => line.startsWith('>'));
 
 afterEach(() => {
+  changeListeners.clear();
+  keysAtCommit.splice(0);
+  edited.splice(0);
+
   for (const setup of openSetups.splice(0)) {
     act(() => {
       setup.renderer.destroy();
@@ -167,7 +250,12 @@ const treeGroups = (): TreeGroup[] => {
 };
 
 it('shows the tree rows on tab and the home items on a second tab', async () => {
-  const setup = await mount([needView(0, 'First')], { width: 60, height: 8 }, [], treeGroups());
+  const setup = await mount(
+    [needView(0, 'First')],
+    { width: 60, height: 8 },
+    ['STATUS problem'],
+    treeGroups(),
+  );
 
   expect(setup.captureCharFrame()).toContain('First');
 
@@ -179,6 +267,7 @@ it('shows the tree rows on tab and the home items on a second tab', async () => 
   expect(tree).toContain('demo-3402  Slice title  active  #12');
   expect(tree).toContain('demo-3403  Task title  open');
   expect(tree).not.toContain('First');
+  expect(tree).not.toContain('STATUS problem');
   expect(selectedLine(setup)).toContain('Plan title');
 
   await press(setup, 'j');
@@ -213,4 +302,222 @@ it('keeps the selected tree row in the frame when the tree is taller than the te
 
   expect(selectedLine(setup)).toContain('Slice 5');
   expect(setup.captureCharFrame()).not.toContain('No plan');
+});
+
+it('keeps the selected row selected when a reload adds a row above it', async () => {
+  const items = [needView(0, 'First'), needView(1, 'Second'), needView(2, 'Third')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  await press(setup, 'j');
+  items.unshift(needView(5, 'Added'));
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).toContain('Added');
+  expect(selectedLine(setup)).toContain('Second');
+});
+
+it('keeps the selected position when a reload removes the selected row', async () => {
+  const items = [needView(0, 'First'), needView(1, 'Second'), needView(2, 'Third')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  await press(setup, 'j');
+  items.splice(1, 1);
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).not.toContain('Second');
+  expect(selectedLine(setup)).toContain('Third');
+});
+
+it('reloads the loaded tree when the store changes', async () => {
+  const groups = treeGroups();
+  const setup = await mount([], { width: 60, height: 8 }, [], groups);
+
+  await press(setup, 'tab');
+
+  const [group] = groups;
+
+  if (group?.plan !== null && group?.plan !== undefined) {
+    group.plan.title = 'Renamed plan';
+  }
+
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain('demo-3401  Renamed plan  open');
+
+  if (group?.plan !== null && group?.plan !== undefined) {
+    group.plan.title = 'Renamed again';
+  }
+
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain('demo-3401  Renamed again  open');
+});
+
+it('opens the selected ticket with e in the home and the tree view', async () => {
+  const setup = await mount(
+    [needView(0, 'First'), needView(1, 'Second')],
+    { width: 60, height: 8 },
+    [],
+    treeGroups(),
+  );
+
+  await press(setup, 'j');
+  await press(setup, 'e');
+  await press(setup, 'tab');
+  await press(setup, 'j');
+  await press(setup, 'e');
+
+  expect(edited).toEqual(['demo-3401', 'demo-3402']);
+});
+
+it('ignores e on the group of slices without a plan', async () => {
+  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
+  const setup = await mount([], { width: 60, height: 8 }, [], groups);
+
+  await press(setup, 'tab');
+  await press(setup, 'e');
+
+  expect(selectedLine(setup)).toContain('No plan');
+  expect(edited).toEqual([]);
+});
+
+it('ignores e when the list is empty', async () => {
+  const setup = await mount([], { width: 60, height: 8 });
+
+  await press(setup, 'e');
+
+  expect(setup.captureCharFrame()).toContain('Nothing needs you.');
+  expect(edited).toEqual([]);
+});
+
+it('shows the error of an editor that throws, and clears it after an edit that works', async () => {
+  const outcomes = [
+    () => Promise.reject(new Error('The editor crashed.')),
+    () => Promise.resolve({ ok: true as const, value: undefined }),
+  ];
+
+  const setup = await mount([needView(0, 'First')], { width: 60, height: 8 }, [], [], {
+    edit: () => outcomes.shift()?.() ?? Promise.reject(new Error('No more edits.')),
+  });
+
+  await press(setup, 'e');
+  expect(setup.captureCharFrame()).toContain('The editor crashed.');
+
+  await press(setup, 'e');
+
+  const [row, status] = setup.captureCharFrame().split('\n');
+
+  expect(row).toContain('First');
+  expect(status?.trim()).toBe('');
+});
+
+it('keeps the first row selected when a reload inserts a row before it and no key was pressed', async () => {
+  const items = [needView(0, 'First'), needView(1, 'Second')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  items.unshift(needView(5, 'Added'));
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).toContain('Added');
+  expect(selectedLine(setup)).toContain('First');
+});
+
+it('selects the row at the last position of a moved ticket when a reload removes it', async () => {
+  const items = [needView(0, 'First'), needView(1, 'Second'), needView(2, 'Third')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  await press(setup, 'j');
+  items.unshift(needView(5, 'Added'));
+  await storeChanged(setup);
+  expect(selectedLine(setup)).toContain('Second');
+
+  items.splice(2, 1);
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).not.toContain('Second');
+  expect(selectedLine(setup)).toContain('Third');
+
+  items.splice(2, 1);
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain('First');
+});
+
+it('keeps the selected tree row across reloads that insert and then remove rows', async () => {
+  const groups = treeGroups();
+  const setup = await mount([], { width: 60, height: 8 }, [], groups);
+
+  await press(setup, 'tab');
+  expect(selectedLine(setup)).toContain('Plan title');
+
+  groups.unshift({
+    plan: { id: 'demo-3409' as NeedView['id'], title: 'Added plan', status: 'open' },
+    slices: [],
+  });
+
+  await storeChanged(setup);
+  expect(selectedLine(setup)).toContain('Plan title');
+
+  groups.splice(1, 1);
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).not.toContain('Plan title');
+  expect(selectedLine(setup)).toContain('Added plan');
+});
+
+it('opens the row on screen when e arrives in the commit of a reload that removed the selected row', async () => {
+  const items = [needView(0, 'A'), needView(1, 'B'), needView(2, 'C')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  await press(setup, 'j');
+  items.splice(1, 1);
+  keysAtCommit.push('e');
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain('C');
+  expect(edited).toEqual(['demo-3402']);
+});
+
+it('moves from the row on screen when j arrives in the commit of a reload', async () => {
+  const items = [needView(0, 'A'), needView(1, 'B'), needView(2, 'C'), needView(3, 'D')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  await press(setup, 'j');
+  items.splice(1, 1);
+  keysAtCommit.push('j');
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain(' D');
+
+  await press(setup, 'j');
+  await press(setup, 'e');
+
+  expect(selectedLine(setup)).toContain(' D');
+  expect(edited).toEqual(['demo-3403']);
+});
+
+it('opens the tree row on screen when e arrives in the commit of a reload that removed the selected row', async () => {
+  const groups = treeGroups();
+  const [group] = groups;
+
+  group?.slices.push({
+    id: 'demo-3404' as NeedView['id'],
+    title: 'Other slice',
+    state: 'planned',
+    pr: null,
+    tasks: [],
+  });
+
+  const setup = await mount([], { width: 60, height: 8 }, [], groups);
+
+  await press(setup, 'tab');
+  await press(setup, 'j');
+  expect(selectedLine(setup)).toContain('Slice title');
+
+  group?.slices.splice(0, 1);
+  keysAtCommit.push('e');
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain('Other slice');
+  expect(edited).toEqual(['demo-3404']);
 });
