@@ -67,7 +67,6 @@ export const readEvidenceTarget = (
   };
 };
 
-// Parses `<id> --head <h> [--change-hash <c>]` and loads the ticket's facts for a listing.
 export const readEvidenceListing = async (
   input: CommandInput,
   usage: string,
