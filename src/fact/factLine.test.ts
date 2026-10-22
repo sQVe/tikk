@@ -20,6 +20,18 @@ describe('parseFactLine', () => {
     expect([claim.ok, release.ok, log.ok, accept.ok]).toEqual([true, true, true, true]);
   });
 
+  it('round-trips an alias fact and rejects one with no from', () => {
+    const parsed = parseFactLine(line({ kind: 'alias', from: 'me-3469' }, { ticket: 'me-4aaa' }));
+
+    if (!parsed.ok) {
+      throw new Error(parsed.reason.message);
+    }
+
+    expect(parsed.value).toMatchObject({ kind: 'alias', from: 'me-3469', ticket: 'me-4aaa' });
+    expect(parseFactLine(serializeFactLine(parsed.value).trim())).toEqual(parsed);
+    expect(parseFactLine(line({ kind: 'alias' })).ok).toBe(false);
+  });
+
   it('returns a failure for invalid JSON', () => {
     const result = parseFactLine('{not json');
 

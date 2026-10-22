@@ -59,6 +59,12 @@ const unarchiveSchema = z.strictObject({
   kind: z.literal('unarchive'),
 });
 
+const aliasSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('alias'),
+  from: ticketIdSchema,
+});
+
 const factSchema = z.discriminatedUnion('kind', [
   claimSchema,
   releaseSchema,
@@ -66,6 +72,7 @@ const factSchema = z.discriminatedUnion('kind', [
   acceptSchema,
   statusSchema,
   unarchiveSchema,
+  aliasSchema,
 ]);
 
 export type Fact = z.output<typeof factSchema>;

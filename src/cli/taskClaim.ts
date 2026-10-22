@@ -9,7 +9,7 @@ import {
   requireHolder,
   requireValue,
 } from './taskCommand.ts';
-import { conflict, withLockedTask } from './taskLock.ts';
+import { conflict, withFetchedTask, withLockedTask } from './taskLock.ts';
 import type { LockedTask } from './taskLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 
@@ -108,7 +108,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
   const session = stringValue(values, 'session');
   const sessionLog = stringValue(values, 'session-log');
 
-  return withLockedTask(input, rawId, 'refuse', async (locked) => {
+  return withFetchedTask(input, rawId, 'refuse', async (locked) => {
     const allowed = requireClaimable(locked, holder.value);
 
     if (!allowed.ok) {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,10 +24,32 @@ afterEach(async () => {
   await rm(base, { recursive: true, force: true });
 });
 
+// Git reads no user config, so the store has no Git identity.
+const isolatedGitEnvironment = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_NOSYSTEM: '1',
+};
+
+const gitOutput = async (root: string, args: string[]): Promise<string> => {
+  const child = Bun.spawn(['git', '-C', root, ...args], {
+    env: isolatedGitEnvironment,
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+
+  return child.stdout.text();
+};
+
 const effects: StoreInitEffects = {
   ...nodeStoreFiles,
   runGit: async (args) => {
-    const process = Bun.spawn(['git', ...args], { stdout: 'pipe', stderr: 'pipe' });
+    const process = Bun.spawn(['git', ...args], {
+      env: isolatedGitEnvironment,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
     const stdout = await new Response(process.stdout).text();
     const code = await process.exited;
 
@@ -46,6 +68,49 @@ it('creates the store once and reports created only the first time', async () =>
   expect(second).toMatchObject({ ok: true, value: { created: false, store: { root } } });
   expect(existsSync(join(root, '.git'))).toBe(true);
   expect(await Bun.file(join(root, 'tikk.json')).json()).toEqual({ version: 1 });
+});
+
+it('commits tikk.json and a union rule for facts on main, without a Git identity', async () => {
+  const root = join(base, 'store');
+
+  await initStore(root, effects);
+
+  const branch = await gitOutput(root, ['branch', '--show-current']);
+  const committed = await gitOutput(root, ['ls-tree', '--name-only', 'HEAD']);
+  const author = await gitOutput(root, ['log', '-1', '--format=%ae']);
+
+  expect(branch.trim()).toBe('main');
+  expect(committed.trim().split('\n')).toEqual(['.gitattributes', 'tikk.json']);
+  expect(author.trim()).toBe('tikk@localhost');
+  expect(await Bun.file(join(root, '.gitattributes')).text()).toContain('facts/** merge=union');
+});
+
+it('adds a missing .gitattributes and the first commit to an existing store, once', async () => {
+  const root = join(base, 'store');
+
+  await mkdir(root);
+  await gitOutput(root, ['init', '--quiet', '--initial-branch=main']);
+  await writeFile(join(root, 'tikk.json'), '{"version": 1}\n');
+
+  const first = await initStore(root, effects);
+  const second = await initStore(root, effects);
+  const commits = await gitOutput(root, ['rev-list', '--count', 'HEAD']);
+  const committed = await gitOutput(root, ['ls-tree', '--name-only', 'HEAD']);
+
+  expect(first).toMatchObject({ ok: true, value: { created: false } });
+  expect(second).toMatchObject({ ok: true, value: { created: false } });
+  expect(commits.trim()).toBe('1');
+  expect(committed.trim().split('\n')).toEqual(['.gitattributes', 'tikk.json']);
+});
+
+it('keeps an existing .gitattributes', async () => {
+  const root = join(base, 'store');
+
+  await initStore(root, effects);
+  await writeFile(join(root, '.gitattributes'), 'custom\n');
+  await initStore(root, effects);
+
+  expect(await Bun.file(join(root, '.gitattributes')).text()).toBe('custom\n');
 });
 
 it('fails to open a store without tikk.json and names tikk init', async () => {
@@ -211,4 +276,70 @@ it('returns the git failure and writes no tikk.json when git init fails', async 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason.message).toContain('store');
   expect(calls.writes).toEqual([]);
+});
+
+it('commits with the configured Git identity when one is set', async () => {
+  const [recording, calls] = recordingEffects({
+    readFile: (path) =>
+      path.endsWith('tikk.json')
+        ? Promise.resolve('{"version": 1}')
+        : Promise.reject(codeError('ENOENT')),
+    runGit: (args) => {
+      calls.gits.push(args);
+
+      const configured = args.includes('config');
+      const noHead = args.includes('rev-parse');
+
+      if (noHead) {
+        return Promise.resolve({ ok: false, reason: { message: 'no HEAD' } });
+      }
+
+      return Promise.resolve({ ok: true, value: configured ? 'me@example.com\n' : '' });
+    },
+  });
+
+  await initStore(join(base, 'store'), recording);
+
+  const commit = calls.gits.find((args) => args.includes('commit'));
+
+  expect(commit).toBeDefined();
+  expect(commit).not.toContain('user.email=tikk@localhost');
+});
+
+const failingOn =
+  (subcommand: string, calls: string[][]): StoreInitEffects['runGit'] =>
+  (args) => {
+    calls.push(args);
+
+    return args.includes(subcommand)
+      ? Promise.resolve({ ok: false, reason: { message: `${subcommand} failed` } })
+      : effects.runGit(args);
+  };
+
+it('fails init and goes no further when the first commit fails', async () => {
+  const root = join(base, 'store');
+  const calls: string[][] = [];
+
+  const result = await initStore(root, { ...effects, runGit: failingOn('commit', calls) });
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toBe('commit failed');
+  expect(calls.at(-1)).toContain('commit');
+  expect((await gitOutput(root, ['rev-list', '--all'])).trim()).toBe('');
+});
+
+it('fails init on an existing store when the branch rename fails, before any later step', async () => {
+  const root = join(base, 'store');
+
+  await mkdir(root);
+  await gitOutput(root, ['init', '--quiet', '--initial-branch=master']);
+  await writeFile(join(root, 'tikk.json'), '{"version": 1}\n');
+
+  const calls: string[][] = [];
+  const result = await initStore(root, { ...effects, runGit: failingOn('branch', calls) });
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toBe('branch failed');
+  expect(calls.at(-1)).toContain('branch');
+  expect(existsSync(join(root, '.gitattributes'))).toBe(false);
 });

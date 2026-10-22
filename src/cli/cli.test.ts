@@ -76,6 +76,15 @@ it('runs init without opening a session', async () => {
   expect(fakeEffects.openCalls()).toBe(0);
 });
 
+it('runs sync without opening a session', async () => {
+  const { exitCode, stdout, fakeEffects } = await run(['sync', '--json']);
+
+  expect(exitCode).toBe(0);
+  expect(JSON.parse(stdout.join(''))).toMatchObject({ committed: true, pushed: true });
+  expect(fakeEffects.syncCalls()).toBe(1);
+  expect(fakeEffects.openCalls()).toBe(0);
+});
+
 it('writes text output to stdout and exits 0', async () => {
   const { exitCode, stdout, stderr } = await run(['show', 'demo-3467']);
 

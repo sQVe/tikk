@@ -3,22 +3,25 @@ import { existsSync } from 'node:fs';
 import {
   appendFile,
   link,
+  mkdtemp,
   mkdir,
   open,
   readdir,
   readFile,
   rename,
+  rm,
   stat,
   unlink,
   writeFile,
 } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
 import type { CacheFiles, TicketCache } from './cache/cache.ts';
 import { runCli } from './cli/cli.ts';
 import type { CliEffects, CliSession } from './cli/cli.ts';
+import { parseFactLine } from './fact/fact.ts';
 import { resolveMachine, resolveProject } from './project.ts';
 import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
@@ -26,6 +29,7 @@ import {
   acquireStoreLock,
   tryStoreLock,
   appendFact,
+  commitArguments,
   createTicketFile,
   initStore,
   listFactFiles,
@@ -44,6 +48,21 @@ import type {
   StoreLockFunctions,
   TicketFileFunctions,
 } from './store/store.ts';
+import {
+  fetchOrigin,
+  initRemoteStore,
+  mergeFetched,
+  runBackgroundSync,
+  settlingPaths,
+  scheduleSync,
+  syncStore,
+} from './sync/sync.ts';
+import type {
+  RemoteInitFunctions,
+  SyncFunctions,
+  SyncReason,
+  SyncScheduleFunctions,
+} from './sync/sync.ts';
 import type { TicketId } from './ticket/ticket.ts';
 
 const homeDirectory = homedir();
@@ -71,6 +90,45 @@ const runStoreGit = async (args: string[]): Promise<Result<string, { message: st
   }
 
   return { ok: false, reason: { message: `"git ${args.join(' ')}" failed.` } };
+};
+
+// Git must fail instead of asking for credentials, since no one may be at the terminal.
+const runSyncGit: SyncFunctions['runGit'] = async (args, signal) => {
+  try {
+    // A timed-out call runs in its own process group, so the kill also reaches the transport
+    // process (such as ssh) that Git started.
+    const child = Bun.spawn(['git', ...args], {
+      env: { ...Bun.env, GIT_TERMINAL_PROMPT: '0' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      detached: signal !== undefined,
+    });
+
+    signal?.addEventListener('abort', () => {
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+      } catch {
+        child.kill('SIGKILL');
+      }
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      child.stdout.text(),
+      child.stderr.text(),
+      child.exited,
+    ]);
+
+    if (exitCode === 0) {
+      return { ok: true, value: stdout };
+    }
+
+    return { ok: false, reason: { message: `"git ${args.join(' ')}" failed: ${stderr.trim()}` } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'git did not start.';
+
+    return { ok: false, reason: { message: `Cannot run git: ${message}` } };
+  }
 };
 
 const ticketFiles: TicketFileFunctions = {
@@ -210,6 +268,12 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
   };
 };
 
+const openFailureCode = (): 'storeError' | 'notInitialized' => {
+  const configured = existsSync(join(storeRoot, 'tikk.json'));
+
+  return configured ? 'storeError' : 'notInitialized';
+};
+
 const openSession: CliEffects['openSession'] = async () => {
   const store = await openStore(storeRoot, storeFiles);
 
@@ -223,10 +287,211 @@ const openSession: CliEffects['openSession'] = async () => {
     return { ok: true, value: sessionFor(store.value, cache.value) };
   }
 
-  const configured = existsSync(join(storeRoot, 'tikk.json'));
-  const code = configured ? 'storeError' : 'notInitialized';
+  return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
+};
 
-  return { ok: false, reason: { code, message: store.reason.message } };
+const initLocalStore = async (): Promise<
+  Result<{ store: string; created: boolean }, { message: string }>
+> => {
+  const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
+
+  if (!initialized.ok) {
+    return initialized;
+  }
+
+  const { store, created } = initialized.value;
+
+  return { ok: true, value: { store: store.root, created } };
+};
+
+const writeBlob: SyncFunctions['writeBlob'] = async (root, text) => {
+  const child = Bun.spawn(['git', '-C', root, 'hash-object', '-w', '--stdin'], {
+    stdin: new TextEncoder().encode(text),
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    child.stdout.text(),
+    child.stderr.text(),
+    child.exited,
+  ]);
+
+  if (exitCode === 0) {
+    return { ok: true, value: stdout };
+  }
+
+  return { ok: false, reason: { message: `"git hash-object" failed: ${stderr.trim()}` } };
+};
+
+const listAliases: SyncFunctions['listAliases'] = async () => {
+  const machine = await resolveMachine(projectEffects);
+
+  if (!machine.ok) {
+    return [];
+  }
+
+  const directory = join(storeRoot, 'facts', machine.value);
+  const names = await readdir(directory).catch(() => []);
+
+  const jsonlNames = names.filter((name) => name.endsWith('.jsonl'));
+
+  const perFile = await Promise.all(
+    jsonlNames.map(async (name) => {
+      const text = await readFile(join(directory, name), 'utf8').catch(() => '');
+      const path = join('facts', machine.value, name);
+
+      return text
+        .split('\n')
+        .filter((line) => line !== '')
+        .flatMap((line) => {
+          const parsed = parseFactLine(line);
+
+          return parsed.ok && parsed.value.kind === 'alias'
+            ? [{ from: parsed.value.from, to: parsed.value.ticket, path }]
+            : [];
+        });
+    }),
+  );
+
+  return perFile.flat();
+};
+
+const syncFunctions: SyncFunctions = {
+  runGit: runSyncGit,
+  writeBlob,
+  listAliases,
+  commitArguments: (root) => commitArguments(runSyncGit, root),
+  lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
+  stat: (path) => stat(path),
+  readFile: (path) => readFile(path, 'utf8'),
+  now: () => Date.now(),
+  readdir: (directory) => readdir(directory),
+  rename: (from, to) => rename(from, to),
+  link: (existingPath, newPath) => link(existingPath, newPath),
+  unlink: (path) => unlink(path),
+  randomIdSuffix: () => newIdSuffix(),
+  appendAlias: async (alias) => {
+    const machine = await resolveMachine(projectEffects);
+
+    if (!machine.ok) {
+      return { ok: false, reason: { message: machine.reason.message } };
+    }
+
+    const fact = { version: 1, kind: 'alias', machine: machine.value, ...alias } as const;
+    const appended = await appendFact(factFiles, { root: storeRoot }, machine.value, fact);
+
+    return appended.ok ? appended : { ok: false, reason: { message: appended.reason.message } };
+  },
+};
+
+// A compiled binary runs itself. Otherwise the child runs this script with the same Bun.
+const backgroundCommand = (): string[] => {
+  const compiled = Bun.main.startsWith('/$bunfs/');
+  const entry = compiled ? [] : ['run', Bun.main];
+
+  return [process.execPath, ...entry, 'sync', '--background'];
+};
+
+const startBackground = (): number | undefined => {
+  const child = Bun.spawn(backgroundCommand(), {
+    detached: true,
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+
+  child.unref();
+
+  return child.pid;
+};
+
+const scheduleFunctions: SyncScheduleFunctions = {
+  pid: process.pid,
+  runGit: runSyncGit,
+  writeFile: storeLock.writeFile,
+  link: storeLock.link,
+  rename: (from, to) => rename(from, to),
+  unlink: storeLock.unlink,
+  readFile: storeLock.readFile,
+  randomSuffix: storeLock.randomSuffix,
+  isProcessAlive: storeLock.isProcessAlive,
+  sleep: storeLock.sleep,
+  startBackground,
+};
+
+const remoteInitFunctions: RemoteInitFunctions = {
+  ...syncFunctions,
+  initStore: initLocalStore,
+  makeTempFolder: async (prefix) => {
+    await mkdir(dirname(prefix), { recursive: true });
+
+    return mkdtemp(prefix);
+  },
+  removeTree: (path) => rm(path, { recursive: true, force: true }),
+};
+
+const syncFailureCode = (reason: SyncReason): 'conflict' | 'locked' | 'storeError' =>
+  reason.kind === 'failed' ? 'storeError' : reason.kind;
+
+const runSync: CliEffects['syncStore'] = async () => {
+  const store = await openStore(storeRoot, storeFiles);
+
+  if (!store.ok) {
+    return { ok: false, reason: { code: openFailureCode(), message: store.reason.message } };
+  }
+
+  const synced = await syncStore(syncFunctions, store.value.root, {
+    allowUnrelatedHistories: false,
+  });
+
+  if (!synced.ok) {
+    return {
+      ok: false,
+      reason: { code: syncFailureCode(synced.reason), message: synced.reason.message },
+    };
+  }
+
+  return synced;
+};
+
+const runBackground: CliEffects['runBackgroundSync'] = async () => {
+  const store = await openStore(storeRoot, storeFiles);
+
+  if (store.ok) {
+    await runBackgroundSync(scheduleFunctions, store.value.root, async () => {
+      const synced = await runSync();
+
+      if (!synced.ok) {
+        return false;
+      }
+
+      const settling = await settlingPaths(syncFunctions, store.value.root, synced.value.pending);
+
+      return settling.length > 0;
+    });
+  }
+};
+
+const runScheduleSync: CliEffects['scheduleSync'] = () =>
+  scheduleSync(scheduleFunctions, storeRoot);
+
+const runFetch: CliEffects['fetchRemote'] = () => fetchOrigin(syncFunctions, storeRoot);
+
+const runMergeFetched: CliEffects['mergeFetched'] = async () => {
+  await mergeFetched(syncFunctions, storeRoot);
+};
+
+const runRemoteInit: CliEffects['initRemoteStore'] = async (url) => {
+  const initialized = await initRemoteStore(remoteInitFunctions, storeRoot, url);
+
+  if (!initialized.ok) {
+    const { reason } = initialized;
+
+    return { ok: false, reason: { code: syncFailureCode(reason), message: reason.message } };
+  }
+
+  return initialized;
 };
 
 const runEditor = async (path: string): Promise<Result<undefined, { message: string }>> => {
@@ -260,17 +525,13 @@ const projectEffects: ProjectEffects = {
 };
 
 const effects: CliEffects = {
-  initStore: async () => {
-    const initialized = await initStore(storeRoot, { ...storeFiles, runGit: runStoreGit });
-
-    if (!initialized.ok) {
-      return initialized;
-    }
-
-    const { store, created } = initialized.value;
-
-    return { ok: true, value: { store: store.root, created } };
-  },
+  initStore: initLocalStore,
+  initRemoteStore: runRemoteInit,
+  syncStore: runSync,
+  runBackgroundSync: runBackground,
+  scheduleSync: runScheduleSync,
+  fetchRemote: runFetch,
+  mergeFetched: runMergeFetched,
   openSession,
   resolveProject: () => resolveProject(process.cwd(), projectEffects),
   resolveMachine: () => resolveMachine(projectEffects),

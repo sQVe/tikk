@@ -51,6 +51,9 @@ export interface FakeEffects {
   initCalls: () => number;
   openCalls: () => number;
   resolveCalls: () => number;
+  syncCalls: () => number;
+  scheduleCalls: () => number;
+  remoteUrls: string[];
   editorPaths: string[];
 }
 
@@ -274,6 +277,9 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
 export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
   const fakeSession = options.session ?? makeSession();
   const editorPaths: string[] = [];
+  const remoteUrls: string[] = [];
+  let syncCount = 0;
+  let scheduleCount = 0;
   let initCount = 0;
   let openCount = 0;
   let resolveCount = 0;
@@ -284,6 +290,38 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
 
       return Promise.resolve({ ok: true, value: { store: '/store', created: true } });
     },
+    initRemoteStore: (url) => {
+      remoteUrls.push(url);
+
+      return Promise.resolve({
+        ok: true,
+        value: { store: '/store', created: true, remote: url, pushed: true },
+      });
+    },
+    syncStore: () => {
+      syncCount += 1;
+
+      return Promise.resolve({
+        ok: true,
+        value: {
+          committed: true,
+          pending: [],
+          aliases: [],
+          remote: true,
+          fetched: true,
+          merged: true,
+          pushed: true,
+        },
+      });
+    },
+    runBackgroundSync: () => Promise.resolve(),
+    scheduleSync: () => {
+      scheduleCount += 1;
+
+      return Promise.resolve();
+    },
+    fetchRemote: () => Promise.resolve(),
+    mergeFetched: () => Promise.resolve(),
     openSession: () => {
       openCount += 1;
 
@@ -310,6 +348,9 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
     initCalls: () => initCount,
     openCalls: () => openCount,
     resolveCalls: () => resolveCount,
+    syncCalls: () => syncCount,
+    scheduleCalls: () => scheduleCount,
+    remoteUrls,
     editorPaths,
   };
 };

@@ -19,3 +19,5 @@ export type { FactFileFunctions } from './factFiles.ts';
 
 export { acquireStoreLock, tryStoreLock } from './storeLock.ts';
 export type { StoreLockFunctions } from './storeLock.ts';
+
+export { commitArguments } from './storeCommit.ts';

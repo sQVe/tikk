@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,29 +11,80 @@ export interface CliRun {
   stderr: string;
 }
 
+export interface CliFixtureOptions {
+  machine?: string;
+  remotePath?: string;
+}
+
 export interface CliFixture {
   home: string;
   storePath: string;
+  remotePath: string;
   run: (args: string[]) => Promise<CliRun>;
   runChecked: (args: string[]) => Promise<CliRun>;
   runJson: <Shape>(args: string[]) => Promise<Shape>;
   cleanup: () => Promise<void>;
 }
 
+export interface CloneFixtures {
+  remotePath: string;
+  first: CliFixture;
+  second: CliFixture;
+  cleanup: () => Promise<void>;
+}
+
 const entryPath = join(import.meta.dir, '..', 'src', 'index.ts');
 
+const writeMachineConfig = async (home: string, machine: string): Promise<void> => {
+  const configDirectory = join(home, '.config', 'tikk');
+
+  await mkdir(configDirectory, { recursive: true });
+  await writeFile(join(configDirectory, 'config.json'), JSON.stringify({ machine }));
+};
+
+// Git reads no user or system config, so the store commits as tikk.
+export const cliEnvironment = (home: string, storePath: string): Record<string, string> => ({
+  ...Bun.env,
+  HOME: home,
+  TIKK_HOME: storePath,
+  XDG_CONFIG_HOME: join(home, '.config'),
+  GIT_CONFIG_NOSYSTEM: '1',
+});
+
+// A background sync child owns these files while it waits and while it runs, and it must not meet a
+// deleted store.
+export const waitForBackgroundSync = async (storePath: string): Promise<void> => {
+  const files = ['tikk.sync-scheduled', 'tikk.sync-running'].map((name) =>
+    join(storePath, '.git', name),
+  );
+
+  const deadline = Date.now() + 60_000;
+
+  while (files.some((file) => existsSync(file)) && Date.now() < deadline) {
+    await Bun.sleep(100);
+  }
+};
+
 // Runs the real CLI in a child process against a store in a temporary home.
-export const createCliFixture = async (prefix: string): Promise<CliFixture> => {
+export const createCliFixture = async (
+  prefix: string,
+  options: CliFixtureOptions = {},
+): Promise<CliFixture> => {
   const home = await mkdtemp(join(tmpdir(), prefix));
   const work = join(home, 'work');
   const storePath = join(home, 'store');
+  const remotePath = options.remotePath ?? join(home, 'remote.git');
 
   await Bun.write(join(work, '.keep'), '');
+
+  if (options.machine !== undefined) {
+    await writeMachineConfig(home, options.machine);
+  }
 
   const run = async (args: string[]): Promise<CliRun> => {
     const child = Bun.spawn(['bun', 'run', entryPath, ...args, '--json'], {
       cwd: work,
-      env: { ...process.env, HOME: home, TIKK_HOME: storePath },
+      env: cliEnvironment(home, storePath),
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -64,7 +116,35 @@ export const createCliFixture = async (prefix: string): Promise<CliFixture> => {
     return JSON.parse(result.stdout) as Shape;
   };
 
-  const cleanup = (): Promise<void> => rm(home, { recursive: true, force: true });
+  const cleanup = async (): Promise<void> => {
+    await waitForBackgroundSync(storePath);
+    await rm(home, { recursive: true, force: true });
+  };
 
-  return { home, storePath, run, runChecked, runJson, cleanup };
+  return { home, storePath, remotePath, run, runChecked, runJson, cleanup };
+};
+
+const runGit = async (args: string[]): Promise<void> => {
+  const child = Bun.spawn(['git', ...args], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
+  const [stderr, exitCode] = await Promise.all([child.stderr.text(), child.exited]);
+
+  invariant(exitCode === 0, `git ${args.join(' ')} exited with ${exitCode}.\nstderr: ${stderr}`);
+};
+
+// Two clients with their own homes and machine names, which share one bare remote in the first
+// home. Neither store exists until a test runs `tikk init`.
+export const createCloneFixtures = async (prefix: string): Promise<CloneFixtures> => {
+  const first = await createCliFixture(prefix, { machine: 'first' });
+  const remotePath = first.remotePath;
+
+  await runGit(['init', '--bare', '--initial-branch=main', remotePath]);
+
+  const second = await createCliFixture(prefix, { machine: 'second', remotePath });
+
+  const cleanup = async (): Promise<void> => {
+    await second.cleanup();
+    await first.cleanup();
+  };
+
+  return { remotePath, first, second, cleanup };
 };
