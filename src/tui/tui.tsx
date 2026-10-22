@@ -19,7 +19,7 @@ interface TuiEffects {
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   // Suspends the TUI while run uses the terminal.
-  lend: <Value>(run: () => Promise<Value>) => Promise<Value>;
+  lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
   // Calls listener when the store changes, and returns the function that unsubscribes it.
   onChange: (listener: () => void) => () => void;
 }
@@ -162,7 +162,13 @@ const Screen = ({ effects, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
   const edit = (id: string) => {
     effects
       .lend(() => effects.edit(id))
-      .then((result) => {
+      .then((loan) => {
+        if (!loan.ok) {
+          return;
+        }
+
+        const result = loan.value;
+
         setNotice(result.ok ? '' : result.reason.message);
       })
       .catch((error: unknown) => {

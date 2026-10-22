@@ -3,11 +3,12 @@ import { afterEach, expect, it } from 'bun:test';
 import { createTestRenderer } from '@opentui/core/testing';
 import { createDefaultOpenTuiKeymap } from '@opentui/keymap/opentui';
 import { createRoot } from '@opentui/react';
-import { act } from 'react';
+import { act, isValidElement } from 'react';
 
 import type { NeedView, NeedsSession } from './cli/cli.ts';
 import { startTerminal } from './terminal.tsx';
 import type { TerminalEffects } from './terminal.tsx';
+import type { AppProps } from './tui/tui.tsx';
 
 type Handler = (reason?: unknown) => void;
 type Setup = Awaited<ReturnType<typeof createTestRenderer>>;
@@ -40,6 +41,7 @@ const start = async (options: StartOptions = {}) => {
   const calls = { unmount: 0, destroy: 0, dispose: 0 };
   const watcher = { onChange: (): void => undefined, stops: 0, loads: 0 };
   const lending: string[] = [];
+  const app: { effects?: AppProps['effects'] } = {};
   const exitCodes: number[] = [];
   const printed: unknown[] = [];
   const root = createRoot(setup.renderer);
@@ -68,6 +70,10 @@ const start = async (options: StartOptions = {}) => {
         },
         root: {
           render: (node) => {
+            if (isValidElement<AppProps>(node)) {
+              app.effects = node.props.effects;
+            }
+
             root.render(node);
           },
           unmount: () => {
@@ -129,7 +135,7 @@ const start = async (options: StartOptions = {}) => {
 
   await settle();
 
-  return { setup, handlers, calls, exitCodes, printed, closing, watcher, lending };
+  return { setup, handlers, calls, exitCodes, printed, closing, watcher, lending, app };
 };
 
 afterEach(() => {
@@ -430,4 +436,112 @@ it('holds a change that arrives just before the editor, and reloads once after r
   });
 
   expect(watcher.loads).toBe(2);
+});
+
+it('runs queued editors one after the other and resumes once after the last', async () => {
+  const editorGates = [Promise.withResolvers<undefined>(), Promise.withResolvers<undefined>()];
+  let started = 0;
+
+  const { setup, lending } = await start({
+    edit: async () => {
+      const gate = editorGates[started];
+      started += 1;
+      lending.push(`edit ${started}`);
+      await gate?.promise;
+      lending.push(`end ${started}`);
+
+      return { ok: true, value: undefined };
+    },
+  });
+
+  await act(async () => {
+    setup.mockInput.pressKey('e');
+    setup.mockInput.pressKey('e');
+  });
+
+  await settle();
+
+  expect(lending).toEqual(['suspend', 'edit 1']);
+
+  editorGates[0]?.resolve(undefined);
+  await settle();
+
+  expect(lending).toEqual(['suspend', 'edit 1', 'end 1', 'edit 2']);
+
+  editorGates[1]?.resolve(undefined);
+  await settle();
+
+  expect(lending).toEqual(['suspend', 'edit 1', 'end 1', 'edit 2', 'end 2', 'resume']);
+});
+
+it('returns cancellation for queued loans without callbacks or renderer resume after shutdown', async () => {
+  const editorDone = Promise.withResolvers<string>();
+  const { app, handlers, lending, calls, exitCodes, printed } = await start();
+  const callbacks: string[] = [];
+  const running = app.effects?.lend(() => editorDone.promise);
+
+  const queued = Array.from({ length: 3 }, () =>
+    app.effects?.lend(() => {
+      callbacks.push('queued');
+
+      return Promise.resolve('queued');
+    }),
+  );
+
+  const outcomes = Promise.allSettled([running, ...queued]);
+
+  await settle();
+  handlers.get('SIGTERM')?.();
+  await settle();
+
+  expect(calls.destroy).toBe(1);
+  editorDone.resolve('finished');
+
+  expect(await outcomes).toEqual([
+    { status: 'fulfilled', value: { ok: true, value: 'finished' } },
+    { status: 'fulfilled', value: { ok: false, reason: 'cancelled' } },
+    { status: 'fulfilled', value: { ok: false, reason: 'cancelled' } },
+    { status: 'fulfilled', value: { ok: false, reason: 'cancelled' } },
+  ]);
+
+  const late = await app.effects?.lend(() => {
+    callbacks.push('late');
+
+    return Promise.resolve('late');
+  });
+
+  expect(late).toEqual({ ok: false, reason: 'cancelled' });
+  expect(callbacks).toEqual([]);
+  expect(lending).toEqual(['suspend']);
+  expect(exitCodes).toEqual([0]);
+  expect(printed).toEqual([]);
+});
+
+it('stops the running editor and never starts the queued one at shutdown', async () => {
+  const editorDone = Promise.withResolvers<undefined>();
+  let started = 0;
+
+  const { setup, handlers, exitCodes, calls } = await start({
+    edit: async () => {
+      started += 1;
+      await editorDone.promise;
+
+      return { ok: true, value: undefined };
+    },
+  });
+
+  await act(async () => {
+    setup.mockInput.pressKey('e');
+    setup.mockInput.pressKey('e');
+  });
+
+  await settle();
+
+  handlers.get('SIGTERM')?.();
+  editorDone.resolve(undefined);
+  await settle();
+
+  expect(started).toBe(1);
+  expect(exitCodes).toEqual([0]);
+  expect(calls.dispose).toBe(1);
 });

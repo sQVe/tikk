@@ -226,22 +226,62 @@ export const startTerminal = async (
     finish();
   };
 
-  // A failed resume leaves the terminal unusable, so tikk restores it through shutdown and exits.
-  const lend = async <Value,>(run: () => Promise<Value>): Promise<Value> => {
-    const { renderer } = await openPromise;
+  // Loans run one at a time. The renderer stays suspended from the first loan until the last queued
+  // loan ends. A failed resume leaves the terminal unusable, so tikk restores it through shutdown
+  // and exits.
+  let loanTail: Promise<undefined> = Promise.resolve(undefined);
+  let pendingLoans = 0;
+  let suspended = false;
 
-    renderer.suspend();
-    changes.hold();
+  const endLoan = (renderer: TerminalRenderer): void => {
+    pendingLoans -= 1;
+
+    if (pendingLoans > 0 || !suspended) {
+      return;
+    }
+
+    suspended = false;
+
+    if (shutdownPromise !== undefined) {
+      return;
+    }
 
     try {
-      return await run();
-    } finally {
-      try {
-        renderer.resume();
-        changes.release();
-      } catch (error) {
-        fail(error);
+      renderer.resume();
+      changes.release();
+    } catch (error) {
+      fail(error);
+    }
+  };
+
+  const lend: AppProps['effects']['lend'] = async (run) => {
+    const previous = loanTail;
+    const turn = Promise.withResolvers<undefined>();
+
+    loanTail = turn.promise;
+    pendingLoans += 1;
+
+    const { renderer } = await openPromise;
+
+    try {
+      await previous;
+
+      if (shutdownPromise !== undefined) {
+        return { ok: false, reason: 'cancelled' };
       }
+
+      if (!suspended) {
+        renderer.suspend();
+        changes.hold();
+        suspended = true;
+      }
+
+      const value = await run();
+
+      return { ok: true, value };
+    } finally {
+      endLoan(renderer);
+      turn.resolve(undefined);
     }
   };
 

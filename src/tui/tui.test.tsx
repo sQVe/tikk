@@ -104,7 +104,7 @@ const mount = async (
 
       return Promise.resolve({ ok: true, value: undefined });
     },
-    lend: (run) => run(),
+    lend: async (run) => ({ ok: true, value: await run() }),
     onChange: (listener) => {
       changeListeners.add(listener);
 
@@ -390,6 +390,33 @@ it('ignores e when the list is empty', async () => {
   expect(edited).toEqual([]);
 });
 
+it('handles a cancelled terminal loan without editing or replacing the current notice', async () => {
+  let attempts = 0;
+
+  const setup = await mount([needView(1, 'Asked task')], { width: 60, height: 10 }, [], [], {
+    lend: () => {
+      attempts += 1;
+
+      if (attempts === 1) {
+        return Promise.reject(new Error('The editor crashed.'));
+      }
+
+      return Promise.resolve({ ok: false, reason: 'cancelled' });
+    },
+  });
+
+  await press(setup, 'e');
+  expect(setup.captureCharFrame()).toContain('The editor crashed.');
+
+  const before = setup.captureCharFrame();
+
+  await press(setup, 'e');
+
+  expect(attempts).toBe(2);
+  expect(edited).toEqual([]);
+  expect(setup.captureCharFrame()).toBe(before);
+});
+
 it('shows the error of an editor that throws, and clears it after an edit that works', async () => {
   const outcomes = [
     () => Promise.reject(new Error('The editor crashed.')),
@@ -530,4 +557,26 @@ it('opens the tree row on screen when e arrives in the commit of a reload that r
 
   expect(selectedLine(setup)).toContain('Other slice');
   expect(edited).toEqual(['demo-3404']);
+});
+
+it('shows blocked findings of one ticket as different rows and keeps the second selected on reload', async () => {
+  const blocked = (fingerprint: string, claim: string): NeedView => ({
+    ...needView(0, 'Same ticket'),
+    reason: 'blockedFinding',
+    fingerprint,
+    claim,
+  });
+
+  const items = [blocked('first', 'First problem'), blocked('second', 'Second problem')];
+  const setup = await mount(items, { width: 80, height: 8 });
+
+  expect(setup.captureCharFrame()).toContain('first  First problem');
+  expect(setup.captureCharFrame()).toContain('second  Second problem');
+
+  await press(setup, 'j');
+  expect(selectedLine(setup)).toContain('second');
+
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain('second');
 });

@@ -82,7 +82,7 @@ const itemView = (item: NeedItem<CliTicket>): NeedView => {
   return { id, title, reason: item.reason, since, ageSeconds, ...parseError };
 };
 
-const itemSubject = (view: NeedView): string =>
+export const itemSubject = (view: NeedView): string =>
   view.reason === 'blockedFinding' ? `${view.fingerprint}  ${view.claim}` : view.title;
 
 const itemLine = (view: NeedView): string => {

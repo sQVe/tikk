@@ -43,7 +43,7 @@ const WithKeymap = (props: Omit<AppProps, 'keymap'>): ReactNode => {
 
 const tuiEffects = (session: NeedsSession): AppProps['effects'] => ({
   ...session,
-  lend: (run) => run(),
+  lend: async (run) => ({ ok: true, value: await run() }),
   onChange: () => () => undefined,
 });
 
