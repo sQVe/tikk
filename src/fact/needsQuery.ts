@@ -6,24 +6,19 @@ import type { SliceIndex } from './sliceState.ts';
 import { deriveTaskStateFromOwnFacts } from './taskState.ts';
 import type { TaskTicket } from './taskState.ts';
 
-type NeedReason =
-  | 'question'
-  | 'submitted'
-  | 'staleClaim'
-  | 'mergedUnverified'
-  | 'flagged'
-  | 'blockedFinding';
-
-export interface NeedItem<Ticket extends TaskTicket> {
+interface NeedBase<Ticket extends TaskTicket> {
   ticket: Ticket;
-  reason: NeedReason;
   since: string;
   ageSeconds: number;
-  holder?: string;
-  openTasks?: TicketId[];
-  fingerprint?: string;
-  claim?: string;
 }
+
+type NeedDetail =
+  | { reason: 'question' | 'submitted' | 'mergedUnverified' }
+  | { reason: 'flagged'; openTasks: TicketId[] }
+  | { reason: 'staleClaim'; holder: string }
+  | { reason: 'blockedFinding'; fingerprint: string; claim: string };
+
+export type NeedItem<Ticket extends TaskTicket> = NeedBase<Ticket> & NeedDetail;
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
 
