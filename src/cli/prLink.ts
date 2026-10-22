@@ -1,4 +1,4 @@
-import { readPullRequest } from '../github.ts';
+import { ghSignal, readPullRequest } from '../github.ts';
 import type { PullRequestObservation, PullRequestRef } from '../github.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
@@ -93,7 +93,7 @@ const prLink = async (input: CommandInput): Promise<CommandResult> => {
     );
   }
 
-  const seen = await readPullRequest(input.effects.runGh, ref);
+  const seen = await readPullRequest(input.effects.runGh, ref, ghSignal());
 
   if (!seen.ok) {
     return { ok: false, reason: { code: 'ghError', message: seen.reason.message } };

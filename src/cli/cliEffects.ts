@@ -128,7 +128,7 @@ export interface CliEffects {
   readTextFile: (path: string) => Promise<string | undefined>;
   runEditor: (path: string) => Promise<Result<undefined, CliMessage>>;
   resolveMachine: () => Promise<Result<string, CliMessage>>;
-  runGh: (args: string[]) => Promise<Result<string, CliMessage>>;
+  runGh: (args: string[], signal: AbortSignal) => Promise<Result<string, CliMessage>>;
   now: () => Date;
 }
 

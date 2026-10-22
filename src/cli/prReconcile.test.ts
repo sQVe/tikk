@@ -1,6 +1,8 @@
 import { expect, it } from 'bun:test';
 
+import { buildSliceIndex, selectSlicePr } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
+import type { CliEffects } from './cliEffects.ts';
 import {
   fakeGh,
   makeEffects,
@@ -8,8 +10,10 @@ import {
   makeKindTicket,
   failureOf,
   makeSession,
+  stalledGh,
   successOf,
   ticketIdOf,
+  withExpiredTimeouts,
 } from './cliHarness.ts';
 import { reconcileBeforeRead, reconcileCommand, reconcilePullRequests } from './prReconcile.ts';
 
@@ -123,6 +127,92 @@ it('keeps a PR merged into another branch out of trunk when the compare says ahe
   expect(appends[0]?.fact).toMatchObject({ base: 'release', inTrunk: false });
 });
 
+it('returns one problem and appends nothing when the compare status is unknown', async () => {
+  const { outcome, appends } = await reconcile(['demo-3467'], [prFact('demo-3467', {})], {
+    7: { state: 'MERGED', base: 'release', mergeCommit: 'merge1', compare: 'unknown' },
+  });
+
+  expect(outcome.updated).toEqual([]);
+  expect(outcome.problems).toHaveLength(1);
+  expect(outcome.problems[0]).toMatchObject({ ticket: 'demo-3467', number: 7 });
+  expect(appends).toEqual([]);
+});
+
+it('returns one problem and appends nothing when gh does not answer before its timeout', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+  });
+
+  const { effects } = makeEffects({ session: fakeSession, runGh: stalledGh });
+
+  const outcome = await withExpiredTimeouts(async () =>
+    reconcilePullRequests({ effects, session: fakeSession.session }),
+  );
+
+  expect(outcome.updated).toEqual([]);
+  expect(outcome.problems).toHaveLength(1);
+  expect(outcome.problems[0]).toMatchObject({ ticket: 'demo-3467', number: 7 });
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('returns one problem and appends nothing when the store cannot be read again', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: {
+      refresh: () => Promise.resolve({ ok: false, reason: { message: 'Cache is gone.' } }),
+    },
+  });
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'CLOSED' } }),
+  });
+
+  const outcome = await reconcilePullRequests({ effects, session: fakeSession.session });
+
+  expect(outcome.updated).toEqual([]);
+
+  expect(outcome.problems).toEqual([
+    { ticket: null, repository: null, number: null, message: 'Cache is gone.' },
+  ]);
+
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('keeps a PR linked by another process while gh reads the old PR', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', { number: 7 })],
+  });
+
+  const github = fakeGh({ 7: { state: 'MERGED', mergeCommit: 'merge1' } });
+
+  const runGh: CliEffects['runGh'] = async (args, signal) => {
+    if (args[0] === 'pr') {
+      await fakeSession.session.appendFact('other', prFact('demo-3467', { number: 8 }));
+    }
+
+    return github(args, signal);
+  };
+
+  const { effects } = makeEffects({ session: fakeSession, runGh });
+  const outcome = await reconcilePullRequests({ effects, session: fakeSession.session });
+
+  await fakeSession.session.refresh();
+
+  const facts = await fakeSession.session.listStateFacts();
+
+  const index = buildSliceIndex(
+    fakeSession.session.listTicketOutlines(),
+    facts.ok ? facts.value : [],
+  );
+
+  expect(outcome.updated).toEqual([]);
+  expect(selectSlicePr(ticketIdOf('demo-3467'), index)?.number).toBe(8);
+});
+
 it('returns one problem for a failing PR and still updates the next', async () => {
   const facts = [prFact('demo-3467', { number: 7 }), prFact('demo-3468', { number: 8 })];
 
@@ -234,7 +324,8 @@ it('refreshes the session after a reconcile that appended', async () => {
   });
 
   expect(result).toEqual({ ok: true, value: [] });
-  expect(refreshes()).toBe(1);
+  // One refresh under the lock checks the selected PR, and one after the append shows the new fact.
+  expect(refreshes()).toBe(2);
 });
 
 it('does not refresh the session after a reconcile that appended nothing', async () => {

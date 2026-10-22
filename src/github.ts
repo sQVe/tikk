@@ -27,7 +27,17 @@ export interface PullRequestObservation {
   inTrunk: boolean;
 }
 
-export type RunGh = (args: string[]) => Promise<Result<string, GithubReason>>;
+export type RunGh = (args: string[], signal: AbortSignal) => Promise<Result<string, GithubReason>>;
+
+interface GhCall {
+  runGh: RunGh;
+  signal: AbortSignal;
+}
+
+const ghTimeoutMilliseconds = 30_000;
+
+// Bounds one pull request read, so a stalled gh cannot hang the command that waits for it.
+export const ghSignal = (): AbortSignal => AbortSignal.timeout(ghTimeoutMilliseconds);
 
 const pullRequestSchema = z.object({
   state: z.enum(['OPEN', 'MERGED', 'CLOSED']),
@@ -37,6 +47,8 @@ const pullRequestSchema = z.object({
 });
 
 const repositorySchema = z.object({ defaultBranchRef: z.object({ name: z.string().min(1) }) });
+
+const compareStatusSchema = z.enum(['ahead', 'behind', 'identical', 'diverged']);
 
 const states = { OPEN: 'open', MERGED: 'merged', CLOSED: 'closed' } as const;
 
@@ -92,11 +104,11 @@ const parseTrunkName = (text: string, command: string): Result<string, GithubRea
 };
 
 const readView = async <Value>(
-  runGh: RunGh,
+  gh: GhCall,
   args: string[],
   parse: (text: string, command: string) => Result<Value, GithubReason>,
 ): Promise<Result<Value, GithubReason>> => {
-  const output = await runGh(args);
+  const output = await gh.runGh(args, gh.signal);
 
   if (!output.ok) {
     return output;
@@ -106,31 +118,35 @@ const readView = async <Value>(
 };
 
 const isMergedInTrunk = async (
-  runGh: RunGh,
+  gh: GhCall,
   ref: PullRequestRef,
   trunk: string,
   mergeCommit: string,
 ): Promise<Result<boolean, GithubReason>> => {
   const range = `${trunk}...${mergeCommit}`;
 
-  const output = await runGh([
-    'api',
-    `repos/${ref.repository}/compare/${range}`,
-    '--jq',
-    '.status',
-  ]);
+  const output = await gh.runGh(
+    ['api', `repos/${ref.repository}/compare/${range}`, '--jq', '.status'],
+    gh.signal,
+  );
 
   if (!output.ok) {
     return output;
   }
 
-  const status = output.value.trim();
+  const status = compareStatusSchema.safeParse(output.value.trim());
 
-  return { ok: true, value: status === 'behind' || status === 'identical' };
+  if (!status.success) {
+    const command = `gh api repos/${ref.repository}/compare/${range}`;
+
+    return { ok: false, reason: { message: `"${command}" gave unexpected output.` } };
+  }
+
+  return { ok: true, value: status.data === 'behind' || status.data === 'identical' };
 };
 
 const readInTrunk = async (
-  runGh: RunGh,
+  gh: GhCall,
   ref: PullRequestRef,
   pullRequest: PullRequestView,
   trunk: string,
@@ -147,29 +163,31 @@ const readInTrunk = async (
     return { ok: true, value: false };
   }
 
-  return isMergedInTrunk(runGh, ref, trunk, pullRequest.mergeCommit);
+  return isMergedInTrunk(gh, ref, trunk, pullRequest.mergeCommit);
 };
 
 export const readPullRequest = async (
   runGh: RunGh,
   ref: PullRequestRef,
+  signal: AbortSignal,
 ): Promise<Result<PullRequestObservation, GithubReason>> => {
+  const gh = { runGh, signal };
   const fields = 'number,state,baseRefName,headRefOid,mergeCommit';
   const view = ['pr', 'view', String(ref.number), '--repo', ref.repository, '--json', fields];
-  const pullRequest = await readView(runGh, view, parsePullRequestView);
+  const pullRequest = await readView(gh, view, parsePullRequestView);
 
   if (!pullRequest.ok) {
     return pullRequest;
   }
 
   const repoView = ['repo', 'view', ref.repository, '--json', 'defaultBranchRef'];
-  const trunk = await readView(runGh, repoView, parseTrunkName);
+  const trunk = await readView(gh, repoView, parseTrunkName);
 
   if (!trunk.ok) {
     return trunk;
   }
 
-  const inTrunk = await readInTrunk(runGh, ref, pullRequest.value, trunk.value);
+  const inTrunk = await readInTrunk(gh, ref, pullRequest.value, trunk.value);
 
   if (!inTrunk.ok) {
     return inTrunk;

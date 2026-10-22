@@ -108,13 +108,7 @@ const blockerState = (
     return 'missing';
   }
 
-  const derived = states.get(target.id);
-
-  if (derived !== undefined) {
-    return derived.state;
-  }
-
-  return target.frontMatter.kind === 'task' ? 'missing' : target.frontMatter.status;
+  return states.get(target.id)?.state ?? target.frontMatter.status;
 };
 
 export const selectReady = <Ticket extends TaskTicket>(

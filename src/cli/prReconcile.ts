@@ -1,6 +1,6 @@
 import { buildSliceIndex, selectSlicePr } from '../fact/fact.ts';
-import type { Fact, SliceState } from '../fact/fact.ts';
-import { readPullRequest } from '../github.ts';
+import type { Fact, SliceIndex, SliceState } from '../fact/fact.ts';
+import { ghSignal, readPullRequest } from '../github.ts';
 import type { PullRequestObservation, PullRequestRef } from '../github.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
@@ -65,11 +65,79 @@ const isOpenSlice = (ticket: CliTicket): boolean =>
   ticket.frontMatter.kind === 'slice' &&
   ticket.frontMatter.status === 'open';
 
-const appendChanges = async (
+const changeProblem = (change: Change, message: string): ReconcileProblem => ({
+  ticket: change.ticket,
+  repository: change.repository,
+  number: change.number,
+  message,
+});
+
+const isStillSelected = (change: Change, index: SliceIndex): boolean => {
+  const selected = selectSlicePr(change.ticket, index);
+
+  return selected?.repository === change.repository && selected.number === change.number;
+};
+
+// Another process may link a different PR while gh runs, so the selection is read again under the
+// lock before anything is appended.
+const readCurrentIndex = async (
+  session: CliSession,
+): Promise<Result<SliceIndex, { message: string }>> => {
+  const refreshed = await session.refresh();
+
+  if (!refreshed.ok) {
+    return refreshed;
+  }
+
+  const facts = await session.listStateFacts();
+
+  if (!facts.ok) {
+    return facts;
+  }
+
+  return { ok: true, value: buildSliceIndex(session.listTicketOutlines(), facts.value) };
+};
+
+const appendSelected = async (
   { effects, session }: ReconcileInput,
+  changes: Change[],
+  machine: string,
+  outcome: ReconcileOutcome,
+): Promise<void> => {
+  const index = await readCurrentIndex(session);
+
+  if (!index.ok) {
+    outcome.problems.push(globalProblem(index.reason.message));
+
+    return;
+  }
+
+  const selected = changes.filter((change) => isStillSelected(change, index.value));
+
+  for (const change of selected) {
+    const fact = makePrFact(
+      { ticket: change.ticket, at: effects.now(), machine },
+      change,
+      change.seen,
+    );
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Appends to one fact file run one at a time.
+    const appended = await session.appendFact(machine, fact);
+
+    if (appended.ok) {
+      outcome.updated.push({ id: change.ticket, state: change.seen.state });
+    } else {
+      outcome.problems.push(changeProblem(change, appended.reason.message));
+    }
+  }
+};
+
+const appendChanges = async (
+  input: ReconcileInput,
   changes: Change[],
   outcome: ReconcileOutcome,
 ): Promise<void> => {
+  const { effects, session } = input;
   const machine = await effects.resolveMachine();
 
   if (!machine.ok) {
@@ -87,27 +155,7 @@ const appendChanges = async (
   }
 
   try {
-    for (const change of changes) {
-      const fact = makePrFact(
-        { ticket: change.ticket, at: effects.now(), machine: machine.value },
-        change,
-        change.seen,
-      );
-
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Appends to one fact file run one at a time.
-      const appended = await session.appendFact(machine.value, fact);
-
-      if (appended.ok) {
-        outcome.updated.push({ id: change.ticket, state: change.seen.state });
-      } else {
-        outcome.problems.push({
-          ticket: change.ticket,
-          repository: change.repository,
-          number: change.number,
-          message: appended.reason.message,
-        });
-      }
-    }
+    await appendSelected(input, changes, machine.value, outcome);
   } finally {
     await lock.value.release();
   }
@@ -122,7 +170,7 @@ const readTarget = async (
 ): Promise<Change | ReconcileProblem | undefined> => {
   const { slice, pr } = target;
   const ref = { repository: pr.repository, number: pr.number };
-  const seen = await readPullRequest(effects.runGh, ref);
+  const seen = await readPullRequest(effects.runGh, ref, ghSignal());
 
   if (!seen.ok) {
     const label = `${ref.repository}#${ref.number} of ${slice.id}`;

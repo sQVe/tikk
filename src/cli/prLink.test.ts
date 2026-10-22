@@ -8,7 +8,9 @@ import {
   makeFact,
   makeKindTicket,
   makeSession,
+  stalledGh,
   successOf,
+  withExpiredTimeouts,
 } from './cliHarness.ts';
 import { prCommand } from './prLink.ts';
 
@@ -164,4 +166,21 @@ it('reports a store write failure as a store error', async () => {
   const { result } = await link(['demo-3467', url], { 7: { state: 'OPEN' } }, { appendFailure });
 
   expect(failureOf(result)).toMatchObject({ code: 'storeError', message: 'Disk is full.' });
+});
+
+it('returns ghError and appends nothing when gh does not answer before its timeout', async () => {
+  const fakeSession = makeSession({ tickets: [makeKindTicket('demo-3467', 'slice')] });
+  const fakeEffects = makeEffects({ session: fakeSession, runGh: stalledGh });
+
+  const result = await withExpiredTimeouts(async () =>
+    prCommand({
+      args: ['link', 'demo-3467', url],
+      json: true,
+      effects: fakeEffects.effects,
+      session: fakeSession.session,
+    }),
+  );
+
+  expect(failureOf(result).code).toBe('ghError');
+  expect(fakeSession.appends).toEqual([]);
 });

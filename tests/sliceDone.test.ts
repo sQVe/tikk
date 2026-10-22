@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
@@ -183,6 +183,45 @@ it('sees a merge after a linked PR closed and reopened', async () => {
   await cli().runJson(['ready']);
 
   expect((await showSlice(id)).state).toBe('mergedUnverified');
+});
+
+// A PATH with only bun and git, so tikk cannot start gh.
+const pathWithoutGh = async (): Promise<string> => {
+  const directory = join(cli().home, 'bin');
+  const git = Bun.which('git');
+
+  invariant(git !== null, 'The tests need git on PATH.');
+
+  await mkdir(directory);
+  await symlink(process.execPath, join(directory, 'bun'));
+  await symlink(git, join(directory, 'git'));
+
+  return directory;
+};
+
+const readFacts = async (): Promise<string[]> => {
+  const root = join(cli().storePath, 'facts');
+  const paths = await readdir(root, { recursive: true });
+  const files = paths.filter((path) => path.endsWith('.jsonl')).toSorted();
+
+  return Promise.all(files.map((path) => readFile(join(root, path), 'utf8')));
+};
+
+it('lists ready work with one reconcile problem and appends no fact when gh cannot start', async () => {
+  await fakeGh().setPullRequest(open);
+
+  const id = await createSlice();
+
+  await cli().runJson(['pr', 'link', id, prUrl]);
+
+  const before = await readFacts();
+  const result = await cli().run(['ready'], { path: await pathWithoutGh() });
+  const listing = JSON.parse(result.stdout) as { reconcileProblems: { ticket: string }[] };
+
+  expect(result.exitCode).toBe(0);
+  expect(listing.reconcileProblems).toHaveLength(1);
+  expect(listing.reconcileProblems[0]?.ticket).toBe(id);
+  expect(await readFacts()).toEqual(before);
 });
 
 it('flags a merged slice that still has an open task', async () => {

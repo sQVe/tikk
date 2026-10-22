@@ -290,11 +290,40 @@ export const failed = (message: string): Promise<Result<never, { message: string
 
 const recordGh =
   (calls: string[][], reply: CliEffects['runGh'] | undefined): CliEffects['runGh'] =>
-  (args) => {
+  (args, signal) => {
     calls.push(args);
 
-    return reply === undefined ? failed('gh is not available.') : reply(args);
+    return reply === undefined ? failed('gh is not available.') : reply(args, signal);
   };
+
+// A gh that never answers on its own and fails only once its signal aborts.
+export const stalledGh: CliEffects['runGh'] = (args, signal) =>
+  new Promise((resolve) => {
+    signal.addEventListener('abort', () => {
+      resolve({ ok: false, reason: { message: `"gh ${args.join(' ')}" was stopped.` } });
+    });
+  });
+
+// Runs with every timeout signal aborting as soon as its caller waits.
+export const withExpiredTimeouts = async <Value>(run: () => Promise<Value>): Promise<Value> => {
+  const original = AbortSignal.timeout.bind(AbortSignal);
+
+  AbortSignal.timeout = () => {
+    const controller = new AbortController();
+
+    setTimeout(() => {
+      controller.abort();
+    }, 0);
+
+    return controller.signal;
+  };
+
+  try {
+    return await run();
+  } finally {
+    AbortSignal.timeout = original;
+  }
+};
 
 export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
   const fakeSession = options.session ?? makeSession();

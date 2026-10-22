@@ -305,13 +305,15 @@ const initLocalStore = async (): Promise<
 };
 
 // GH_PROMPT_DISABLED makes gh fail instead of asking questions, since no one may be at the terminal.
-const runGh: CliEffects['runGh'] = async (args) => {
+const runGh: CliEffects['runGh'] = async (args, signal) => {
   try {
     const child = Bun.spawn(['gh', ...args], {
       env: { ...Bun.env, GH_PROMPT_DISABLED: '1' },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
+      signal,
+      killSignal: 'SIGKILL',
     });
 
     const [stdout, stderr, exitCode] = await Promise.all([
@@ -319,6 +321,10 @@ const runGh: CliEffects['runGh'] = async (args) => {
       child.stderr.text(),
       child.exited,
     ]);
+
+    if (signal.aborted) {
+      return { ok: false, reason: { message: `"gh ${args.join(' ')}" did not finish in time.` } };
+    }
 
     if (exitCode === 0) {
       return { ok: true, value: stdout };

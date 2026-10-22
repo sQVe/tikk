@@ -38,9 +38,7 @@ const readVerdictsFile = async (
   try {
     verdicts = Bun.YAML.parse(text);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-
-    return invalidArguments(`The verdicts file ${path} is not valid YAML: ${detail}`);
+    return invalidArguments(`The verdicts file ${path} is not valid YAML: ${String(error)}`);
   }
 
   if (!Array.isArray(verdicts)) {
