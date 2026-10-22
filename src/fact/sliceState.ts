@@ -29,6 +29,11 @@ export interface SliceState {
   pr: SlicePr | null;
 }
 
+export interface SliceIndex {
+  factsByTicket: Map<TicketId, Fact[]>;
+  tasksBySlice: Map<TicketId, SliceTicket[]>;
+}
+
 type PrFact = Extract<Fact, { kind: 'pr' }>;
 type AuditFact = Extract<Fact, { kind: 'audit' }>;
 
@@ -94,29 +99,38 @@ const prView = (fact: PrFact): SlicePr => ({
   checkedAt: fact.at,
 });
 
-export const deriveSliceState = (
-  slice: SliceTicket,
-  tickets: SliceTicket[],
-  facts: Fact[],
-  now: Date,
-): SliceState => {
-  const factsByTicket = Map.groupBy(facts, (fact) => fact.ticket);
+export const buildSliceIndex = (tickets: SliceTicket[], facts: Fact[]): SliceIndex => {
+  const tasks = tickets.filter(
+    (ticket): ticket is SliceTicket & { frontMatter: { parent: TicketId } } =>
+      ticket.frontMatter.kind === 'task' && ticket.frontMatter.parent !== undefined,
+  );
+
+  return {
+    factsByTicket: Map.groupBy(facts, (fact) => fact.ticket),
+    tasksBySlice: Map.groupBy(tasks, (ticket) => ticket.frontMatter.parent),
+  };
+};
+
+export const selectSlicePr = (sliceId: TicketId, index: SliceIndex): SlicePr | null => {
+  const pr = winningPrFact(index.factsByTicket.get(sliceId) ?? []);
+
+  return pr === undefined || pr.state === 'closed' ? null : prView(pr);
+};
+
+export const deriveSliceState = (slice: SliceTicket, index: SliceIndex, now: Date): SliceState => {
+  const { factsByTicket } = index;
   const own = factsByTicket.get(slice.id) ?? [];
   const pr = winningPrFact(own);
 
-  const tasks = tickets
-    .filter(
-      (ticket) => ticket.frontMatter.kind === 'task' && ticket.frontMatter.parent === slice.id,
-    )
-    .map((ticket) => {
-      const taskFacts = factsByTicket.get(ticket.id) ?? [];
+  const tasks = (index.tasksBySlice.get(slice.id) ?? []).map((ticket) => {
+    const taskFacts = factsByTicket.get(ticket.id) ?? [];
 
-      return {
-        id: ticket.id,
-        facts: taskFacts,
-        state: deriveTaskStateFromOwnFacts(ticket, taskFacts, now).state,
-      };
-    });
+    return {
+      id: ticket.id,
+      facts: taskFacts,
+      state: deriveTaskStateFromOwnFacts(ticket, taskFacts, now).state,
+    };
+  });
 
   if (pr === undefined || pr.state === 'closed') {
     const started = tasks.filter((task) => isStarted(task.state));

@@ -1,8 +1,9 @@
+import { readPullRequest } from '../github.ts';
+import type { PullRequestObservation, PullRequestRef } from '../github.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { differsFromObservation, makePrFact, readPullRequest } from './prGithub.ts';
-import type { PullRequestObservation, PullRequestRef } from './prGithub.ts';
+import { differsFromObservation, makePrFact } from './prGithub.ts';
 import { withLockedTicket } from './taskLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';

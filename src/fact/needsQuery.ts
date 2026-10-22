@@ -1,6 +1,7 @@
 import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
-import { deriveSliceState } from './sliceState.ts';
+import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
+import type { SliceIndex } from './sliceState.ts';
 import { deriveTaskStateFromOwnFacts } from './taskState.ts';
 import type { TaskTicket } from './taskState.ts';
 
@@ -122,11 +123,10 @@ const isOpenSlice = (ticket: TaskTicket): boolean => {
 
 const sliceNeedsOf = <Ticket extends TaskTicket>(
   slice: Ticket,
-  tickets: Ticket[],
-  facts: Fact[],
+  index: SliceIndex,
   now: Date,
 ): NeedItem<Ticket>[] => {
-  const derived = deriveSliceState(slice, tickets, facts, now);
+  const derived = deriveSliceState(slice, index, now);
   const since = derived.pr?.checkedAt;
   const items: NeedItem<Ticket>[] = [];
 
@@ -168,7 +168,8 @@ export const selectNeeds = <Ticket extends TaskTicket>(
   facts: Fact[],
   now: Date,
 ): NeedItem<Ticket>[] => {
-  const factsByTicket = Map.groupBy(facts, (fact) => fact.ticket);
+  const index = buildSliceIndex(tickets, facts);
+  const { factsByTicket } = index;
 
   const taskItems = tickets
     .filter(isConsidered)
@@ -176,7 +177,7 @@ export const selectNeeds = <Ticket extends TaskTicket>(
 
   const sliceItems = tickets
     .filter(isOpenSlice)
-    .flatMap((slice) => sliceNeedsOf(slice, tickets, facts, now));
+    .flatMap((slice) => sliceNeedsOf(slice, index, now));
 
   return [...taskItems, ...sliceItems].toSorted(byOldest);
 };

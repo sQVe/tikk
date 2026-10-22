@@ -1,5 +1,5 @@
 import type { Fact } from './factLine.ts';
-import { deriveSliceState } from './sliceState.ts';
+import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceStateName } from './sliceState.ts';
 import { deriveTaskStateFromOwnFacts } from './taskState.ts';
 import type { TaskClaim, TaskStateName, TaskTicket } from './taskState.ts';
@@ -76,19 +76,22 @@ const deriveStates = (
   facts: Fact[],
   now: Date,
 ): Map<string, Consideration> => {
-  const grouped = Map.groupBy(facts, (fact) => fact.ticket);
+  const index = buildSliceIndex(tickets, facts);
   const states = new Map<string, Consideration>();
 
   for (const ticket of tickets) {
     const { kind, status } = ticket.frontMatter;
 
     if (kind === 'task') {
-      states.set(ticket.id, deriveTaskStateFromOwnFacts(ticket, grouped.get(ticket.id) ?? [], now));
+      states.set(
+        ticket.id,
+        deriveTaskStateFromOwnFacts(ticket, index.factsByTicket.get(ticket.id) ?? [], now),
+      );
     }
 
     if (kind === 'slice' && status === 'open') {
       states.set(ticket.id, {
-        state: deriveSliceState(ticket, tickets, facts, now).state,
+        state: deriveSliceState(ticket, index, now).state,
         claim: null,
       });
     }

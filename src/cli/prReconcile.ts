@@ -1,5 +1,7 @@
-import { deriveSliceState } from '../fact/fact.ts';
+import { buildSliceIndex, selectSlicePr } from '../fact/fact.ts';
 import type { Fact, SliceState } from '../fact/fact.ts';
+import { readPullRequest } from '../github.ts';
+import type { PullRequestObservation, PullRequestRef } from '../github.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { parseCommandArguments, invalidArguments } from './cliArguments.ts';
@@ -11,8 +13,7 @@ import type {
   CommandInput,
   CommandResult,
 } from './cliEffects.ts';
-import { differsFromObservation, makePrFact, readPullRequest } from './prGithub.ts';
-import type { PullRequestObservation, PullRequestRef } from './prGithub.ts';
+import { differsFromObservation, makePrFact } from './prGithub.ts';
 
 export interface ReconcileProblem {
   ticket: TicketId | null;
@@ -147,10 +148,10 @@ const collectChanges = async (
   facts: Fact[],
   outcome: ReconcileOutcome,
 ): Promise<Change[]> => {
-  const outlines = session.listTicketOutlines();
+  const index = buildSliceIndex(session.listTicketOutlines(), facts);
 
   const targets = slices.flatMap((slice): Target[] => {
-    const { pr } = deriveSliceState(slice, outlines, facts, effects.now());
+    const pr = selectSlicePr(slice.id, index);
 
     return pr === null || isSettled(pr) ? [] : [{ slice, pr }];
   });

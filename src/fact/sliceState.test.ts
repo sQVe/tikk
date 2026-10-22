@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { deriveSliceState } from './fact.ts';
+import { buildSliceIndex, deriveSliceState } from './fact.ts';
 import type { Fact } from './fact.ts';
 import { makeFact, makeTicket, now, taskId } from './factHarness.ts';
 
@@ -30,22 +30,29 @@ const auditFact = (head: string, verdict = 'met', extra: Record<string, unknown>
     ...extra,
   });
 
+const derive = (
+  target: Parameters<typeof deriveSliceState>[0],
+  tickets: Parameters<typeof buildSliceIndex>[0],
+  facts: Parameters<typeof buildSliceIndex>[1],
+  at: Date,
+) => deriveSliceState(target, buildSliceIndex(tickets, facts), at);
+
 describe('deriveSliceState', () => {
   it('derives mergedUnverified from a merged PR with no audit', () => {
-    const result = deriveSliceState(slice, [slice], [prFact()], now);
+    const result = derive(slice, [slice], [prFact()], now);
 
     expect(result.state).toBe('mergedUnverified');
     expect(result.pr).toMatchObject({ number: 7, mergeCommit: 'bbb', checkedAt: prFact().at });
   });
 
   it('derives planned from no PR and no started task', () => {
-    const result = deriveSliceState(slice, [slice, task], [], now);
+    const result = derive(slice, [slice, task], [], now);
 
     expect(result).toMatchObject({ state: 'planned', since: null, ageSeconds: null, pr: null });
   });
 
   it('derives planned from a PR closed unmerged', () => {
-    const result = deriveSliceState(slice, [slice], [prFact({ state: 'closed' })], now);
+    const result = derive(slice, [slice], [prFact({ state: 'closed' })], now);
 
     expect(result.state).toBe('planned');
   });
@@ -58,7 +65,7 @@ describe('deriveSliceState', () => {
       at: '2026-10-20T11:00:00.000Z',
     });
 
-    const result = deriveSliceState(slice, [slice, task], [claim], now);
+    const result = derive(slice, [slice, task], [claim], now);
 
     expect(result).toMatchObject({
       state: 'active',
@@ -68,7 +75,7 @@ describe('deriveSliceState', () => {
   });
 
   it('derives inReview from an open PR', () => {
-    const result = deriveSliceState(slice, [slice], [prFact({ state: 'open' })], now);
+    const result = derive(slice, [slice], [prFact({ state: 'open' })], now);
 
     expect(result).toMatchObject({ state: 'inReview', since: prFact().at });
   });
@@ -76,18 +83,18 @@ describe('deriveSliceState', () => {
   it('derives inReview from a PR merged into a non-trunk branch', () => {
     const stacked = prFact({ base: 'feature', inTrunk: false });
 
-    expect(deriveSliceState(slice, [slice], [stacked], now).state).toBe('inReview');
+    expect(derive(slice, [slice], [stacked], now).state).toBe('inReview');
   });
 
   it('derives done from an audit with every verdict met for the merged head', () => {
     const audit = auditFact('aaa', 'met', { at: '2026-10-20T11:00:00.000Z' });
-    const result = deriveSliceState(slice, [slice], [prFact(), audit], now);
+    const result = derive(slice, [slice], [prFact(), audit], now);
 
     expect(result).toMatchObject({ state: 'done', since: prFact().at });
   });
 
   it('derives mergedUnverified from an all-met audit for another head', () => {
-    const result = deriveSliceState(slice, [slice], [prFact(), auditFact('zzz')], now);
+    const result = derive(slice, [slice], [prFact(), auditFact('zzz')], now);
 
     expect(result.state).toBe('mergedUnverified');
   });
@@ -96,9 +103,7 @@ describe('deriveSliceState', () => {
     const older = auditFact('aaa', 'met', { at: '2026-10-20T10:30:00.000Z' });
     const newer = auditFact('aaa', 'not-met', { at: '2026-10-20T11:00:00.000Z' });
 
-    expect(deriveSliceState(slice, [slice], [prFact(), older, newer], now).state).toBe(
-      'mergedUnverified',
-    );
+    expect(derive(slice, [slice], [prFact(), older, newer], now).state).toBe('mergedUnverified');
   });
 
   it('lets an older merged fact beat a newer open fact for the same PR', () => {
@@ -108,20 +113,20 @@ describe('deriveSliceState', () => {
       at: '2026-10-20T11:00:00.000Z',
     });
 
-    const result = deriveSliceState(slice, [slice], [prFact(), open], now);
+    const result = derive(slice, [slice], [prFact(), open], now);
 
     expect(result.state).toBe('mergedUnverified');
   });
 
   it('flags a merged slice with an open task and names the task', () => {
-    const result = deriveSliceState(slice, [slice, task], [prFact()], now);
+    const result = derive(slice, [slice, task], [prFact()], now);
 
     expect(result).toMatchObject({ flagged: true, openTasks: [taskId('3478')] });
   });
 
   it('does not flag a merged slice whose tasks are done', () => {
     const accept = makeFact('3478', { kind: 'accept' });
-    const result = deriveSliceState(slice, [slice, task], [prFact(), accept], now);
+    const result = derive(slice, [slice, task], [prFact(), accept], now);
 
     expect(result).toMatchObject({ flagged: false, openTasks: [] });
   });

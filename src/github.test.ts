@@ -1,22 +1,40 @@
 import { expect, it } from 'bun:test';
 
-import { parsePullRequestView, parseTrunkName } from './github.ts';
+import { readPullRequest } from './github.ts';
+import type { RunGh } from './github.ts';
 
-it('reads a merged pull request view', () => {
-  const text = JSON.stringify({
-    state: 'MERGED',
-    baseRefName: 'main',
-    headRefOid: 'abc',
-    mergeCommit: { oid: 'def' },
-  });
+const ref = { repository: 'acme/app', number: 7 };
 
-  expect(parsePullRequestView(text, 'gh pr view')).toEqual({
+const replyWith =
+  (view: string, repo: string): RunGh =>
+  async (args) => ({ ok: true, value: args[0] === 'pr' ? view : repo });
+
+const mergedView = JSON.stringify({
+  state: 'MERGED',
+  baseRefName: 'main',
+  headRefOid: 'abc',
+  mergeCommit: { oid: 'def' },
+});
+
+const repoView = JSON.stringify({ defaultBranchRef: { name: 'main' } });
+
+it('reads a merged pull request view', async () => {
+  const result = await readPullRequest(replyWith(mergedView, repoView), ref);
+
+  expect(result).toEqual({
     ok: true,
-    value: { state: 'merged', base: 'main', head: 'abc', mergeCommit: 'def' },
+    value: {
+      state: 'merged',
+      base: 'main',
+      head: 'abc',
+      mergeCommit: 'def',
+      trunk: 'main',
+      inTrunk: true,
+    },
   });
 });
 
-it('refuses output that is not JSON or has an unknown state', () => {
+it('refuses output that is not JSON or has an unknown state', async () => {
   const unknown = JSON.stringify({
     state: 'DRAFT',
     baseRefName: 'main',
@@ -24,13 +42,14 @@ it('refuses output that is not JSON or has an unknown state', () => {
     mergeCommit: null,
   });
 
-  expect(parsePullRequestView('oops', 'gh pr view').ok).toBe(false);
-  expect(parsePullRequestView(unknown, 'gh pr view').ok).toBe(false);
+  expect((await readPullRequest(replyWith('oops', repoView), ref)).ok).toBe(false);
+  expect((await readPullRequest(replyWith(unknown, repoView), ref)).ok).toBe(false);
 });
 
-it('reads the trunk name and refuses a view without one', () => {
-  const text = JSON.stringify({ defaultBranchRef: { name: 'trunk' } });
+it('reads the trunk name and refuses a view without one', async () => {
+  const trunk = JSON.stringify({ defaultBranchRef: { name: 'trunk' } });
+  const found = await readPullRequest(replyWith(mergedView, trunk), ref);
 
-  expect(parseTrunkName(text, 'gh repo view')).toEqual({ ok: true, value: 'trunk' });
-  expect(parseTrunkName('{}', 'gh repo view').ok).toBe(false);
+  expect(found.ok && found.value.trunk).toBe('trunk');
+  expect((await readPullRequest(replyWith(mergedView, '{}'), ref)).ok).toBe(false);
 });

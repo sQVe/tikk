@@ -1,4 +1,4 @@
-import { deriveSliceState, deriveTaskState } from '../fact/fact.ts';
+import { buildSliceIndex, deriveSliceState, deriveTaskState } from '../fact/fact.ts';
 import type { SliceState, TaskClaim, TaskStateName } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
@@ -113,7 +113,7 @@ const showSlice = async (
     return storeFailure(facts.reason.message);
   }
 
-  const derived = deriveSliceState(ticket, outlines, facts.value, now);
+  const derived = deriveSliceState(ticket, buildSliceIndex(outlines, facts.value), now);
   const view: SliceView = { ...ticketView(ticket, true), ...derived };
 
   return { ok: true, value: { json: view, text: ticketText(ticket, derived.state) } };
