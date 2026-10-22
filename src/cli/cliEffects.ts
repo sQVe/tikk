@@ -67,6 +67,7 @@ export interface CliSession extends Disposable {
   // One attempt that never waits for another holder.
   tryLockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
   appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FactAppendReason>>;
+  storeLog: (text: string) => Promise<Result<{ hash: string }, CliMessage>>;
   createTicketFile: (
     project: ProjectName,
     title: string,

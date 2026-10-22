@@ -98,6 +98,58 @@ const auditSchema = z.strictObject({
   verdicts: z.array(auditVerdictSchema).min(1),
 });
 
+const nonEmpty = z.string().min(1);
+
+const targetSchema = z.strictObject({
+  repository: nonEmpty,
+  head: nonEmpty,
+  base: nonEmpty,
+  changeHash: nonEmpty,
+});
+
+const checkSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('check'),
+  target: targetSchema,
+  command: nonEmpty,
+  exitCode: z.number().int(),
+  log: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/, 'Log must be a SHA-256 hash in lower-case hex.')
+    .optional(),
+});
+
+export const reviewFindingSchema = z.strictObject({
+  fingerprint: nonEmpty,
+  severity: z.enum(['high', 'medium', 'low']),
+  location: nonEmpty,
+  claim: nonEmpty,
+});
+
+const reviewSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('review'),
+  target: targetSchema,
+  captureHash: nonEmpty,
+  mode: nonEmpty,
+  findings: z
+    .array(reviewFindingSchema)
+    .refine(
+      (findings) =>
+        new Set(findings.map((finding) => finding.fingerprint)).size === findings.length,
+      'Finding fingerprints must be unique within one review.',
+    ),
+});
+
+const findingSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('finding'),
+  fingerprint: nonEmpty,
+  status: z.enum(['open', 'fixed', 'notWorthChanging', 'incorrect', 'blocked']),
+  actor: nonEmpty,
+  reason: nonEmpty,
+});
+
 const factSchema = z.discriminatedUnion('kind', [
   claimSchema,
   releaseSchema,
@@ -108,6 +160,9 @@ const factSchema = z.discriminatedUnion('kind', [
   aliasSchema,
   prSchema,
   auditSchema,
+  checkSchema,
+  reviewSchema,
+  findingSchema,
 ]);
 
 export type Fact = z.output<typeof factSchema>;

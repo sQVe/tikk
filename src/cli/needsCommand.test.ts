@@ -214,3 +214,25 @@ it('returns the list with one reconcile problem when gh fails', async () => {
   expect(output.text).toContain('demo-3467  question');
   expect(output.text).toContain('problem: ');
 });
+
+it('prints a blocked finding with its fingerprint and claim', async () => {
+  const review = makeFact({
+    kind: 'review',
+    target: { repository: 'tikk', head: 'aaa', base: 'main', changeHash: 'h' },
+    captureHash: 'c',
+    mode: 'code',
+    findings: [{ fingerprint: 'fp-1', severity: 'high', location: 'a.ts:1', claim: 'Wrong' }],
+  });
+
+  const blocked = makeFact({
+    kind: 'finding',
+    fingerprint: 'fp-1',
+    status: 'blocked',
+    actor: 'agent',
+    reason: 'Needs a decision',
+  });
+
+  const output = successOf(await needs([], [makeTicket('demo-3467')], [review, blocked]));
+
+  expect(output.text).toBe('demo-3467  blockedFinding  1h  fp-1  Wrong\n');
+});

@@ -24,21 +24,44 @@ const shortAge = (ageSeconds: number): string => {
   return `${Math.floor(ageSeconds / secondsPerDay)}d`;
 };
 
+const reasonFields = (item: NeedItem<CliTicket>): Record<string, unknown> => {
+  if (item.reason === 'staleClaim') {
+    return { holder: item.holder };
+  }
+
+  if (item.reason === 'flagged') {
+    return { openTasks: item.openTasks };
+  }
+
+  if (item.reason === 'blockedFinding') {
+    return { fingerprint: item.fingerprint, claim: item.claim };
+  }
+
+  return {};
+};
+
 const itemView = (item: NeedItem<CliTicket>): Record<string, unknown> => ({
   id: item.ticket.id,
   title: item.ticket.frontMatter.title,
   reason: item.reason,
   since: item.since,
   ageSeconds: item.ageSeconds,
-  ...(item.holder === undefined ? {} : { holder: item.holder }),
-  ...(item.openTasks === undefined ? {} : { openTasks: item.openTasks }),
+  ...reasonFields(item),
   ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
 });
 
+const itemSubject = (item: NeedItem<CliTicket>): string => {
+  if (item.reason === 'blockedFinding') {
+    return `${item.fingerprint}  ${item.claim}`;
+  }
+
+  return item.ticket.frontMatter.title;
+};
+
 const itemLine = (item: NeedItem<CliTicket>): string => {
   const { ticket } = item;
-  const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${ticket.frontMatter.title}`;
-  const tasks = item.openTasks === undefined ? '' : `  ${item.openTasks.join(' ')}`;
+  const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${itemSubject(item)}`;
+  const tasks = item.reason === 'flagged' ? `  ${item.openTasks.join(' ')}` : '';
   const suffix = ticket.error === null ? '' : `  parseError ${ticket.path}`;
 
   return `${line}${tasks}${suffix}\n`;

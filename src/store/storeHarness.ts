@@ -12,6 +12,7 @@ import {
 } from 'node:fs/promises';
 
 import type { FactFileFunctions } from './factFiles.ts';
+import type { LogFileFunctions } from './logFiles.ts';
 import type { StoreInitEffects } from './storeInit.ts';
 import type { StoreLockFunctions } from './storeLock.ts';
 import { newIdSuffix } from './ticketFiles.ts';
@@ -60,6 +61,14 @@ export const nodeFactFiles: FactFileFunctions = {
   mkdir: nodeTicketFiles.mkdir,
   readFileFrom: (path, fromByte) => Bun.file(path).slice(fromByte).bytes(),
   appendFile: (path, text) => appendFile(path, text),
+};
+
+export const nodeLogFiles: LogFileFunctions = {
+  mkdir: nodeTicketFiles.mkdir,
+  writeFile: nodeTicketFiles.writeFile,
+  rename: nodeTicketFiles.rename,
+  unlink: nodeTicketFiles.unlink,
+  randomIdSuffix: nodeTicketFiles.randomIdSuffix,
 };
 
 export const nodeStoreLock: StoreLockFunctions = {

@@ -48,6 +48,7 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
       [
         'tickets/demo/gone.md',
         'facts/laptop/2026-10.jsonl',
+        'logs/abc123.log',
         'tikk.json',
         'tickets/demo/settled.md',
         'tickets/demo/fresh.md',
@@ -75,8 +76,9 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
   expect(stagedEntries(fake).toSorted()).toEqual(
     [
       '--add --cacheinfo 100644,blob1,facts/laptop/2026-10.jsonl',
-      '--add --cacheinfo 100644,blob3,tickets/demo/settled.md',
-      '--add --cacheinfo 100644,blob2,tikk.json',
+      '--add --cacheinfo 100644,blob2,logs/abc123.log',
+      '--add --cacheinfo 100644,blob4,tickets/demo/settled.md',
+      '--add --cacheinfo 100644,blob3,tikk.json',
       '--force-remove -- tickets/demo/gone.md',
     ].toSorted(),
   );
@@ -197,7 +199,7 @@ it('holds back an unplaced alias that sits before the committed lines of a fact 
   expect(fake.blobs).toEqual([committedLine]);
 });
 
-const pathspecs = 'facts tickets tikk.json .gitattributes';
+const pathspecs = 'facts logs tickets tikk.json .gitattributes';
 
 const nulList = (list: string[] | undefined): string =>
   (list ?? []).map((path) => `${path}\0`).join('');

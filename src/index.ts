@@ -29,6 +29,7 @@ import {
   acquireStoreLock,
   tryStoreLock,
   appendFact,
+  storeLog,
   commitArguments,
   createTicketFile,
   initStore,
@@ -43,6 +44,7 @@ import {
 } from './store/store.ts';
 import type {
   FactFileFunctions,
+  LogFileFunctions,
   Store,
   StoreInitEffects,
   StoreLockFunctions,
@@ -162,6 +164,14 @@ const ticketFiles: TicketFileFunctions = {
   randomIdSuffix: () => newIdSuffix(),
 };
 
+const logFiles: LogFileFunctions = {
+  mkdir: ticketFiles.mkdir,
+  writeFile: ticketFiles.writeFile,
+  rename: ticketFiles.rename,
+  unlink: ticketFiles.unlink,
+  randomIdSuffix: ticketFiles.randomIdSuffix,
+};
+
 const factFiles: FactFileFunctions = {
   readdir: ticketFiles.readdir,
   stat: ticketFiles.stat,
@@ -258,6 +268,11 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     lockStore: () => acquireStoreLock(storeLock, store),
     tryLockStore: () => tryStoreLock(storeLock, store),
     appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
+    storeLog: async (text) => {
+      const stored = await storeLog(logFiles, store, text);
+
+      return stored.ok ? stored : { ok: false, reason: { message: stored.reason.message } };
+    },
     createTicketFile: (project, title, text) =>
       createTicketFile(ticketFiles, store, project, title, text),
     writeTicketFile: (path, expectedHash, text) =>

@@ -1,11 +1,14 @@
 import packageJson from '../../package.json' with { type: 'json' };
 import { sweepArchive } from './archiveSweep.ts';
+import { checkCommand } from './checkCommand.ts';
 import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
+import { findingCommand } from './findingCommand.ts';
 import { needsCommand } from './needsCommand.ts';
 import { prCommand } from './prLink.ts';
 import { reconcileCommand } from './prReconcile.ts';
 import { readyCommand } from './readyCommand.ts';
+import { reviewCommand } from './reviewCommand.ts';
 import { sliceAudit } from './sliceAudit.ts';
 import { syncCommand } from './syncCommand.ts';
 import { taskClaim, taskRelease } from './taskClaim.ts';
@@ -47,10 +50,13 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['audit', sliceAudit],
   ['archive', ticketArchive],
   ['unarchive', ticketUnarchive],
+  ['check', checkCommand],
+  ['review', reviewCommand],
+  ['finding', findingCommand],
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|pr|reconcile|audit|archive|unarchive> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

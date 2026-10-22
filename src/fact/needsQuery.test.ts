@@ -6,6 +6,23 @@ import { makeFact, makeTicket, now, taskId } from './factHarness.ts';
 const reasonsOf = (items: ReturnType<typeof selectNeeds>) =>
   items.map((item) => [item.ticket.id, item.reason]);
 
+const reviewOf = (id: string, fingerprints: string[]) =>
+  makeFact(id, {
+    kind: 'review',
+    target: { repository: 'r', head: 'a', base: 'main', changeHash: 'c' },
+    captureHash: 'h',
+    mode: 'm',
+    findings: fingerprints.map((fingerprint) => ({
+      fingerprint,
+      severity: 'high',
+      location: 'f',
+      claim: `Claim ${fingerprint}`,
+    })),
+  });
+
+const statusOf = (id: string, fingerprint: string, status: string, at: string) =>
+  makeFact(id, { kind: 'finding', fingerprint, status, actor: 'a', reason: 'r', at });
+
 describe('selectNeeds', () => {
   it('lists an unanswered question and drops it after an answer', () => {
     const ticket = makeTicket('3467');
@@ -170,6 +187,75 @@ describe('selectNeeds', () => {
     ];
 
     expect(selectNeeds(tickets, facts, now)).toEqual([]);
+  });
+
+  it('lists a blocked finding on a slice and drops it after a fixed status', () => {
+    const slice = makeTicket('3467', { kind: 'slice' });
+    const target = { repository: 'r', head: 'a', base: 'main', changeHash: 'c' };
+
+    const review = makeFact('3467', {
+      kind: 'review',
+      target,
+      captureHash: 'h',
+      mode: 'm',
+      findings: [{ fingerprint: 'fp', severity: 'high', location: 'f', claim: 'Broken' }],
+    });
+
+    const blocked = makeFact('3467', {
+      kind: 'finding',
+      fingerprint: 'fp',
+      status: 'blocked',
+      actor: 'a',
+      reason: 'r',
+      at: '2026-10-20T11:00:00.000Z',
+    });
+
+    const fixed = makeFact('3467', {
+      kind: 'finding',
+      fingerprint: 'fp',
+      status: 'fixed',
+      actor: 'a',
+      reason: 'r',
+      at: '2026-10-20T11:30:00.000Z',
+    });
+
+    const [item] = selectNeeds([slice], [review, blocked], now);
+
+    expect(item).toMatchObject({
+      reason: 'blockedFinding',
+      since: '2026-10-20T11:00:00.000Z',
+      fingerprint: 'fp',
+      claim: 'Broken',
+    });
+
+    expect(selectNeeds([slice], [review, blocked, fixed], now)).toEqual([]);
+  });
+
+  it('lists no blocked finding of an archived ticket', () => {
+    const slice = makeTicket('3467', { kind: 'slice', archived: '2026-10-01' });
+
+    const facts = [
+      reviewOf('3467', ['fp']),
+      statusOf('3467', 'fp', 'blocked', '2026-10-20T11:00:00.000Z'),
+    ];
+
+    expect(selectNeeds([slice], facts, now)).toEqual([]);
+  });
+
+  it('dates a blocked finding from its own status, not from another finding', () => {
+    const slice = makeTicket('3467', { kind: 'slice' });
+
+    const facts = [
+      reviewOf('3467', ['fp-1', 'fp-2']),
+      statusOf('3467', 'fp-1', 'blocked', '2026-10-20T11:00:00.000Z'),
+      statusOf('3467', 'fp-2', 'fixed', '2026-10-20T11:30:00.000Z'),
+    ];
+
+    const items = selectNeeds([slice], facts, now);
+
+    expect(items.map((item) => [item.reason, item.since])).toEqual([
+      ['blockedFinding', '2026-10-20T11:00:00.000Z'],
+    ]);
   });
 });
 

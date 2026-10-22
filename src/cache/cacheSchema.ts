@@ -13,7 +13,7 @@ export interface CacheOpenReason {
 
 type VersionCheck = 'current' | 'outdated' | 'busy';
 
-const cacheVersion = 6;
+const cacheVersion = 7;
 
 // Other tikk processes write the same cache, so a query waits for their lock instead of failing.
 const defaultBusyTimeoutMilliseconds = 5000;

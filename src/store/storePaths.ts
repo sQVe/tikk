@@ -40,3 +40,8 @@ export const factsDirectory = (store: Store): string => join(store.root, 'facts'
 
 export const factFilePath = (store: Store, machine: string, month: string): string =>
   join(factsDirectory(store), machine, `${month}.jsonl`);
+
+export const logsDirectory = (store: Store): string => join(store.root, 'logs');
+
+export const logFilePath = (store: Store, hash: string): string =>
+  join(logsDirectory(store), `${hash}.log`);
