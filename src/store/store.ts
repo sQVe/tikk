@@ -17,6 +17,9 @@ export type { Store } from './storePaths.ts';
 export { appendFact, listFactFiles, readFactFile } from './factFiles.ts';
 export type { FactFileFunctions } from './factFiles.ts';
 
+export { storeLog } from './logFiles.ts';
+export type { LogFileFunctions } from './logFiles.ts';
+
 export { acquireStoreLock, tryStoreLock } from './storeLock.ts';
 export type { StoreLockFunctions } from './storeLock.ts';
 

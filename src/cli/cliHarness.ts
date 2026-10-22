@@ -34,6 +34,7 @@ export interface FakeSession {
   writes: FakeWrite[];
   creates: FakeCreate[];
   appends: { machine: string; fact: Fact }[];
+  storedLogs: string[];
   listOptions: { includeArchived: boolean }[];
   lockHeld: () => boolean;
   changeOnDisk: (ticket: CliTicket) => void;
@@ -165,6 +166,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
   const writes: FakeWrite[] = [];
   const creates: FakeCreate[] = [];
   const appends: { machine: string; fact: Fact }[] = [];
+  const storedLogs: string[] = [];
   const listOptions: { includeArchived: boolean }[] = [];
   let isLocked = false;
   let isDisposed = false;
@@ -237,6 +239,14 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     listArchiveFacts: () => Promise.resolve({ ok: true, value: [...facts] }),
     lockStore: takeLock,
     tryLockStore: takeLock,
+    storeLog: (text) => {
+      storedLogs.push(text);
+
+      return Promise.resolve({
+        ok: true,
+        value: { hash: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' },
+      });
+    },
     appendFact: (machine, fact) => {
       appends.push({ machine, fact });
       diskFacts.push(fact);
@@ -276,6 +286,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     writes,
     creates,
     appends,
+    storedLogs,
     listOptions,
     lockHeld: () => isLocked,
     changeOnDisk: (ticket) => {
