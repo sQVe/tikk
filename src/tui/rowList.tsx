@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-// A row without a ticket ID stands for a group, such as the slices that have no plan.
 export interface ListRow {
   key: string;
   id: string | null;

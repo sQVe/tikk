@@ -18,7 +18,6 @@ const openSetups: Setup[] = [];
 const changeListeners = new Set<() => void>();
 const edited: string[] = [];
 
-// Keys that the probe presses in the commit of the next reload, before passive effects run.
 const keysAtCommit: string[] = [];
 const probe = { reloaded: (): void => undefined };
 
@@ -76,7 +75,6 @@ const mount = async (
     message,
   }));
 
-  // Tests change items and groups in place, then call storeChanged to reload.
   const effects: AppProps['effects'] = {
     load: () => {
       const loaded = Promise.resolve({

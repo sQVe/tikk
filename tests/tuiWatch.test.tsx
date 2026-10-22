@@ -161,7 +161,6 @@ const mergedPullRequest = JSON.stringify({
   mergeCommit: { oid: 'merge1' },
 });
 
-// Answers like the fake gh after the pull request merged, inside this process.
 const mergedGh: CliEffects['runGh'] = (args) => {
   const [command] = args;
 

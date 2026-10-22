@@ -10,13 +10,10 @@ import { ticketEditor } from './ticketEditor.ts';
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
-  // Opens the ticket file in $EDITOR in the current terminal, like `tikk edit` does.
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
-  // Stops running work, waits for it to settle, then releases the session.
   close: () => Promise<void>;
 }
 
-// One session stays open for the TUI's lifetime. Each load reads like `tikk needs --json` does, and each tree load reads the plan tree.
 export const openNeedsSession = async (
   effects: CliEffects,
 ): Promise<Result<NeedsSession, CliFailure>> => {
@@ -73,7 +70,6 @@ export const openNeedsSession = async (
     return edited.ok ? { ok: true, value: undefined } : edited;
   };
 
-  // Work runs one at a time, since each refresh may sweep the archive and each read may append PR facts.
   const track = <Value>(start: () => Promise<Value>): Promise<Value> => {
     const running = previous.then(start).finally(() => {
       pending.delete(running);

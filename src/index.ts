@@ -347,7 +347,6 @@ const backgroundCommand = (): string[] => {
 
 const editorKillDelayMilliseconds = 2000;
 
-// An aborted editor gets SIGTERM, and SIGKILL if it is still running after the delay.
 const runEditor: CliEffects['runEditor'] = async (path, signal) => {
   const editor = Bun.env['EDITOR'] ?? 'vi';
   const command = editor.split(/\s+/).filter((part) => part !== '');

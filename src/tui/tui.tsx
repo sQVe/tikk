@@ -18,9 +18,7 @@ interface TuiEffects {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
-  // Suspends the TUI while run uses the terminal.
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
-  // Calls listener when the store changes, and returns the function that unsubscribes it.
   onChange: (listener: () => void) => () => void;
 }
 
@@ -54,7 +52,6 @@ const errorMessage = (error: unknown, fallback: string): string =>
 const clampedIndex = (index: number, count: number): number =>
   Math.max(0, Math.min(count - 1, index));
 
-// The selected row stays selected after a reload while it exists. Otherwise the index stays.
 const resolvedSelection = (selection: Selection, rows: readonly ListRow[]): Selection => {
   const found = rows.findIndex((row) => row.key === selection.key);
   const index = found === -1 ? clampedIndex(selection.index, rows.length) : found;
@@ -68,8 +65,6 @@ const loadedState = <Value,>(
   rows: ListRow[],
 ): ListState<Value> => ({ loaded, rows, selection: resolvedSelection(current.selection, rows) });
 
-// Each change starts a new load. The session runs loads in order, so the last result is the newest.
-// A load commits its rows and the selection resolved against them in one update.
 const useList = <Value,>(
   enabled: boolean,
   load: () => Promise<Result<Value, CliFailure>>,
@@ -201,8 +196,6 @@ const Screen = ({ effects, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
     }
   };
 
-  // The keymap swaps bindings only in a passive effect, so the bindings stay fixed and read the
-  // rows on screen from a ref that every commit updates first.
   const latestRun = useRef(run);
 
   useLayoutEffect(() => {

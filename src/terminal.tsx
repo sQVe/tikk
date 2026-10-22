@@ -31,7 +31,6 @@ export interface TerminalEffects {
   printError: (error: unknown) => void;
 }
 
-// Calls onChange when a store file changes, and returns the function that stops watching.
 type StoreWatch = (onChange: () => void) => () => void;
 
 export interface TerminalDependencies {
@@ -41,8 +40,6 @@ export interface TerminalDependencies {
 
 const changeDelayMilliseconds = 100;
 
-// Coalesces store changes into one notice per delay. While the terminal is lent, it holds changes
-// and sends one notice when the terminal comes back.
 const createChangeFeed = (watch: StoreWatch) => {
   const listeners = new Set<() => void>();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -226,9 +223,6 @@ export const startTerminal = async (
     finish();
   };
 
-  // Loans run one at a time. The renderer stays suspended from the first loan until the last queued
-  // loan ends. A failed resume leaves the terminal unusable, so tikk restores it through shutdown
-  // and exits.
   let loanTail: Promise<undefined> = Promise.resolve(undefined);
   let pendingLoans = 0;
   let suspended = false;

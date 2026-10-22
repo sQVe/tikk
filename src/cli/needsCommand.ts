@@ -48,7 +48,6 @@ const shortAge = (ageSeconds: number): string => {
   return `${Math.floor(ageSeconds / secondsPerDay)}d`;
 };
 
-// The JSON key order is id, title, reason, since, ageSeconds, the reason fields, then parseError.
 const itemView = (item: NeedItem<CliTicket>): NeedView => {
   const { id, frontMatter } = item.ticket;
   const { title } = frontMatter;

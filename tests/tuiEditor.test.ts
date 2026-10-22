@@ -23,7 +23,6 @@ IFS= read -r title
 sed -i "s/^title: .*/title: $title/" "$1"
 `;
 
-// Ignores SIGTERM, so only SIGKILL stops it.
 const stuckEditor = (pidPath: string): string => `#!/bin/sh
 printf '%s' $$ > '${pidPath}'
 trap '' TERM
@@ -35,8 +34,6 @@ const showCursor = '\u001b[?25h';
 const columns = 100;
 const rows = 20;
 
-// Replays the cursor moves, clears, screen switches, and text of the output. Other escape sequences
-// are skipped.
 const sequencePattern =
   // oxlint-disable-next-line eslint/no-control-regex -- Terminal escape sequences start with ESC and end with BEL.
   /\u001b\[([0-9;?]*)([ -/]*[@-~])|\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)|\u001b[^[\]]/y;
