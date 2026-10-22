@@ -96,3 +96,22 @@ it('ignores a covers ID that names no criterion', () => {
     { ticket: slicePlan, kind: 'plan', criterion: 'b' },
   ]);
 });
+
+it('counts only slices for a plan and only tasks for a slice', () => {
+  const taskUnderPlan = ticket(task, { kind: 'task', parent: slicePlan });
+  const issueUnderSlice = ticket(idOf('tikk-3a4e'), { kind: 'issue', parent: slice });
+
+  const gaps = findCoverageGaps([
+    plan,
+    sliceFor({ covers: undefined }),
+    taskUnderPlan,
+    issueUnderSlice,
+  ]);
+
+  expect(gaps).toEqual([
+    { ticket: slicePlan, kind: 'plan', criterion: 'a' },
+    { ticket: slicePlan, kind: 'plan', criterion: 'b' },
+    { ticket: slice, kind: 'slice', criterion: 'a' },
+    { ticket: slice, kind: 'slice', criterion: 'b' },
+  ]);
+});

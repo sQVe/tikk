@@ -13,6 +13,8 @@ export interface CoverageGap {
   criterion: string;
 }
 
+const coveringKind = { plan: 'slice', slice: 'task' } as const;
+
 const isActive = (ticket: CoverageTicket): boolean => ticket.frontMatter.status !== 'canceled';
 
 const criterionIds = (ticket: CoverageTicket): string[] =>
@@ -38,7 +40,12 @@ const gapsOf = (
   }
 
   const criteria = criterionIds(owner);
-  const covered = new Set(children.filter(isActive).flatMap((child) => coveredBy(child, criteria)));
+
+  const covering = children.filter(
+    (child) => isActive(child) && child.frontMatter.kind === coveringKind[kind],
+  );
+
+  const covered = new Set(covering.flatMap((child) => coveredBy(child, criteria)));
 
   return criteria
     .filter((criterion) => !covered.has(criterion))
