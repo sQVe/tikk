@@ -6,9 +6,11 @@ import {
   failureOf,
   makeEffects,
   makeFact,
+  makeKindTicket,
   makeSession,
   makeTicket,
   successOf,
+  ticketIdOf,
 } from './cliHarness.ts';
 import { needsCommand } from './needsCommand.ts';
 
@@ -77,4 +79,62 @@ it('still lists a question on a task whose file no longer parses', async () => {
   });
 
   expect(output.text.endsWith(`  parseError ${broken.path}\n`)).toBe(true);
+});
+
+const mergedFact = makeFact({
+  ticket: 'demo-3469',
+  kind: 'pr',
+  repository: 'sqve/tikk',
+  number: 7,
+  state: 'merged',
+  base: 'main',
+  head: 'aaa',
+  trunk: 'main',
+  inTrunk: true,
+});
+
+const auditFact = makeFact({
+  ticket: 'demo-3469',
+  kind: 'audit',
+  head: 'aaa',
+  base: 'main',
+  verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],
+});
+
+it('lists a merged slice with no audit as mergedUnverified', async () => {
+  const output = successOf(await needs([], [makeKindTicket('demo-3469', 'slice')], [mergedFact]));
+
+  expect(output.json).toEqual({
+    items: [
+      {
+        id: 'demo-3469',
+        title: 'A title',
+        reason: 'mergedUnverified',
+        since: '2026-10-20T11:00:00.000Z',
+        ageSeconds: 3600,
+      },
+    ],
+  });
+});
+
+it('lists a merged slice with an open task as flagged with the task ID', async () => {
+  const task = makeTicket('demo-3478', {
+    frontMatter: { ...makeTicket('demo-3478').frontMatter, parent: ticketIdOf('demo-3469') },
+  });
+
+  const slice = makeKindTicket('demo-3469', 'slice');
+  const output = successOf(await needs([], [slice, task], [mergedFact, auditFact]));
+
+  expect(output.json).toMatchObject({
+    items: [{ id: 'demo-3469', reason: 'flagged', openTasks: ['demo-3478'] }],
+  });
+
+  expect(output.text).toBe('demo-3469  flagged  1h  A title  demo-3478\n');
+});
+
+it('leaves out a done slice', async () => {
+  const slice = makeKindTicket('demo-3469', 'slice');
+  const output = successOf(await needs([], [slice], [mergedFact, auditFact]));
+
+  expect(output.json).toEqual({ items: [] });
 });

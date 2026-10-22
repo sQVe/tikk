@@ -182,9 +182,9 @@ it('returns the unblocked slices of a plan and names what blocks a skipped slice
   const output = successOf(await ready(['--parent', 'demo-3466'], [plan, blocked, free, task]));
 
   expect(output.json).toMatchObject({
-    candidates: [{ id: 'demo-3468' }],
+    candidates: [{ id: 'demo-3468', state: 'planned' }],
     skipped: [
-      { id: 'demo-3467', reason: 'blocked', blockers: [{ id: 'demo-3468', state: 'open' }] },
+      { id: 'demo-3467', reason: 'blocked', blockers: [{ id: 'demo-3468', state: 'planned' }] },
     ],
   });
 });

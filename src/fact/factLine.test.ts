@@ -7,6 +7,13 @@ const base = { version: 1, ticket: 'me-3469', at: '2026-10-20T10:00:00.000Z', ma
 const line = (extra: Record<string, unknown>, overrides: Record<string, unknown> = {}): string =>
   JSON.stringify({ ...base, ...extra, ...overrides });
 
+const auditExtra = (verdict: string): Record<string, unknown> => ({
+  kind: 'audit',
+  head: 'aaa',
+  base: 'main',
+  verdicts: [{ criterion: 'It works.', verdict, evidence: 'Ran it.' }],
+});
+
 describe('parseFactLine', () => {
   it('parses each fact kind', () => {
     const claim = parseFactLine(
@@ -30,6 +37,30 @@ describe('parseFactLine', () => {
     expect(parsed.value).toMatchObject({ kind: 'alias', from: 'me-3469', ticket: 'me-4aaa' });
     expect(parseFactLine(serializeFactLine(parsed.value).trim())).toEqual(parsed);
     expect(parseFactLine(line({ kind: 'alias' })).ok).toBe(false);
+  });
+
+  it('parses a pr fact and an audit fact', () => {
+    const pr = parseFactLine(
+      line({
+        kind: 'pr',
+        repository: 'sqve/tikk',
+        number: 7,
+        state: 'merged',
+        base: 'main',
+        head: 'aaa',
+        trunk: 'main',
+        inTrunk: true,
+      }),
+    );
+
+    const audit = parseFactLine(line(auditExtra('met')));
+
+    expect([pr.ok, audit.ok]).toEqual([true, true]);
+  });
+
+  it('rejects an audit fact whose verdict is not one of the four values', () => {
+    expect(parseFactLine(line(auditExtra('maybe'))).ok).toBe(false);
+    expect(parseFactLine(line({ ...auditExtra('met'), verdicts: [] })).ok).toBe(false);
   });
 
   it('returns a failure for invalid JSON', () => {

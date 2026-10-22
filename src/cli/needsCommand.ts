@@ -30,15 +30,17 @@ const itemView = (item: NeedItem<CliTicket>): Record<string, unknown> => ({
   since: item.since,
   ageSeconds: item.ageSeconds,
   ...(item.holder === undefined ? {} : { holder: item.holder }),
+  ...(item.openTasks === undefined ? {} : { openTasks: item.openTasks }),
   ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
 });
 
 const itemLine = (item: NeedItem<CliTicket>): string => {
   const { ticket } = item;
   const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${ticket.frontMatter.title}`;
+  const tasks = item.openTasks === undefined ? '' : `  ${item.openTasks.join(' ')}`;
   const suffix = ticket.error === null ? '' : `  parseError ${ticket.path}`;
 
-  return `${line}${suffix}\n`;
+  return `${line}${tasks}${suffix}\n`;
 };
 
 export const needsCommand = async ({

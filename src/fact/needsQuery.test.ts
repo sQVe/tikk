@@ -172,3 +172,50 @@ describe('selectNeeds', () => {
     expect(selectNeeds(tickets, facts, now)).toEqual([]);
   });
 });
+
+describe('selectNeeds for slices', () => {
+  const slice = makeTicket('3469', { kind: 'slice' });
+
+  const merged = makeFact('3469', {
+    kind: 'pr',
+    repository: 'sqve/tikk',
+    number: 7,
+    state: 'merged',
+    base: 'main',
+    head: 'aaa',
+    mergeCommit: 'bbb',
+    trunk: 'main',
+    inTrunk: true,
+  });
+
+  const audit = makeFact('3469', {
+    kind: 'audit',
+    head: 'aaa',
+    base: 'main',
+    verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],
+  });
+
+  it('lists a merged slice with no audit as mergedUnverified, dated from the PR fact', () => {
+    const [item, ...rest] = selectNeeds([slice], [merged], now);
+
+    expect(rest).toEqual([]);
+
+    expect(item).toMatchObject({
+      reason: 'mergedUnverified',
+      since: '2026-10-20T10:00:00.000Z',
+      ageSeconds: 7200,
+    });
+  });
+
+  it('lists a merged slice with an open task as flagged with that task', () => {
+    const task = makeTicket('3478', { parent: '3469' });
+    const items = selectNeeds([slice, task], [merged, audit], now);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ reason: 'flagged', openTasks: [task.id] });
+  });
+
+  it('leaves out a done slice', () => {
+    expect(selectNeeds([slice], [merged, audit], now)).toEqual([]);
+  });
+});

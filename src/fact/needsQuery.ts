@@ -1,8 +1,10 @@
+import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
+import { deriveSliceState } from './sliceState.ts';
 import { deriveTaskStateFromOwnFacts } from './taskState.ts';
 import type { TaskTicket } from './taskState.ts';
 
-type NeedReason = 'question' | 'submitted' | 'staleClaim';
+type NeedReason = 'question' | 'submitted' | 'staleClaim' | 'mergedUnverified' | 'flagged';
 
 export interface NeedItem<Ticket extends TaskTicket> {
   ticket: Ticket;
@@ -10,6 +12,7 @@ export interface NeedItem<Ticket extends TaskTicket> {
   since: string;
   ageSeconds: number;
   holder?: string;
+  openTasks?: TicketId[];
 }
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
@@ -107,6 +110,49 @@ const isConsidered = (ticket: TaskTicket): boolean => {
   return frontMatter.kind === 'task' && frontMatter.archived === undefined;
 };
 
+const isOpenSlice = (ticket: TaskTicket): boolean => {
+  const { frontMatter } = ticket;
+
+  return (
+    frontMatter.kind === 'slice' &&
+    frontMatter.status === 'open' &&
+    frontMatter.archived === undefined
+  );
+};
+
+const sliceNeedsOf = <Ticket extends TaskTicket>(
+  slice: Ticket,
+  tickets: Ticket[],
+  facts: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const derived = deriveSliceState(slice, tickets, facts, now);
+  const since = derived.pr?.checkedAt;
+  const items: NeedItem<Ticket>[] = [];
+
+  if (since === undefined) {
+    return items;
+  }
+
+  const ageSeconds = ageSecondsOf(since, now);
+
+  if (derived.state === 'mergedUnverified') {
+    items.push({ ticket: slice, reason: 'mergedUnverified', since, ageSeconds });
+  }
+
+  if (derived.flagged) {
+    items.push({
+      ticket: slice,
+      reason: 'flagged',
+      since,
+      ageSeconds,
+      openTasks: derived.openTasks,
+    });
+  }
+
+  return items;
+};
+
 const byOldest = <Ticket extends TaskTicket>(a: NeedItem<Ticket>, b: NeedItem<Ticket>): number => {
   const bySince = new Date(a.since).getTime() - new Date(b.since).getTime();
 
@@ -124,8 +170,13 @@ export const selectNeeds = <Ticket extends TaskTicket>(
 ): NeedItem<Ticket>[] => {
   const factsByTicket = Map.groupBy(facts, (fact) => fact.ticket);
 
-  return tickets
+  const taskItems = tickets
     .filter(isConsidered)
-    .flatMap((ticket) => needsOf(ticket, factsByTicket.get(ticket.id) ?? [], now))
-    .toSorted(byOldest);
+    .flatMap((ticket) => needsOf(ticket, factsByTicket.get(ticket.id) ?? [], now));
+
+  const sliceItems = tickets
+    .filter(isOpenSlice)
+    .flatMap((slice) => sliceNeedsOf(slice, tickets, facts, now));
+
+  return [...taskItems, ...sliceItems].toSorted(byOldest);
 };

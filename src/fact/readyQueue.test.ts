@@ -144,3 +144,66 @@ describe('selectReady', () => {
     ]);
   });
 });
+
+const prFor = (suffix: string, extra: Record<string, unknown>) =>
+  makeFact(suffix, {
+    kind: 'pr',
+    repository: 'sqve/tikk',
+    number: 7,
+    state: 'open',
+    base: 'main',
+    head: 'aaa',
+    trunk: 'main',
+    inTrunk: false,
+    ...extra,
+  });
+
+describe('selectReady for slices', () => {
+  const sliceScope = { kind: 'slice' } as const;
+
+  it('reports a planned slice as a candidate with its derived state', () => {
+    const slice = makeTicket('3469', { kind: 'slice' });
+    const result = selectReady([slice], [], now, sliceScope);
+
+    expect(result.candidates).toEqual([{ ticket: slice, state: 'planned' }]);
+  });
+
+  it('does not offer a slice that is in review', () => {
+    const slice = makeTicket('3469', { kind: 'slice' });
+    const result = selectReady([slice], [prFor('3469', {})], now, sliceScope);
+
+    expect(result.candidates).toEqual([]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('offers a slice blocked by a done slice', () => {
+    const done = makeTicket('3469', { kind: 'slice' });
+    const blocked = makeTicket('3478', { kind: 'slice', blockedBy: ['3469'] });
+
+    const facts = [
+      prFor('3469', { state: 'merged', inTrunk: true, mergeCommit: 'bbb' }),
+      makeFact('3469', {
+        kind: 'audit',
+        head: 'aaa',
+        base: 'main',
+        verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],
+      }),
+    ];
+
+    const result = selectReady([done, blocked], facts, now, sliceScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([blocked.id]);
+  });
+
+  it('keeps a slice blocked by a slice in review and names its state', () => {
+    const review = makeTicket('3469', { kind: 'slice' });
+    const blocked = makeTicket('3478', { kind: 'slice', blockedBy: ['3469'] });
+    const result = selectReady([review, blocked], [prFor('3469', {})], now, sliceScope);
+
+    expect(result.candidates).toEqual([]);
+
+    expect(result.skipped).toEqual([
+      { ticket: blocked, reason: 'blocked', blockers: [{ id: review.id, state: 'inReview' }] },
+    ]);
+  });
+});

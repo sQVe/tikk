@@ -15,6 +15,10 @@ export interface TaskClaim {
   sessionLog: string | null;
 }
 
+interface StatusTicket {
+  frontMatter: Pick<TicketFrontMatter, 'status'>;
+}
+
 export interface TaskState {
   state: TaskStateName;
   claim: TaskClaim | null;
@@ -35,7 +39,7 @@ const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number
 const stateOnly = (state: TaskStateName): TaskState => ({ state, claim: null });
 
 export const deriveTaskStateFromOwnFacts = (
-  ticket: TaskTicket,
+  ticket: StatusTicket,
   own: Fact[],
   now: Date,
 ): TaskState => {

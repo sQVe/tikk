@@ -5,10 +5,12 @@ import {
   failureOf,
   makeEffects,
   makeFact,
+  makeKindTicket,
   makeSession,
   makeTicket,
   projectNameOf,
   successOf,
+  ticketIdOf,
 } from './cliHarness.ts';
 import { ticketShow } from './ticketShow.ts';
 
@@ -92,4 +94,62 @@ it('prints the derived state of a task in text, not the front matter status', as
 
   expect(output.text).toContain('demo-3467  done  A title');
   expect(output.text).not.toContain('demo-3467  open');
+});
+
+it('shows a merged open slice with its derived state, PR, and open tasks', async () => {
+  const slice = makeKindTicket('demo-3469', 'slice');
+
+  const task = makeTicket('demo-3478', {
+    frontMatter: { ...makeTicket('demo-3478').frontMatter, parent: ticketIdOf('demo-3469') },
+  });
+
+  const merged = makeFact({
+    ticket: 'demo-3469',
+    kind: 'pr',
+    repository: 'sqve/tikk',
+    number: 7,
+    state: 'merged',
+    base: 'main',
+    head: 'aaa',
+    trunk: 'main',
+    inTrunk: true,
+  });
+
+  const output = successOf(await show(['demo-3469'], [slice, task], [merged]));
+
+  expect(output.json).toMatchObject({
+    id: 'demo-3469',
+    state: 'mergedUnverified',
+    since: '2026-10-20T11:00:00.000Z',
+    ageSeconds: 3600,
+    flagged: true,
+    openTasks: ['demo-3478'],
+    pr: {
+      repository: 'sqve/tikk',
+      number: 7,
+      state: 'merged',
+      base: 'main',
+      head: 'aaa',
+      mergeCommit: null,
+      inTrunk: true,
+      checkedAt: '2026-10-20T11:00:00.000Z',
+    },
+  });
+
+  expect(output.text).toContain('demo-3469  mergedUnverified');
+});
+
+it('shows a planned slice with no PR', async () => {
+  const output = successOf(await show(['demo-3469'], [makeKindTicket('demo-3469', 'slice')]));
+
+  expect(output.json).toMatchObject({ state: 'planned', since: null, ageSeconds: null, pr: null });
+});
+
+it('keeps the status of a draft slice', async () => {
+  const output = successOf(
+    await show(['demo-3469'], [makeKindTicket('demo-3469', 'slice', 'draft')]),
+  );
+
+  expect(output.json).not.toHaveProperty('pr');
+  expect(output.text).toContain('demo-3469  draft');
 });

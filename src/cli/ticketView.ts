@@ -1,5 +1,5 @@
-import { deriveTaskState } from '../fact/fact.ts';
-import type { TaskClaim, TaskStateName } from '../fact/fact.ts';
+import { deriveSliceState, deriveTaskState } from '../fact/fact.ts';
+import type { SliceState, TaskClaim, TaskStateName } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
@@ -31,6 +31,8 @@ export interface TaskView extends TicketView {
   state: TaskStateName;
   claim: TaskClaim | null;
 }
+
+interface SliceView extends TicketView, SliceState {}
 
 export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => {
   const { frontMatter } = ticket;
@@ -94,11 +96,38 @@ export const storeFailure = (message: string): CommandResult => ({
   reason: { code: 'storeError', message },
 });
 
+const showSlice = async (
+  session: CliSession,
+  now: Date,
+  ticket: CliTicket,
+): Promise<CommandResult> => {
+  const outlines = session.listTicketOutlines();
+
+  const taskIds = outlines
+    .filter((outline) => outline.frontMatter.parent === ticket.id)
+    .map((outline) => outline.id);
+
+  const facts = await session.listStateFacts([ticket.id, ...taskIds]);
+
+  if (!facts.ok) {
+    return storeFailure(facts.reason.message);
+  }
+
+  const derived = deriveSliceState(ticket, outlines, facts.value, now);
+  const view: SliceView = { ...ticketView(ticket, true), ...derived };
+
+  return { ok: true, value: { json: view, text: ticketText(ticket, derived.state) } };
+};
+
 export const showOutput = async (
   session: CliSession,
   now: Date,
   ticket: CliTicket,
 ): Promise<CommandResult> => {
+  if (ticket.frontMatter.kind === 'slice' && ticket.frontMatter.status === 'open') {
+    return showSlice(session, now, ticket);
+  }
+
   if (ticket.frontMatter.kind !== 'task') {
     return {
       ok: true,

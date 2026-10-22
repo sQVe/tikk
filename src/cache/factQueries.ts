@@ -77,7 +77,7 @@ export const hasValidFactErrorRows = (database: Database): boolean =>
 
 // Only these facts decide a ticket's state. Progress notes and questions are the bulk of a history,
 // and no state reads them.
-const stateFactsSql = `(kind IN ('claim', 'release', 'accept', 'status', 'unarchive')
+const stateFactsSql = `(kind IN ('claim', 'release', 'accept', 'status', 'unarchive', 'pr', 'audit')
   OR (kind = 'log' AND log_type = 'submitted'))`;
 
 // Only these facts date when a ticket finished or was unarchived.
