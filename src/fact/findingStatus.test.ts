@@ -40,6 +40,20 @@ describe('selectFindings', () => {
     expect(matches(facts)).toEqual({ kept: 'unchanged', gone: 'absent', fresh: 'new' });
   });
 
+  it('returns only the findings of the asked ticket', () => {
+    const other = makeFact('3468', {
+      kind: 'review',
+      target,
+      captureHash: 'h',
+      mode: 'm',
+      findings: [{ fingerprint: 'theirs', severity: 'low', location: 'f', claim: 'c' }],
+    });
+
+    const found = selectFindings([review(8, ['mine']), other], 'me-3467');
+
+    expect(found.map((f) => f.fingerprint)).toEqual(['mine']);
+  });
+
   it('takes fields from the newest review that holds the fingerprint', () => {
     const [kept] = selectFindings([review(8, ['kept']), review(9, ['kept'])], 'me-3467');
 
