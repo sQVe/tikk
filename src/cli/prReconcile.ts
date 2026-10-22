@@ -9,7 +9,6 @@ import type {
   CliEffects,
   CliFailure,
   CliSession,
-  CliTicket,
   CommandInput,
   CommandResult,
 } from './cliEffects.ts';
@@ -39,7 +38,7 @@ interface ReconcileInput {
 }
 
 interface Target {
-  slice: CliTicket;
+  slice: TicketId;
   pr: NonNullable<SliceState['pr']>;
 }
 
@@ -47,6 +46,8 @@ interface Change extends PullRequestRef {
   ticket: TicketId;
   seen: PullRequestObservation;
 }
+
+type TicketOutline = ReturnType<CliSession['listTicketOutlines']>[number];
 
 const reconcileUsage = 'Usage: tikk reconcile [--json]';
 
@@ -60,10 +61,10 @@ const globalProblem = (message: string): ReconcileProblem => ({
 export const problemLines = (problems: ReconcileProblem[]): string =>
   problems.map((problem) => `problem: ${problem.message}\n`).join('');
 
-const isOpenSlice = (ticket: CliTicket): boolean =>
-  ticket.error === null &&
-  ticket.frontMatter.kind === 'slice' &&
-  ticket.frontMatter.status === 'open';
+const isOpenSlice = ({ frontMatter }: TicketOutline): boolean =>
+  frontMatter.kind === 'slice' &&
+  frontMatter.status === 'open' &&
+  frontMatter.archived === undefined;
 
 const changeProblem = (change: Change, message: string): ReconcileProblem => ({
   ticket: change.ticket,
@@ -80,8 +81,10 @@ const isStillSelected = (change: Change, index: SliceIndex): boolean => {
 
 // Another process may link a different PR while gh runs, so the selection is read again under the
 // lock before anything is appended.
+// Picking a slice's PR reads only the slice's own facts, so the index holds no tasks.
 const readCurrentIndex = async (
   session: CliSession,
+  sliceIds: TicketId[],
 ): Promise<Result<SliceIndex, { message: string }>> => {
   const refreshed = await session.refresh();
 
@@ -89,13 +92,13 @@ const readCurrentIndex = async (
     return refreshed;
   }
 
-  const facts = await session.listStateFacts();
+  const facts = await session.listStateFacts(sliceIds);
 
   if (!facts.ok) {
     return facts;
   }
 
-  return { ok: true, value: buildSliceIndex(session.listTicketOutlines(), facts.value) };
+  return { ok: true, value: buildSliceIndex([], facts.value) };
 };
 
 const appendSelected = async (
@@ -104,7 +107,10 @@ const appendSelected = async (
   machine: string,
   outcome: ReconcileOutcome,
 ): Promise<void> => {
-  const index = await readCurrentIndex(session);
+  const index = await readCurrentIndex(
+    session,
+    changes.map((change) => change.ticket),
+  );
 
   if (!index.ok) {
     outcome.problems.push(globalProblem(index.reason.message));
@@ -173,14 +179,14 @@ const readTarget = async (
   const seen = await readPullRequest(effects.runGh, ref, ghSignal());
 
   if (!seen.ok) {
-    const label = `${ref.repository}#${ref.number} of ${slice.id}`;
+    const label = `${ref.repository}#${ref.number} of ${slice}`;
     const message = `Cannot read pull request ${label}: ${seen.reason.message}`;
 
-    return { ticket: slice.id, ...ref, message };
+    return { ticket: slice, ...ref, message };
   }
 
   return differsFromObservation(pr, seen.value)
-    ? { ticket: slice.id, ...ref, seen: seen.value }
+    ? { ticket: slice, ...ref, seen: seen.value }
     : undefined;
 };
 
@@ -191,20 +197,20 @@ const isProblem = (result: Change | ReconcileProblem | undefined): result is Rec
   result !== undefined && 'message' in result;
 
 const collectChanges = async (
-  { effects, session }: ReconcileInput,
-  slices: CliTicket[],
+  { effects }: ReconcileInput,
+  slices: TicketId[],
   facts: Fact[],
   outcome: ReconcileOutcome,
 ): Promise<Change[]> => {
-  const index = buildSliceIndex(session.listTicketOutlines(), facts);
+  const index = buildSliceIndex([], facts);
 
   const targets = slices.flatMap((slice): Target[] => {
-    const pr = selectSlicePr(slice.id, index);
+    const pr = selectSlicePr(slice, index);
 
     return pr === null || isSettled(pr) ? [] : [{ slice, pr }];
   });
 
-  outcome.checked.push(...targets.map((target) => target.slice.id));
+  outcome.checked.push(...targets.map((target) => target.slice));
 
   const results = await Promise.all(targets.map((target) => readTarget(effects, target)));
 
@@ -216,8 +222,17 @@ const collectChanges = async (
 // All gh calls run before the store lock, which is taken only to append.
 export const reconcilePullRequests = async (input: ReconcileInput): Promise<ReconcileOutcome> => {
   const outcome: ReconcileOutcome = { checked: [], updated: [], problems: [] };
-  const slices = input.session.listTickets({ includeArchived: false }).filter(isOpenSlice);
-  const facts = await input.session.listStateFacts();
+
+  const slices = input.session
+    .listTicketOutlines()
+    .filter(isOpenSlice)
+    .map((outline) => outline.id);
+
+  if (slices.length === 0) {
+    return outcome;
+  }
+
+  const facts = await input.session.listStateFacts(slices);
 
   if (!facts.ok) {
     outcome.problems.push(globalProblem(facts.reason.message));
