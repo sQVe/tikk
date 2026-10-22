@@ -26,6 +26,14 @@ status comes from triage facts. Criteria coverage is a query.
 - A `review` holds `finding`s. A `check` holds none. Triage appends a fact that changes a finding's
   status. The newest line wins, as for all facts.
 - An `audit` holds one verdict per criterion.
+- A `qa` record is one QA run on a slice. It holds a run ID, scenarios, artifacts, and gaps. Each
+  scenario has a name, the criteria it covers, what was observed, and a verdict of `pass`, `fail`,
+  or `blocked`. The run ID is the first 12 hex characters of a SHA-256 of the fact without `run`.
+  `tikk qa add` refuses a ticket that is not a slice and a criterion the slice does not have.
+- An audit verdict may cite QA runs by run ID. `tikk audit` refuses a cited run that is not a `qa`
+  record of the slice, was seen at another repository or head than the audit, or has no scenario for
+  the verdict's criterion. It also refuses a `met` verdict that cites a run whose scenario for that
+  criterion is `fail` or `blocked`.
 
 ### Criteria
 
@@ -33,6 +41,11 @@ status comes from triage facts. Criteria coverage is a query.
   expected result, and `covers` links from slices and tasks.
 - A task covers all of its slice's criteria unless it names some.
 - Coverage is a query over criteria and `covers` links. No ticket copies criteria text.
+- A slice covers the plan criteria in its `covers`. A slice with no `covers` covers none.
+- A canceled slice or task covers nothing, and a canceled plan or slice reports no gaps. Archived
+  tickets are left out. A `covers` ID that names no criterion of the parent is ignored.
+- `tikk coverage [<id>]` reports each plan criterion that no slice covers and each slice criterion
+  that no task covers. It takes a plan or a slice and exits 0 when it finds gaps.
 - The coverage report is a warning until the `--force` rate shows agents can meet it.
 
 ## Consequences

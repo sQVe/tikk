@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import type { Fact } from '../fact/fact.ts';
 import {
   failureOf,
   makeEffects,
@@ -43,6 +44,7 @@ const audit = async (
     text?: string;
     kind?: 'slice' | 'task';
     withFile?: boolean;
+    facts?: Fact[];
     appendFailure?: { kind: 'invalid' | 'failed'; message: string };
   } = {},
 ) => {
@@ -56,6 +58,7 @@ const audit = async (
   const fakeSession = makeSession({
     tickets: [slice(options.kind)],
     facts: [
+      ...(options.facts ?? []),
       makeFact({
         kind: 'pr',
         repository: 'acme/app',
@@ -224,5 +227,90 @@ it('refuses an audit that leaves a criterion without a verdict', async () => {
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('second');
   expect(failure.message).toContain('no verdict');
+  expect(appends).toEqual([]);
+});
+
+const qaRun = (
+  head: string,
+  scenarioVerdict: string,
+  criteria = ['first'],
+  repository = 'acme/app',
+): Fact =>
+  makeFact({
+    kind: 'qa',
+    run: 'abc123abc123',
+    target: { repository, head, base: 'main', changeHash: 'hash1' },
+    scenarios: [{ name: 'Open', criteria, observed: 'Seen', verdict: scenarioVerdict }],
+    artifacts: [],
+    gaps: [],
+  });
+
+const citing = (run: string): string =>
+  allMet.replace(
+    '- criterion: first\n  verdict: met\n  evidence: Test passes',
+    `- criterion: first\n  verdict: met\n  evidence: Test passes\n  qa: [${run}]`,
+  );
+
+it('appends an audit that cites a passing QA run', async () => {
+  const { result, appends } = await audit(fullArguments, {
+    text: citing('abc123abc123'),
+    facts: [qaRun('head1', 'pass')],
+  });
+
+  expect(result.ok).toBe(true);
+  expect(appends).toHaveLength(1);
+});
+
+it.each([
+  ['unknown', 'ffffffffffff', qaRun('head1', 'pass')],
+  ['at another head', 'abc123abc123', qaRun('head2', 'pass')],
+  ['from another repository', 'abc123abc123', qaRun('head1', 'pass', ['first'], 'acme/other')],
+  ['without a scenario for the criterion', 'abc123abc123', qaRun('head1', 'pass', ['second'])],
+  ['with a failed scenario cited by a met verdict', 'abc123abc123', qaRun('head1', 'fail')],
+  ['with a blocked scenario cited by a met verdict', 'abc123abc123', qaRun('head1', 'blocked')],
+])('refuses a cited run that is %s and appends nothing', async (_name, run, fact) => {
+  const { result, appends } = await audit(fullArguments, {
+    text: citing(run),
+    facts: [fact],
+  });
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(appends).toEqual([]);
+});
+
+it('appends a not-met verdict that cites a failed QA run', async () => {
+  const text = citing('abc123abc123').replace(
+    'criterion: first\n  verdict: met',
+    'criterion: first\n  verdict: not-met',
+  );
+
+  const { result, appends } = await audit(fullArguments, {
+    text,
+    facts: [qaRun('head1', 'fail')],
+  });
+
+  expect(result.ok).toBe(true);
+  expect(appends).toHaveLength(1);
+});
+
+it('refuses a met verdict when any cited scenario for the criterion did not pass', async () => {
+  const run = makeFact({
+    kind: 'qa',
+    run: 'abc123abc123',
+    target: { repository: 'acme/app', head: 'head1', base: 'main', changeHash: 'hash1' },
+    scenarios: [
+      { name: 'Open', criteria: ['first'], observed: 'Seen', verdict: 'pass' },
+      { name: 'Close', criteria: ['first'], observed: 'Stuck', verdict: 'fail' },
+    ],
+    artifacts: [],
+    gaps: [],
+  });
+
+  const { result, appends } = await audit(fullArguments, {
+    text: citing('abc123abc123'),
+    facts: [run],
+  });
+
+  expect(failureOf(result).code).toBe('invalidArguments');
   expect(appends).toEqual([]);
 });
