@@ -23,8 +23,8 @@ status comes from triage facts. Criteria coverage is a query.
 
 - A `check`, `review`, `audit`, or `qa` record carries repository, head, base, and a change hash. A
   record for other code does not count for the current head.
-- A `check` or `review` holds `finding`s. Triage appends a fact that changes a finding's status. The
-  newest line wins, as for all facts.
+- A `review` holds `finding`s. A `check` holds none. Triage appends a fact that changes a finding's
+  status. The newest line wins, as for all facts.
 - An `audit` holds one verdict per criterion.
 
 ### Criteria

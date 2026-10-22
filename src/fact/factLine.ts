@@ -119,7 +119,7 @@ const checkSchema = z.strictObject({
     .optional(),
 });
 
-const reviewFindingSchema = z.strictObject({
+export const reviewFindingSchema = z.strictObject({
   fingerprint: nonEmpty,
   severity: z.enum(['high', 'medium', 'low']),
   location: nonEmpty,

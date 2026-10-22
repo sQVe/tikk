@@ -37,9 +37,17 @@ const itemView = (item: NeedItem<CliTicket>): Record<string, unknown> => ({
   ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
 });
 
+const itemSubject = (item: NeedItem<CliTicket>): string => {
+  if (item.fingerprint === undefined) {
+    return item.ticket.frontMatter.title;
+  }
+
+  return `${item.fingerprint}  ${item.claim}`;
+};
+
 const itemLine = (item: NeedItem<CliTicket>): string => {
   const { ticket } = item;
-  const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${ticket.frontMatter.title}`;
+  const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${itemSubject(item)}`;
   const tasks = item.openTasks === undefined ? '' : `  ${item.openTasks.join(' ')}`;
   const suffix = ticket.error === null ? '' : `  parseError ${ticket.path}`;
 
