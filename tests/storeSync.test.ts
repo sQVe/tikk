@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, setDefaultTimeout } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
@@ -792,12 +792,15 @@ it('a sync against a remote whose transport hangs gives up and kills the hanging
 }, 40_000);
 
 it('a sync reports merged false when the fetch failed', async () => {
-  const fixture = singleFixture();
+  const { first, remotePath } = clonePair();
 
-  await fixture.runChecked(['init']);
-  await gitOutput(fixture.storePath, ['remote', 'add', 'origin', join(fixture.home, 'gone.git')]);
+  await first.runChecked(['init', '--remote', remotePath]);
+  await first.runChecked(['sync']);
+  await rename(remotePath, `${remotePath}.gone`);
 
-  const report = await fixture.runJson<SyncReport>(['sync']);
+  const report = await first.runJson<SyncReport>(['sync']);
+
+  await rename(`${remotePath}.gone`, remotePath);
 
   expect(report.fetched).toBe(false);
   expect(report.merged).toBe(false);
