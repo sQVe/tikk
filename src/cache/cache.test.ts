@@ -265,6 +265,52 @@ it('lists only the facts that decide a task state', async () => {
   expect(factsOf(cache)).toHaveLength(3);
 });
 
+it('lists status and unarchive facts as state facts', async () => {
+  const fake = createFakeFiles();
+  const note = { kind: 'log', type: 'progress', text: 'A note' };
+
+  fake.setFactFile(
+    factPath(),
+    factText('tikk-3a4b', note, '2026-10-20T10:00:00.000Z') +
+      factText('tikk-3a4b', { kind: 'status', status: 'closed' }, '2026-10-20T10:01:00.000Z') +
+      factText('tikk-3a4b', { kind: 'unarchive' }, '2026-10-20T10:02:00.000Z'),
+  );
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  const stateFacts = cache.listStateFacts();
+
+  expect(stateFacts.ok && stateFacts.value.map((fact) => fact.kind)).toEqual([
+    'status',
+    'unarchive',
+  ]);
+});
+
+it('lists only the facts that date a finish or an unarchive as archive facts', async () => {
+  const fake = createFakeFiles();
+  const claim = { kind: 'claim', holder: 'agent', leaseEnd: '2099-01-01T00:00:00.000Z' };
+
+  fake.setFactFile(
+    factPath(),
+    factText('tikk-3a4b', claim, '2026-10-20T10:00:00.000Z') +
+      factText('tikk-3a4b', { kind: 'accept' }, '2026-10-20T10:01:00.000Z') +
+      factText('tikk-3a4b', { kind: 'status', status: 'closed' }, '2026-10-20T10:02:00.000Z') +
+      factText('tikk-3a4c', { kind: 'unarchive' }, '2026-10-20T10:03:00.000Z'),
+  );
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  const archiveFacts = cache.listArchiveFacts();
+
+  expect(
+    archiveFacts.ok && archiveFacts.value.map((fact) => `${fact.ticket} ${fact.kind}`),
+  ).toEqual(['tikk-3a4b accept', 'tikk-3a4b status', 'tikk-3a4c unarchive']);
+});
+
 it('lists a release with the claim it ends, so the task is open again', async () => {
   const fake = createFakeFiles();
   const claim = { kind: 'claim', holder: 'agent', leaseEnd: '2099-01-01T00:00:00.000Z' };
@@ -295,6 +341,8 @@ it('lists a release with the claim it ends, so the task is open again', async ()
       title: 'T',
       project: project.value,
       blockedBy: [],
+      discoveredFrom: [],
+      related: [],
       status: 'open' as const,
     },
   };
@@ -560,4 +608,46 @@ it('returns the failure and keeps the facts when an automatic rebuild cannot rea
 
   expect(refreshed).toMatchObject({ ok: false, reason: { message: 'Cannot read.' } });
   expect(stateFactTickets(cache)).toEqual(['tikk-3a4b']);
+});
+
+it('does not report success when another handle damages a ticket row during the file listing', async () => {
+  const fake = await seedOneTicket();
+
+  using cache = openTestCache(databasePath);
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    listTicketFiles: async () => {
+      runSql(databasePath, "UPDATE tickets SET blocked_by = 'not json'");
+
+      return fake.files.listTicketFiles();
+    },
+  });
+
+  expect(refreshed.ok).toBe(false);
+});
+
+it('does not report success when another handle damages a ticket row during an automatic fact rebuild', async () => {
+  const fake = await seedOneTicket();
+
+  fake.setFactFile(factPath(), factText('me-3a4b', liveClaim));
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  runSql(databasePath, "UPDATE fact_files SET bytes_read = 'abc'");
+
+  const refreshed = await cache.refresh({
+    ...fake.files,
+    readFactFile: async (factFile, fromByte) => {
+      const read = await fake.files.readFactFile(factFile, fromByte);
+
+      runSql(databasePath, "UPDATE tickets SET blocked_by = 'not json'");
+
+      return read;
+    },
+  });
+
+  expect(refreshed.ok).toBe(false);
 });

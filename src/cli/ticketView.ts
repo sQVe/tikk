@@ -5,6 +5,8 @@ import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import type { CliFailure, CliSession, CliTicket, CommandResult } from './cliEffects.ts';
 
+type Criterion = NonNullable<CliTicket['frontMatter']['criteria']>[number];
+
 export interface TicketView {
   id: string;
   path: string;
@@ -15,6 +17,10 @@ export interface TicketView {
   parent: string | null;
   rank: number | null;
   blockedBy: string[];
+  discoveredFrom: string[];
+  related: string[];
+  criteria: Criterion[] | null;
+  covers: string[] | null;
   status: string;
   archived: string | null;
   body?: string;
@@ -39,6 +45,10 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
     parent: frontMatter.parent ?? null,
     rank: frontMatter.rank ?? null,
     blockedBy: frontMatter.blockedBy,
+    discoveredFrom: frontMatter.discoveredFrom,
+    related: frontMatter.related,
+    criteria: frontMatter.criteria ?? null,
+    covers: frontMatter.covers ?? null,
     status: frontMatter.status,
     archived: frontMatter.archived ?? null,
     error: ticket.error,

@@ -74,6 +74,8 @@ it('shows no state for an issue', async () => {
       title: 'An issue',
       project: projectNameOf('demo'),
       blockedBy: [],
+      discoveredFrom: [],
+      related: [],
       status: 'closed',
     },
   });

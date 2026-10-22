@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
-import { parseTicketId, ticketFrontMatterSchema } from '../ticket/ticket.ts';
+import { parseTicketId, ticketFrontMatterSchema, ticketIdSchema } from '../ticket/ticket.ts';
 import type { TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
 
 export interface CachedTicket {
@@ -14,6 +14,19 @@ export interface CachedTicket {
   error: string | null;
   frontMatter: TicketFrontMatter;
   body: string;
+}
+
+export interface TicketOutline {
+  id: TicketId;
+  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
+}
+
+interface ListColumns {
+  blockedBy: unknown;
+  discoveredFrom: unknown;
+  related: unknown;
+  criteria: unknown;
+  covers: unknown;
 }
 
 export interface CachedError {
@@ -30,16 +43,6 @@ export interface ListTicketsOptions {
   includeArchived: boolean;
 }
 
-const parseBlockedBy = (text: string, context: z.RefinementCtx): unknown => {
-  try {
-    return JSON.parse(text);
-  } catch {
-    context.addIssue({ code: 'custom', message: 'blocked_by is not JSON.' });
-
-    return z.NEVER;
-  }
-};
-
 const ticketRowSchema = z.object({
   id: z.string(),
   path: z.string(),
@@ -50,7 +53,11 @@ const ticketRowSchema = z.object({
   project: z.string(),
   parent: z.string().nullable(),
   rank: z.number().nullable(),
-  blocked_by: z.string().transform(parseBlockedBy),
+  blocked_by: z.string(),
+  discovered_from: z.string(),
+  related: z.string(),
+  criteria: z.string().nullable(),
+  covers: z.string().nullable(),
   status: z.string(),
   archived: z.string().nullable(),
   body: z.string(),
@@ -61,7 +68,25 @@ const pathRowSchema = z.object({ path: z.string() });
 const errorRowSchema = z.object({ path: z.string(), error: z.string() });
 
 const ticketColumns =
-  'id, path, hash, error, kind, title, project, parent, rank, blocked_by, status, archived, body';
+  'id, path, hash, error, kind, title, project, parent, rank, blocked_by, discovered_from, related, criteria, covers, status, archived, body';
+
+const parseOptionalJson = (text: string | null): unknown =>
+  text === null ? undefined : (JSON.parse(text) ?? undefined);
+
+// The list columns hold JSON text. A column that is not JSON means the row is damaged.
+const parseListColumns = (row: z.output<typeof ticketRowSchema>): ListColumns | undefined => {
+  try {
+    return {
+      blockedBy: JSON.parse(row.blocked_by),
+      discoveredFrom: JSON.parse(row.discovered_from),
+      related: JSON.parse(row.related),
+      criteria: parseOptionalJson(row.criteria),
+      covers: parseOptionalJson(row.covers),
+    };
+  } catch {
+    return undefined;
+  }
+};
 
 const parseCachedTicket = (raw: unknown): CachedTicket | undefined => {
   const row = ticketRowSchema.safeParse(raw);
@@ -76,13 +101,23 @@ const parseCachedTicket = (raw: unknown): CachedTicket | undefined => {
     return undefined;
   }
 
+  const lists = parseListColumns(row.data);
+
+  if (lists === undefined) {
+    return undefined;
+  }
+
   const frontMatter = ticketFrontMatterSchema.safeParse({
     kind: row.data.kind,
     title: row.data.title,
     project: row.data.project,
     parent: row.data.parent ?? undefined,
     rank: row.data.rank ?? undefined,
-    blockedBy: row.data.blocked_by,
+    blockedBy: lists.blockedBy,
+    discoveredFrom: lists.discoveredFrom,
+    related: lists.related,
+    criteria: lists.criteria,
+    covers: lists.covers,
     status: row.data.status,
     archived: row.data.archived ?? undefined,
   });
@@ -180,6 +215,45 @@ export const listTickets = (database: Database, options: ListTicketsOptions): Ca
 
   return rows.map(toCachedTicket);
 };
+
+const outlineRowSchema = z.object({
+  id: ticketIdSchema,
+  kind: ticketFrontMatterSchema.shape.kind,
+  status: ticketFrontMatterSchema.shape.status,
+  parent: ticketIdSchema.nullable(),
+  archived: z.string().nullable(),
+});
+
+const toOutline = (raw: unknown): TicketOutline => {
+  const row = outlineRowSchema.safeParse(raw);
+
+  invariant(row.success, 'A cached ticket outline row is invalid.');
+
+  const { id, kind, status, parent, archived } = row.data;
+  const frontMatter: TicketOutline['frontMatter'] = { kind, status };
+
+  if (parent !== null) {
+    frontMatter.parent = parent;
+  }
+
+  if (archived !== null) {
+    frontMatter.archived = archived;
+  }
+
+  return { id, frontMatter };
+};
+
+// Reads only the fields that place a ticket in its tree, which is much cheaper than whole tickets.
+// A ticket whose file has an error is left out, since its cached fields are stale.
+export const listTicketOutlines = (database: Database): TicketOutline[] =>
+  database
+    .query(
+      `SELECT id, kind, status, parent, archived FROM tickets
+      WHERE title IS NOT NULL AND error IS NULL
+      ORDER BY project, id`,
+    )
+    .all()
+    .map(toOutline);
 
 export const listErrors = (database: Database): CachedError[] => {
   const rows = database

@@ -1,5 +1,5 @@
 import type { Result } from '../result.ts';
-import { parseTicketId, serializeTicketFile, ticketFrontMatterSchema } from '../ticket/ticket.ts';
+import { parseTicketId, ticketFrontMatterSchema } from '../ticket/ticket.ts';
 import type { TicketFrontMatter } from '../ticket/ticket.ts';
 import {
   invalidArguments,
@@ -9,54 +9,91 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { fileErrorFailure, withStoreLock } from './taskLock.ts';
-import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
+import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { readCriteriaFile } from './ticketCriteria.ts';
+import { ticketEditor } from './ticketEditor.ts';
+import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
+import { showAfterRefresh } from './ticketView.ts';
 
 interface FieldEdit {
   hash: string;
   title: string | undefined;
   status: string | undefined;
+  kind: string | undefined;
+  parent: string | undefined;
   bodyPath: string | undefined;
+  criteriaPath: string | undefined;
 }
 
 const usage =
-  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--body-file <f>] --json, or tikk edit <id>';
+  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] --json, or tikk edit <id>';
 
-const missingTicket = (rawId: string): CommandResult => ({
-  ok: false,
-  reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
-});
+const kindChange = (
+  ticket: CliTicket,
+  edit: FieldEdit,
+): Result<TicketFrontMatter['kind'], CliFailure> => {
+  const { kind: current } = ticket.frontMatter;
+  const { kind, parent } = edit;
 
-const editInEditor = async (input: CommandInput, rawId: string): Promise<CommandResult> => {
-  const id = parseTicketId(rawId);
-
-  if (!id.ok) {
-    return missingTicket(rawId);
+  if (parent !== undefined && kind !== 'slice') {
+    return invalidArguments('--parent is only allowed with --kind slice.');
   }
 
-  const path = input.session.findTicketPath(id.value);
-
-  if (!path.ok) {
-    return missingTicket(rawId);
+  if (kind === undefined) {
+    return { ok: true, value: current };
   }
 
-  const edited = await input.effects.runEditor(path.value);
-
-  if (!edited.ok) {
-    return storeFailure(edited.reason.message);
+  if (kind !== 'slice' && kind !== 'plan') {
+    return invalidArguments(`The kind of a ticket can only change to slice or plan, not ${kind}.`);
   }
 
-  return showAfterRefresh(input.session, input.effects.now(), id.value);
+  if (current !== 'issue') {
+    return invalidArguments(
+      `Ticket ${ticket.id} is a ${current}, and only an issue can change its kind.`,
+    );
+  }
+
+  return { ok: true, value: kind };
+};
+
+const parentChange = (edit: FieldEdit): Result<TicketFrontMatter['parent'], CliFailure> => {
+  if (edit.parent === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  const parent = parseTicketId(edit.parent);
+
+  if (!parent.ok) {
+    return invalidArguments(parent.reason.message);
+  }
+
+  return parent;
 };
 
 const buildFrontMatter = (
   ticket: CliTicket,
   edit: FieldEdit,
+  criteria: unknown,
 ): Result<TicketFrontMatter, CliFailure> => {
+  const kind = kindChange(ticket, edit);
+
+  if (!kind.ok) {
+    return kind;
+  }
+
+  const parent = parentChange(edit);
+
+  if (!parent.ok) {
+    return parent;
+  }
+
   const frontMatter = ticketFrontMatterSchema.safeParse({
     ...ticket.frontMatter,
+    kind: kind.value,
+    parent: parent.value ?? ticket.frontMatter.parent,
     title: edit.title ?? ticket.frontMatter.title,
     status: edit.status ?? ticket.frontMatter.status,
+    criteria: criteria ?? ticket.frontMatter.criteria,
   });
 
   if (!frontMatter.success) {
@@ -71,14 +108,22 @@ const applyEdit = async (
   ticket: CliTicket,
   edit: FieldEdit,
 ): Promise<CommandResult> => {
-  if (ticket.error !== null) {
-    return fileErrorFailure(ticket);
+  const criteria = await readCriteriaFile(input.effects, edit.criteriaPath);
+
+  if (!criteria.ok) {
+    return criteria;
   }
 
-  const frontMatter = buildFrontMatter(ticket, edit);
+  const frontMatter = buildFrontMatter(ticket, edit, criteria.value);
 
   if (!frontMatter.ok) {
     return frontMatter;
+  }
+
+  const tree = checkSessionTree(input.session, frontMatter.value);
+
+  if (!tree.ok) {
+    return tree;
   }
 
   const body =
@@ -90,13 +135,15 @@ const applyEdit = async (
     return body;
   }
 
-  const text = serializeTicketFile({ frontMatter: frontMatter.value, body: body.value });
-  const written = await input.session.writeTicketFile(ticket.path, edit.hash, text);
+  const written = await writeTicketWithStatus(input, {
+    ticket,
+    expectedHash: edit.hash,
+    frontMatter: frontMatter.value,
+    body: body.value,
+  });
 
   if (!written.ok) {
-    const code = written.reason.kind === 'changedOnDisk' ? 'changedOnDisk' : 'storeError';
-
-    return { ok: false, reason: { code, message: written.reason.message } };
+    return written;
   }
 
   return showAfterRefresh(input.session, input.effects.now(), ticket.id);
@@ -108,12 +155,18 @@ const readFieldEdit = (
 ): Result<FieldEdit | undefined, CliFailure> => {
   const title = stringValue(values, 'title');
   const status = stringValue(values, 'status');
+  const kind = stringValue(values, 'kind');
+  const parent = stringValue(values, 'parent');
   const bodyPath = stringValue(values, 'body-file');
+  const criteriaPath = stringValue(values, 'criteria-file');
   const hash = stringValue(values, 'hash');
-  const hasField = title !== undefined || status !== undefined || bodyPath !== undefined;
+  const fields = [title, status, kind, parent, bodyPath, criteriaPath];
+  const hasField = fields.some((field) => field !== undefined);
 
   if (!hasField && json) {
-    return invalidArguments(`Give at least one of --title, --status, or --body-file. ${usage}`);
+    return invalidArguments(
+      `Give at least one of --title, --status, --kind, --parent, --criteria-file, or --body-file. ${usage}`,
+    );
   }
 
   if (!hasField) {
@@ -124,7 +177,7 @@ const readFieldEdit = (
     return invalidArguments(`Give --hash. ${usage}`);
   }
 
-  return { ok: true, value: { hash, title, status, bodyPath } };
+  return { ok: true, value: { hash, title, status, kind, parent, bodyPath, criteriaPath } };
 };
 
 export const ticketEdit = async (input: CommandInput): Promise<CommandResult> => {
@@ -132,6 +185,9 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     hash: { type: 'string' },
     title: { type: 'string' },
     status: { type: 'string' },
+    kind: { type: 'string' },
+    parent: { type: 'string' },
+    'criteria-file': { type: 'string' },
     'body-file': { type: 'string' },
   });
 
@@ -152,24 +208,12 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
   }
 
   if (edit.value === undefined) {
-    return editInEditor(input, rawId);
+    return ticketEditor(input, rawId);
   }
 
   const fieldEdit = edit.value;
 
-  return withStoreLock(input, async () => {
-    const refreshed = await input.session.refresh();
-
-    if (!refreshed.ok) {
-      return storeFailure(refreshed.reason.message);
-    }
-
-    const found = findTicket(input.session, rawId);
-
-    if (!found.ok) {
-      return found;
-    }
-
-    return applyEdit(input, found.value, fieldEdit);
-  });
+  return withLockedTicket(input, rawId, refuseFileErrors, (ticket) =>
+    applyEdit(input, ticket, fieldEdit),
+  );
 };

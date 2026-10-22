@@ -29,6 +29,8 @@ interface Attempt {
   breaker: string;
   deadline: number;
   waitMilliseconds: number;
+  // Attempts at once after one that cleared a stale lock, before the deadline decides.
+  vacatedRetries: number;
 }
 
 type Clearing = 'cleared' | 'busy';
@@ -182,6 +184,25 @@ const lockedResult = (message: string): Result<never, StoreLockReason> => ({
   reason: { kind: 'locked', message },
 });
 
+// True when the lock is gone or this process cleared it as stale.
+const vacateStaleLock = async (
+  functions: StoreLockFunctions,
+  paths: { path: string; breaker: string },
+  holder: number | undefined | 'gone',
+): Promise<Result<boolean, StoreLockReason>> => {
+  if (holder === 'gone') {
+    return { ok: true, value: true };
+  }
+
+  if (!isStale(functions, holder)) {
+    return { ok: true, value: false };
+  }
+
+  const cleared = await clearStaleLock(functions, paths, holder);
+
+  return cleared.ok ? { ok: true, value: cleared.value === 'cleared' } : cleared;
+};
+
 const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLockReason>> => {
   const { functions, path, breaker, deadline, waitMilliseconds } = attempt;
 
@@ -201,17 +222,16 @@ const tryAcquire = async (attempt: Attempt): Promise<Result<StoreLock, StoreLock
     return holder;
   }
 
-  const holderPid = holder.value === 'gone' ? undefined : holder.value;
-  let vacated = holder.value === 'gone';
+  const vacancy = await vacateStaleLock(functions, { path, breaker }, holder.value);
 
-  if (!vacated && isStale(functions, holderPid)) {
-    const cleared = await clearStaleLock(functions, { path, breaker }, holderPid);
+  if (!vacancy.ok) {
+    return vacancy;
+  }
 
-    if (!cleared.ok) {
-      return cleared;
-    }
+  const vacated = vacancy.value;
 
-    vacated = cleared.value === 'cleared';
+  if (vacated && attempt.vacatedRetries > 0) {
+    return tryAcquire({ ...attempt, vacatedRetries: attempt.vacatedRetries - 1 });
   }
 
   if (functions.now() >= deadline) {
@@ -249,4 +269,19 @@ export const acquireStoreLock = (
     breaker: breakerFilePath(store),
     deadline: functions.now() + timeoutMilliseconds,
     waitMilliseconds: minimumWaitMilliseconds,
+    vacatedRetries: 0,
+  });
+
+// Makes one attempt and never sleeps. A stale lock is still cleared, and then taken at once.
+export const tryStoreLock = (
+  functions: StoreLockFunctions,
+  store: Store,
+): Promise<Result<StoreLock, StoreLockReason>> =>
+  tryAcquire({
+    functions,
+    path: lockFilePath(store),
+    breaker: breakerFilePath(store),
+    deadline: functions.now(),
+    waitMilliseconds: minimumWaitMilliseconds,
+    vacatedRetries: 1,
   });

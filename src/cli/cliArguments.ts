@@ -6,7 +6,7 @@ import type { Result } from '../result.ts';
 import type { CliEffects, CliFailure } from './cliEffects.ts';
 
 export interface ParsedArguments {
-  values: Record<string, string | boolean | undefined>;
+  values: Record<string, string | boolean | string[] | undefined>;
   positionals: string[];
 }
 
@@ -43,6 +43,12 @@ export const stringValue = (
   return typeof value === 'string' ? value : undefined;
 };
 
+export const listValue = (values: ParsedArguments['values'], name: string): string[] => {
+  const value = values[name];
+
+  return Array.isArray(value) ? value : [];
+};
+
 export const readBodyFile = async (
   effects: CliEffects,
   path: string,
@@ -54,4 +60,31 @@ export const readBodyFile = async (
   }
 
   return { ok: true, value: text };
+};
+
+export const forceOptions = {
+  force: { type: 'boolean' },
+  reason: { type: 'string' },
+} as const;
+
+// The reason an override gives for skipping a strict check, or undefined when no override is set.
+export const readForce = (
+  values: ParsedArguments['values'],
+): Result<string | undefined, CliFailure> => {
+  const force = values['force'] === true;
+  const reason = stringValue(values, 'reason');
+
+  if (!force && reason === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (!force) {
+    return invalidArguments('--reason works only with --force.');
+  }
+
+  if (reason === undefined || reason.trim() === '') {
+    return invalidArguments('--force needs --reason <text> that says why.');
+  }
+
+  return { ok: true, value: reason };
 };

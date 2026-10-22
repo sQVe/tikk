@@ -24,6 +24,7 @@ import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
 import {
   acquireStoreLock,
+  tryStoreLock,
   appendFact,
   createTicketFile,
   initStore,
@@ -188,12 +189,16 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     getTicket: (id) => cache.getTicket(id),
     findTicketPath: (id) => cache.findTicketPath(id),
     listTickets: (options) => cache.listTickets(options),
+    listTicketOutlines: () => cache.listTicketOutlines(),
+    mayHaveArchiveWork: (now) => cache.mayHaveArchiveWork(now),
     listErrors: () => cache.listErrors(),
     listFacts: (ticketIds) =>
       listFactsRecovering(cache, files, (ids) => cache.listFacts(ids), ticketIds),
     listStateFacts: (ticketIds) =>
       listFactsRecovering(cache, files, (ids) => cache.listStateFacts(ids), ticketIds),
+    listArchiveFacts: () => listFactsRecovering(cache, files, () => cache.listArchiveFacts()),
     lockStore: () => acquireStoreLock(storeLock, store),
+    tryLockStore: () => tryStoreLock(storeLock, store),
     appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
     createTicketFile: (project, title, text) =>
       createTicketFile(ticketFiles, store, project, title, text),

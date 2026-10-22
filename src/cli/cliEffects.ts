@@ -11,6 +11,11 @@ export interface CliTicket {
   body: string;
 }
 
+interface CliTicketOutline {
+  id: TicketId;
+  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
+}
+
 export interface CliFailure {
   code:
     | 'notInitialized'
@@ -49,10 +54,17 @@ export interface CliSession extends Disposable {
   getTicket: (id: TicketId) => Result<CliTicket, CliMessage>;
   findTicketPath: (id: TicketId) => Result<string, CliMessage>;
   listTickets: (options: { includeArchived: boolean }) => CliTicket[];
+  // Tickets whose files parse, with only the fields that place them in their tree.
+  listTicketOutlines: () => CliTicketOutline[];
+  // False only when the archive sweep surely has nothing to do.
+  mayHaveArchiveWork: (now: Date) => boolean;
   listErrors: () => { path: string; message: string }[];
   listFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listStateFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
+  listArchiveFacts: () => Promise<Result<Fact[], CliMessage>>;
   lockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
+  // One attempt that never waits for another holder.
+  tryLockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
   appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FactAppendReason>>;
   createTicketFile: (
     project: ProjectName,

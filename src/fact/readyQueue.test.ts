@@ -110,4 +110,37 @@ describe('selectReady', () => {
     expect(byParent.candidates.map((entry) => entry.ticket.id)).toEqual([child.id]);
     expect(byOtherProject.candidates).toEqual([]);
   });
+
+  it('selects slices of a plan and treats a canceled slice blocker as cleared', () => {
+    const plan = makeTicket('3469', { kind: 'plan' });
+    const canceled = makeTicket('3478', { kind: 'slice', parent: '3469', status: 'canceled' });
+    const slice = makeTicket('3479', { kind: 'slice', parent: '3469', blockedBy: ['3478'] });
+    const task = makeTicket('3489', { parent: '3469' });
+    const scope = { kind: 'slice' as const, parent: plan.id };
+    const result = selectReady([plan, canceled, slice, task], [], now, scope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([slice.id]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('never selects a draft slice and lets an open or draft slice block', () => {
+    const draft = makeTicket('3478', { kind: 'slice', parent: '3469', status: 'draft', rank: 1 });
+    const open = makeTicket('3479', { kind: 'slice', parent: '3469', rank: 3 });
+
+    const blocked = makeTicket('3489', {
+      kind: 'slice',
+      parent: '3469',
+      rank: 2,
+      blockedBy: ['3478'],
+    });
+
+    const scope = { kind: 'slice' as const, parent: taskId('3469') };
+    const result = selectReady([draft, open, blocked], [], now, scope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([open.id]);
+
+    expect(result.skipped).toEqual([
+      { ticket: blocked, reason: 'blocked', blockers: [{ id: draft.id, state: 'draft' }] },
+    ]);
+  });
 });

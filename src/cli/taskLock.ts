@@ -12,6 +12,11 @@ export interface LockedTask {
 
 type FileErrors = 'refuse' | 'allow';
 
+interface LockPolicy {
+  fileErrors: FileErrors;
+  requireTask: boolean;
+}
+
 export const conflict = (message: string): { ok: false; reason: CliFailure } => ({
   ok: false,
   reason: { code: 'conflict', message },
@@ -22,11 +27,13 @@ export const fileErrorFailure = (ticket: CliTicket): { ok: false; reason: CliFai
   reason: { code: 'parseError', message: `${ticket.path} has an error: ${ticket.error}` },
 });
 
-const loadTask = async (
+export const refuseFileErrors: LockPolicy = { fileErrors: 'refuse', requireTask: false };
+
+const loadTicket = async (
   input: CommandInput,
   rawId: string,
-  fileErrors: FileErrors,
-): Promise<Result<LockedTask, CliFailure>> => {
+  policy: LockPolicy,
+): Promise<Result<CliTicket, CliFailure>> => {
   const refreshed = await input.session.refresh();
 
   if (!refreshed.ok) {
@@ -39,26 +46,20 @@ const loadTask = async (
     return found;
   }
 
-  const task = found.value;
+  const ticket = found.value;
 
-  if (task.frontMatter.kind !== 'task') {
+  if (policy.requireTask && ticket.frontMatter.kind !== 'task') {
     return invalidArguments(
-      `Ticket ${task.id} is not a task: its kind is ${task.frontMatter.kind}.`,
+      `Ticket ${ticket.id} is not a task: its kind is ${ticket.frontMatter.kind}.`,
     );
   }
 
-  // The cache keeps the last good front matter of a broken file, which a state change must not use.
-  if (fileErrors === 'refuse' && task.error !== null) {
-    return fileErrorFailure(task);
+  // The cache keeps the last good front matter of a broken file, which a change must not use.
+  if (policy.fileErrors === 'refuse' && ticket.error !== null) {
+    return fileErrorFailure(ticket);
   }
 
-  const facts = await input.session.listStateFacts([task.id]);
-
-  if (!facts.ok) {
-    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
-  }
-
-  return { ok: true, value: { task, facts: facts.value, now: input.effects.now() } };
+  return { ok: true, value: ticket };
 };
 
 // Every write runs under the store lock. The work refreshes the cache after it takes the lock, so
@@ -82,18 +83,34 @@ export const withStoreLock = async (
   }
 };
 
-export const withLockedTask = (
+export const withLockedTicket = (
   input: CommandInput,
   rawId: string,
-  fileErrors: FileErrors,
-  work: (locked: LockedTask) => Promise<CommandResult>,
+  policy: LockPolicy,
+  work: (ticket: CliTicket) => Promise<CommandResult>,
 ): Promise<CommandResult> =>
   withStoreLock(input, async () => {
-    const loaded = await loadTask(input, rawId, fileErrors);
+    const loaded = await loadTicket(input, rawId, policy);
 
     if (!loaded.ok) {
       return loaded;
     }
 
     return work(loaded.value);
+  });
+
+export const withLockedTask = (
+  input: CommandInput,
+  rawId: string,
+  fileErrors: FileErrors,
+  work: (locked: LockedTask) => Promise<CommandResult>,
+): Promise<CommandResult> =>
+  withLockedTicket(input, rawId, { fileErrors, requireTask: true }, async (task) => {
+    const facts = await input.session.listStateFacts([task.id]);
+
+    if (!facts.ok) {
+      return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+    }
+
+    return work({ task, facts: facts.value, now: input.effects.now() });
   });

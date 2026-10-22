@@ -1,9 +1,12 @@
 import { selectReady } from '../fact/fact.ts';
+import type { Result } from '../result.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
-import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { ticketView } from './ticketView.ts';
+import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { findTicket, ticketView } from './ticketView.ts';
 
 type Selection = ReturnType<typeof selectReady<CliTicket>>;
+type ReadyKind = 'task' | 'slice';
+type KindResult = Result<ReadyKind, CliFailure>;
 type Skipped = Selection['skipped'][number];
 
 const skippedView = (item: Skipped): Record<string, unknown> => ({
@@ -15,10 +18,15 @@ const skippedView = (item: Skipped): Record<string, unknown> => ({
   ...(item.leaseEnd === undefined ? {} : { leaseEnd: item.leaseEnd }),
 });
 
-const isUnreadableTask = (ticket: CliTicket, project?: string, parent?: string): boolean => {
+const isUnreadable = (
+  ticket: CliTicket,
+  kind: ReadyKind,
+  project?: string,
+  parent?: string,
+): boolean => {
   const { frontMatter } = ticket;
 
-  if (ticket.error === null || frontMatter.kind !== 'task' || frontMatter.archived !== undefined) {
+  if (ticket.error === null || frontMatter.kind !== kind || frontMatter.archived !== undefined) {
     return false;
   }
 
@@ -47,6 +55,44 @@ const skippedDetails = (item: Skipped): string => {
   return '';
 };
 
+const usage = 'Usage: tikk ready [--project <p>] [--parent <id> | --kind <task|slice>] [--json]';
+
+const chooseKind = (
+  session: CommandInput['session'],
+  parent: string | undefined,
+  rawKind: string | undefined,
+): KindResult => {
+  if (parent !== undefined && rawKind !== undefined) {
+    return invalidArguments('Use either --parent or --kind, not both.');
+  }
+
+  if (parent === undefined) {
+    if (rawKind === undefined || rawKind === 'task' || rawKind === 'slice') {
+      return { ok: true, value: rawKind ?? 'task' };
+    }
+
+    return invalidArguments(`Kind ${rawKind} is not task or slice.`);
+  }
+
+  const found = findTicket(session, parent);
+
+  if (!found.ok) {
+    return found;
+  }
+
+  const parentKind = found.value.frontMatter.kind;
+
+  if (parentKind === 'plan') {
+    return { ok: true, value: 'slice' };
+  }
+
+  if (parentKind === 'slice') {
+    return { ok: true, value: 'task' };
+  }
+
+  return invalidArguments(`Ticket ${parent} is a ${parentKind}; --parent takes a plan or slice.`);
+};
+
 const readyText = (selection: Selection, unreadable: CliTicket[]): string => {
   const candidateLines = selection.candidates.map(
     ({ ticket, state }) => `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
@@ -73,6 +119,7 @@ export const readyCommand = async ({
   const parsed = parseCommandArguments(args, {
     project: { type: 'string' },
     parent: { type: 'string' },
+    kind: { type: 'string' },
   });
 
   if (!parsed.ok) {
@@ -80,17 +127,22 @@ export const readyCommand = async ({
   }
 
   if (parsed.value.positionals.length > 0) {
-    return invalidArguments('Usage: tikk ready [--project <p>] [--parent <id>] [--json]');
+    return invalidArguments(usage);
   }
 
   const project = stringValue(parsed.value.values, 'project');
   const parent = stringValue(parsed.value.values, 'parent');
+  const kind = chooseKind(session, parent, stringValue(parsed.value.values, 'kind'));
+
+  if (!kind.ok) {
+    return kind;
+  }
 
   // Archived tickets stay in the list so a blocker that was archived is not reported as missing.
   const listed = session.listTickets({ includeArchived: true });
 
   // A ticket whose file does not parse cannot be claimed, so it is never a candidate.
-  const unreadable = listed.filter((ticket) => isUnreadableTask(ticket, project, parent));
+  const unreadable = listed.filter((ticket) => isUnreadable(ticket, kind.value, project, parent));
   const tickets = listed.filter((ticket) => ticket.error === null);
 
   const facts = await session.listStateFacts();
@@ -100,6 +152,7 @@ export const readyCommand = async ({
   }
 
   const selection = selectReady(tickets, facts.value, effects.now(), {
+    kind: kind.value,
     ...(project === undefined ? {} : { project }),
     ...(parent === undefined ? {} : { parent }),
   });

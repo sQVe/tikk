@@ -75,15 +75,18 @@ const damagedErrorSql = `SELECT 1 FROM fact_errors
 export const hasValidFactErrorRows = (database: Database): boolean =>
   database.query(damagedErrorSql).get() === null;
 
-// Only these facts decide a task's state. Progress notes and questions are the bulk of a history,
+// Only these facts decide a ticket's state. Progress notes and questions are the bulk of a history,
 // and no state reads them.
-const stateFactsSql = `(kind IN ('claim', 'release', 'accept')
+const stateFactsSql = `(kind IN ('claim', 'release', 'accept', 'status', 'unarchive')
   OR (kind = 'log' AND log_type = 'submitted'))`;
+
+// Only these facts date when a ticket finished or was unarchived.
+const archiveFactsSql = `kind IN ('accept', 'status', 'unarchive')`;
 
 const readFacts = (
   database: Database,
   ticketIds: TicketId[] | undefined,
-  stateOnly: boolean,
+  kindFilter: string | undefined,
 ): Result<Fact[], FactDamage> => {
   const conditions: string[] = [];
   const parameters: string[] = [];
@@ -93,8 +96,8 @@ const readFacts = (
     parameters.push(JSON.stringify(ticketIds));
   }
 
-  if (stateOnly) {
-    conditions.push(stateFactsSql);
+  if (kindFilter !== undefined) {
+    conditions.push(kindFilter);
   }
 
   const where = conditions.length === 0 ? '' : ` WHERE ${conditions.join(' AND ')}`;
@@ -119,12 +122,15 @@ const readFacts = (
 };
 
 export const listFacts = (database: Database, ticketIds?: TicketId[]): Result<Fact[], FactDamage> =>
-  readFacts(database, ticketIds, false);
+  readFacts(database, ticketIds, undefined);
 
 export const listStateFacts = (
   database: Database,
   ticketIds?: TicketId[],
-): Result<Fact[], FactDamage> => readFacts(database, ticketIds, true);
+): Result<Fact[], FactDamage> => readFacts(database, ticketIds, stateFactsSql);
+
+export const listArchiveFacts = (database: Database): Result<Fact[], FactDamage> =>
+  readFacts(database, undefined, archiveFactsSql);
 
 export const listFactErrors = (database: Database): CachedError[] => {
   const rows = database

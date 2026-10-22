@@ -35,6 +35,8 @@ export const makeTicket = (
       status: 'open',
       ...rest,
       blockedBy: blockedBy.map(taskId),
+      discoveredFrom: [],
+      related: [],
       ...(parent === undefined ? {} : { parent: taskId(parent) }),
     },
   };

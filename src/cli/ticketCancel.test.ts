@@ -2,12 +2,13 @@ import { expect, it } from 'bun:test';
 
 import { parseTicketFile } from '../ticket/ticket.ts';
 import {
+  failed,
   failureOf,
   makeEffects,
   makeFact,
+  makeKindTicket,
   makeSession,
   makeTicket,
-  projectNameOf,
   successOf,
 } from './cliHarness.ts';
 import type { SessionOptions } from './cliHarness.ts';
@@ -91,21 +92,73 @@ it('refuses to cancel a done task and writes nothing', async () => {
   expect(fakeSession.lockHeld()).toBe(false);
 });
 
-it('refuses to cancel an issue and writes nothing', async () => {
-  const issue = makeTicket('demo-3467', {
-    frontMatter: {
-      kind: 'issue',
-      title: 'An issue',
-      project: projectNameOf('demo'),
-      blockedBy: [],
-      status: 'open',
+it('cancels a plan in its file and appends a status fact', async () => {
+  const plan = makeKindTicket('demo-3467', 'plan');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [plan] });
+  const [write] = fakeSession.writes;
+  const written = parseTicketFile(write?.text ?? '');
+
+  successOf(result);
+  expect(write?.expectedHash).toBe(plan.hash);
+  expect(written.ok && written.value.frontMatter.status).toBe('canceled');
+  expect(fakeSession.appends).toHaveLength(1);
+
+  expect(fakeSession.appends[0]).toMatchObject({
+    machine: 'laptop',
+    fact: { kind: 'status', ticket: 'demo-3467', status: 'canceled' },
+  });
+});
+
+it('appends a status fact when it cancels a task', async () => {
+  const { fakeSession, result } = await cancel(['demo-3467']);
+
+  successOf(result);
+
+  expect(fakeSession.appends.map((append) => append.fact)).toMatchObject([
+    { kind: 'status', status: 'canceled' },
+  ]);
+});
+
+it('cancels an issue', async () => {
+  const issue = makeKindTicket('demo-3467', 'issue');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [issue] });
+
+  expect(successOf(result).json).toMatchObject({ id: 'demo-3467' });
+  expect(fakeSession.writes).toHaveLength(1);
+  expect(fakeSession.appends).toHaveLength(1);
+});
+
+it('returns a canceled slice unchanged and appends nothing', async () => {
+  const slice = makeKindTicket('demo-3467', 'slice', 'canceled');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [slice] });
+
+  successOf(result);
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('refuses to cancel a closed issue and changes nothing', async () => {
+  const closed = makeKindTicket('demo-3467', 'issue', 'closed');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [closed] });
+
+  expect(failureOf(result).code).toBe('conflict');
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('reports that the file was written when the fact cannot be appended', async () => {
+  const { fakeSession, result } = await cancel(['demo-3467'], {
+    overrides: {
+      appendFact: () =>
+        Promise.resolve({ ok: false, reason: { kind: 'failed', message: 'Disk full.' } }),
     },
   });
 
-  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [issue] });
+  const failure = failureOf(result);
 
-  expect(failureOf(result).code).toBe('invalidArguments');
-  expect(fakeSession.writes).toEqual([]);
+  expect(failure.code).toBe('storeError');
+  expect(failure.message).toContain('written');
+  expect(fakeSession.writes).toHaveLength(1);
 });
 
 it('refuses to cancel a task whose file has an error and writes nothing', async () => {
@@ -139,4 +192,27 @@ it('refuses a missing ID before it takes the lock', async () => {
   });
 
   expect(failureOf(result).code).toBe('invalidArguments');
+});
+
+it('reports a storeError when the facts of a task cannot be read', async () => {
+  const { fakeSession, result } = await cancel(['demo-3467'], {
+    overrides: { listStateFacts: () => failed('The facts are damaged.') },
+  });
+
+  expect(failureOf(result).code).toBe('storeError');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('reports a plan that changed on disk', async () => {
+  const plan = makeKindTicket('demo-3467', 'plan');
+
+  const { result } = await cancel(['demo-3467'], {
+    tickets: [plan],
+    overrides: {
+      writeTicketFile: () =>
+        Promise.resolve({ ok: false, reason: { kind: 'changedOnDisk', message: 'Changed.' } }),
+    },
+  });
+
+  expect(failureOf(result).code).toBe('changedOnDisk');
 });

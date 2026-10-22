@@ -546,3 +546,19 @@ it('leaves no ticket file when the write fails after the file was created', asyn
   expect(listing.tickets).toEqual([]);
   expect(listing.errors).toEqual([]);
 });
+
+it('reports a hand-written open slice without criteria as a file error and not as ready', async () => {
+  await run(['init', '--json']);
+
+  const path = join(home, 'store', 'tickets', 'tikk', 'tikk-3a4b-slice.md');
+  const front = '---\nkind: slice\ntitle: Bare\nproject: tikk\nstatus: open\n---\nBody\n';
+
+  await Bun.write(path, front);
+
+  const listing = await runJson<Listing>(['ls']);
+  const ready = await runJson<{ candidates: { id: string }[] }>(['ready', '--kind', 'slice']);
+
+  expect(listing.errors.map((error) => error.path)).toEqual([path]);
+  expect(listing.errors[0]?.message).toContain('needs at least one criterion');
+  expect(ready.candidates.map((candidate) => candidate.id)).not.toContain('tikk-3a4b');
+});

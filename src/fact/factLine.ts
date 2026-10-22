@@ -23,6 +23,7 @@ const claimSchema = z.strictObject({
   leaseEnd: z.iso.datetime(),
   session: z.string().optional(),
   sessionLog: z.string().optional(),
+  forced: z.string().min(1).optional(),
 });
 
 const releaseSchema = z.strictObject({
@@ -37,6 +38,7 @@ const logSchema = z.strictObject({
   type: z.enum(['progress', 'question', 'answer', 'discovered', 'submitted']),
   text: z.string(),
   holder: z.string().min(1).optional(),
+  forced: z.string().min(1).optional(),
 });
 
 const acceptSchema = z.strictObject({
@@ -45,11 +47,25 @@ const acceptSchema = z.strictObject({
   holder: z.string().min(1).optional(),
 });
 
+const statusSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('status'),
+  status: z.enum(['draft', 'open', 'canceled', 'closed']),
+  forced: z.string().min(1).optional(),
+});
+
+const unarchiveSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('unarchive'),
+});
+
 const factSchema = z.discriminatedUnion('kind', [
   claimSchema,
   releaseSchema,
   logSchema,
   acceptSchema,
+  statusSchema,
+  unarchiveSchema,
 ]);
 
 export type Fact = z.output<typeof factSchema>;
