@@ -106,6 +106,7 @@ interface RemoteStoreSummary {
   store: string;
   created: boolean;
   remote: string;
+  pushed: boolean;
 }
 
 interface SyncFailure {

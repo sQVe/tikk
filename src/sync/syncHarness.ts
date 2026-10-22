@@ -14,6 +14,7 @@ export interface FakeSync {
   gitCalls: GitCall[];
   blobs: string[];
   renames: [string, string][];
+  removed: string[];
   disk: Map<string, { text: string; mtimeMs: number }>;
   aliasWrites: () => number;
   aliasRecords: { ticket: string; from: string; at: string }[];
@@ -77,6 +78,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   };
 
   const renames: [string, string][] = [];
+  const removed: string[] = [];
   const disk = new Map(Object.entries(options.files ?? {}));
   const aliasRecords: { ticket: string; from: string; at: string }[] = [];
   let suffixCount = 0;
@@ -213,6 +215,12 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       return Promise.resolve({ ok: true, value: { path: '/store/facts/fake/2026-10.jsonl' } });
     },
+    makeTempFolder: (prefix) => Promise.resolve(`${prefix}tmp`),
+    removeTree: (path) => {
+      removed.push(path);
+
+      return Promise.resolve();
+    },
     initStore: () => {
       initCount += 1;
 
@@ -225,6 +233,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     gitCalls,
     blobs,
     renames,
+    removed,
     disk,
     aliasWrites: () => aliasWrites,
     aliasRecords,

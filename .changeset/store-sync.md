@@ -11,3 +11,4 @@ second delay. `tikk claim` fetches and merges first, so it sees claims made on o
 still works offline. When a merge brings in a ticket whose ID another ticket already uses, sync
 gives the newer ticket a new ID, renames its file, and records an `alias` fact. `tikk sync --json`
 lists these as `aliases`, and reports `remote`, `fetched`, `merged`, and `pushed` for each step.
+`tikk init --remote --json` also reports `pushed`.

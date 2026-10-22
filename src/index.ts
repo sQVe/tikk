@@ -3,17 +3,19 @@ import { existsSync } from 'node:fs';
 import {
   appendFile,
   link,
+  mkdtemp,
   mkdir,
   open,
   readdir,
   readFile,
   rename,
+  rm,
   stat,
   unlink,
   writeFile,
 } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { openCache } from './cache/cache.ts';
 import type { CacheFiles, TicketCache } from './cache/cache.ts';
@@ -421,6 +423,12 @@ const scheduleFunctions: SyncScheduleFunctions = {
 const remoteInitFunctions: RemoteInitFunctions = {
   ...syncFunctions,
   initStore: initLocalStore,
+  makeTempFolder: async (prefix) => {
+    await mkdir(dirname(prefix), { recursive: true });
+
+    return mkdtemp(prefix);
+  },
+  removeTree: (path) => rm(path, { recursive: true, force: true }),
 };
 
 const syncFailureCode = (reason: SyncReason): 'conflict' | 'locked' | 'storeError' =>

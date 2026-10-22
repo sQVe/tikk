@@ -22,6 +22,13 @@ interface SyncReport {
   pushed: boolean;
 }
 
+interface InitReport {
+  store: string;
+  created: boolean;
+  remote: string;
+  pushed: boolean;
+}
+
 interface AliasSyncReport extends SyncReport {
   aliases: { from: string; to: string; path: string }[];
 }
@@ -804,4 +811,160 @@ it('a sync reports merged false when the fetch failed', async () => {
 
   expect(report.fetched).toBe(false);
   expect(report.merged).toBe(false);
+});
+
+const makeBareRemote = async (path: string, rejectPushes: boolean): Promise<void> => {
+  await gitOutput(dirname(path), ['init', '--quiet', '--bare', '--initial-branch=main', path]);
+
+  if (rejectPushes) {
+    const hook = join(path, 'hooks', 'pre-receive');
+
+    await mkdir(dirname(hook), { recursive: true });
+    await writeFile(hook, '#!/bin/sh\nexit 1\n');
+    await chmod(hook, 0o755);
+  }
+};
+
+it('init --remote reports pushed false when the remote rejects the first push on an empty folder', async () => {
+  const fixture = singleFixture();
+  const remote = join(fixture.home, 'reject.git');
+
+  await makeBareRemote(remote, true);
+
+  const report = await fixture.runJson<InitReport>(['init', '--remote', remote]);
+
+  expect(report.pushed).toBe(false);
+  expect(report.remote).toBe(remote);
+});
+
+it('init --remote reports pushed false when the remote rejects the push for an existing store', async () => {
+  const fixture = singleFixture();
+  const remote = join(fixture.home, 'reject.git');
+
+  await makeBareRemote(remote, true);
+  await fixture.runChecked(['init']);
+
+  const report = await fixture.runJson<InitReport>(['init', '--remote', remote]);
+
+  expect(report.pushed).toBe(false);
+});
+
+it('init --remote reports pushed true when the remote takes the push', async () => {
+  const fixture = singleFixture();
+  const remote = join(fixture.home, 'accept.git');
+
+  await makeBareRemote(remote, false);
+
+  const report = await fixture.runJson<InitReport>(['init', '--remote', remote]);
+
+  expect(report.pushed).toBe(true);
+});
+
+it('init --remote refuses a clone that is not a tikk store and leaves the folder free', async () => {
+  const fixture = singleFixture();
+  const other = join(fixture.home, 'other.git');
+  const seed = join(fixture.home, 'seed');
+  const valid = join(fixture.home, 'valid.git');
+
+  await makeBareRemote(other, false);
+  await mkdir(seed, { recursive: true });
+  await gitOutput(seed, ['init', '--quiet', '--initial-branch=main']);
+  await writeFile(join(seed, 'README.md'), 'not a store\n');
+  await gitOutput(seed, ['add', '.']);
+
+  await gitOutput(seed, [
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '--quiet',
+    '-m',
+    'x',
+  ]);
+
+  await gitOutput(seed, ['push', '--quiet', other, 'main']);
+  await makeBareRemote(valid, false);
+
+  const failed = await fixture.run(['init', '--remote', other]);
+
+  expect(failed.exitCode).not.toBe(0);
+  expect(existsSync(fixture.storePath) ? await readdir(fixture.storePath) : []).toEqual([]);
+
+  const report = await fixture.runJson<InitReport>(['init', '--remote', valid]);
+
+  expect(report.created).toBe(true);
+});
+
+const seedNonStoreRemote = async (home: string, name: string): Promise<string> => {
+  const remote = join(home, name);
+  const seed = join(home, `${name}-seed`);
+
+  await makeBareRemote(remote, false);
+  await mkdir(seed, { recursive: true });
+  await gitOutput(seed, ['init', '--quiet', '--initial-branch=main']);
+  await writeFile(join(seed, 'README.md'), 'not a store\n');
+  await gitOutput(seed, ['add', '.']);
+
+  await gitOutput(seed, [
+    '-c',
+    'user.name=t',
+    '-c',
+    'user.email=t@t',
+    'commit',
+    '--quiet',
+    '-m',
+    'x',
+  ]);
+
+  await gitOutput(seed, ['push', '--quiet', remote, 'main']);
+
+  return remote;
+};
+
+it('a failed clone keeps an empty store folder and leaves no temporary folder', async () => {
+  const fixture = singleFixture();
+  const other = await seedNonStoreRemote(fixture.home, 'other.git');
+
+  await mkdir(fixture.storePath, { recursive: true });
+
+  const failed = await fixture.run(['init', '--remote', other]);
+
+  expect(failed.exitCode).not.toBe(0);
+  expect(existsSync(fixture.storePath)).toBe(true);
+  expect(await readdir(fixture.storePath)).toEqual([]);
+  expect((await readdir(fixture.home)).filter((name) => name.startsWith('store.'))).toEqual([]);
+});
+
+it('a file written into the store folder during the clone survives, and init fails', async () => {
+  const fixture = singleFixture();
+  const { remotePath } = clonePair();
+  const template = join(fixture.home, 'template');
+  const previous = process.env['GIT_TEMPLATE_DIR'];
+
+  await fixture.runChecked(['init', '--remote', remotePath]);
+  await rm(fixture.storePath, { recursive: true, force: true });
+  await mkdir(join(template, 'hooks'), { recursive: true });
+  await mkdir(fixture.storePath, { recursive: true });
+
+  const hook = join(template, 'hooks', 'post-checkout');
+
+  await writeFile(hook, `#!/bin/sh\necho mine > '${join(fixture.storePath, 'late.txt')}'\n`);
+  await chmod(hook, 0o755);
+  process.env['GIT_TEMPLATE_DIR'] = template;
+
+  try {
+    const failed = await fixture.run(['init', '--remote', remotePath]);
+
+    expect(failed.exitCode).not.toBe(0);
+  } finally {
+    if (previous === undefined) {
+      delete process.env['GIT_TEMPLATE_DIR'];
+    } else {
+      process.env['GIT_TEMPLATE_DIR'] = previous;
+    }
+  }
+
+  expect(await readFile(join(fixture.storePath, 'late.txt'), 'utf8')).toBe('mine\n');
+  expect((await readdir(fixture.home)).filter((name) => name.startsWith('store.'))).toEqual([]);
 });

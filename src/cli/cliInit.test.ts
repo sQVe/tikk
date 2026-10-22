@@ -67,6 +67,7 @@ it('connects the store to a remote and reports it in json and text', async () =>
     store: '/store',
     created: true,
     remote: 'git@example.com:me/store.git',
+    pushed: true,
   });
 
   expect(output.text).toContain('git@example.com:me/store.git');

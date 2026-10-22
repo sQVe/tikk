@@ -12,13 +12,15 @@ const initWithRemote = async (url: string, effects: CliEffects): Promise<Command
     return initialized;
   }
 
-  const { store, created, remote } = initialized.value;
+  const { store, created, remote, pushed } = initialized.value;
+  const synced = `${createdVerb(created)} the store at ${store}, synced with ${remote}\n`;
+  const unpushed = `${createdVerb(created)} the store at ${store}, but ${remote} did not take the push. Run "tikk sync" to retry.\n`;
 
   return {
     ok: true,
     value: {
-      json: { store, created, remote },
-      text: `${createdVerb(created)} the store at ${store}, synced with ${remote}\n`,
+      json: { store, created, remote, pushed },
+      text: pushed ? synced : unpushed,
     },
   };
 };

@@ -30,13 +30,20 @@ const originUntilAdded = (): ((args: string[]) => ReturnType<typeof gitOutput> |
 it('clones a remote that has main into a missing store folder, with no local commit', async () => {
   const fake = makeSync({
     folder: 'missing',
+    files: { '/store.clone-tmp/tikk.json': { text: '{"version":1}', mtimeMs: 0 } },
     git: (args) => (args.includes('ls-remote') ? gitOutput(remoteMain) : undefined),
   });
 
   const result = await initRemoteStore(fake.functions, root, url);
 
-  expect(result).toEqual({ ok: true, value: { store: root, created: true, remote: url } });
-  expect(fake.commands()).toContain(`clone --quiet --branch main ${url} ${root}`);
+  expect(result).toEqual({
+    ok: true,
+    value: { store: root, created: true, remote: url, pushed: true },
+  });
+
+  expect(fake.commands()).toContain(`clone --quiet --branch main ${url} /store.clone-tmp`);
+  expect(fake.renames).toEqual([['/store.clone-tmp', root]]);
+  expect(fake.removed).toEqual([]);
   expect(fake.initCalls()).toBe(0);
   expect(hasCommand(fake.commands(), 'commit')).toBe(false);
 });
@@ -47,7 +54,11 @@ it('starts the store in an empty folder and pushes it when the remote has no mai
   const result = await initRemoteStore(fake.functions, root, url);
   const push = fake.gitCalls.find((call) => call.args.includes('push'));
 
-  expect(result).toEqual({ ok: true, value: { store: root, created: true, remote: url } });
+  expect(result).toEqual({
+    ok: true,
+    value: { store: root, created: true, remote: url, pushed: true },
+  });
+
   expect(fake.initCalls()).toBe(1);
   expect(fake.commands()).toContain(`remote add origin ${url}`);
   expect(push?.args).toContain('--set-upstream');
@@ -74,7 +85,11 @@ it('adds origin to a local store and merges unrelated histories once', async () 
   const result = await initRemoteStore(fake.functions, root, url);
   const merge = fake.gitCalls.find((call) => call.args.includes('merge'));
 
-  expect(result).toEqual({ ok: true, value: { store: root, created: true, remote: url } });
+  expect(result).toEqual({
+    ok: true,
+    value: { store: root, created: true, remote: url, pushed: true },
+  });
+
   expect(fake.commands()).toContain(`remote add origin ${url}`);
   expect(merge?.args).toContain('--allow-unrelated-histories');
   expect(hasCommand(fake.commands(), 'ls-remote')).toBe(false);
@@ -103,7 +118,11 @@ it('succeeds again on a store that already syncs with the URL', async () => {
 
   const result = await initRemoteStore(fake.functions, root, url);
 
-  expect(result).toEqual({ ok: true, value: { store: root, created: true, remote: url } });
+  expect(result).toEqual({
+    ok: true,
+    value: { store: root, created: true, remote: url, pushed: true },
+  });
+
   expect(hasCommand(fake.commands(), 'remote add')).toBe(false);
 });
 
@@ -147,4 +166,32 @@ it('clones with the network timeout signal', async () => {
   const clone = fake.gitCalls.find((call) => call.args.includes('clone'));
 
   expect(clone?.signal).toBe(true);
+});
+
+it('removes the clone and fails when the remote main is not a tikk store', async () => {
+  const fake = makeSync({
+    folder: 'missing',
+    git: (args) => (args.includes('ls-remote') ? gitOutput(remoteMain) : undefined),
+  });
+
+  const result = await initRemoteStore(fake.functions, root, url);
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.kind).toBe('failed');
+  expect(fake.removed).toEqual(['/store.clone-tmp']);
+  expect(fake.renames).toEqual([]);
+});
+
+it('removes only the temporary folder when the store path is taken during the clone', async () => {
+  const fake = makeSync({
+    folder: 'missing',
+    files: { '/store.clone-tmp/tikk.json': { text: '{"version":1}', mtimeMs: 0 } },
+    renameFails: true,
+    git: (args) => (args.includes('ls-remote') ? gitOutput(remoteMain) : undefined),
+  });
+
+  const result = await initRemoteStore(fake.functions, root, url);
+
+  expect(result.ok).toBe(false);
+  expect(fake.removed).toEqual(['/store.clone-tmp']);
 });

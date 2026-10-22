@@ -293,7 +293,10 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
     initRemoteStore: (url) => {
       remoteUrls.push(url);
 
-      return Promise.resolve({ ok: true, value: { store: '/store', created: true, remote: url } });
+      return Promise.resolve({
+        ok: true,
+        value: { store: '/store', created: true, remote: url, pushed: true },
+      });
     },
     syncStore: () => {
       syncCount += 1;

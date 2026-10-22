@@ -45,7 +45,7 @@ const packagePolicies = new Map<string, PackagePolicy>([
   ['fact', { builtins: false, packages: ['zod'] }],
   ['store', { builtins: true, packages: ['nanoid'] }],
   ['cache', { builtins: true, packages: ['zod'] }],
-  ['sync', builtinsOnly],
+  ['sync', { builtins: true, packages: ['zod'] }],
   ['project', { builtins: true, packages: ['zod'] }],
   ['cli', { builtins: false, packages: ['node:util'] }],
   ['index', builtinsOnly],
