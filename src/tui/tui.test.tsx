@@ -496,6 +496,16 @@ it('moves from the row on screen when j arrives in the commit of a reload', asyn
   expect(edited).toEqual(['demo-3403']);
 });
 
+it('moves one row for each j that arrives before the next commit', async () => {
+  const items = [needView(0, 'A'), needView(1, 'B'), needView(2, 'C')];
+  const setup = await mount(items, { width: 60, height: 8 });
+
+  keysAtCommit.push('j', 'j');
+  await storeChanged(setup);
+
+  expect(selectedLine(setup)).toContain(' C');
+});
+
 it('opens the tree row on screen when e arrives in the commit of a reload that removed the selected row', async () => {
   const groups = treeGroups();
   const [group] = groups;

@@ -7,18 +7,21 @@ import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEf
 import { problemLines, reconcileBeforeRead } from './prReconcile.ts';
 import type { ReconcileProblem } from './prReconcile.ts';
 
-export interface NeedView {
+interface NeedViewBase {
   id: TicketId;
   title: string;
-  reason: NeedItem<CliTicket>['reason'];
   since: string;
   ageSeconds: number;
-  holder?: string;
-  openTasks?: TicketId[];
-  fingerprint?: string;
-  claim?: string;
   parseError?: string;
 }
+
+export type NeedView = NeedViewBase &
+  (
+    | { reason: 'question' | 'submitted' | 'mergedUnverified' }
+    | { reason: 'flagged'; openTasks: TicketId[] }
+    | { reason: 'staleClaim'; holder: string }
+    | { reason: 'blockedFinding'; fingerprint: string; claim: string }
+  );
 
 export interface NeedsReading {
   items: NeedView[];
@@ -45,45 +48,46 @@ const shortAge = (ageSeconds: number): string => {
   return `${Math.floor(ageSeconds / secondsPerDay)}d`;
 };
 
-const reasonFields = (
-  item: NeedItem<CliTicket>,
-): Pick<NeedView, 'holder' | 'openTasks' | 'fingerprint' | 'claim'> => {
+// The JSON key order is id, title, reason, since, ageSeconds, the reason fields, then parseError.
+const itemView = (item: NeedItem<CliTicket>): NeedView => {
+  const { id, frontMatter } = item.ticket;
+  const { title } = frontMatter;
+  const { since, ageSeconds } = item;
+  const parseError = item.ticket.error === null ? {} : { parseError: item.ticket.path };
+
   if (item.reason === 'staleClaim') {
-    return { holder: item.holder };
+    return {
+      id,
+      title,
+      reason: item.reason,
+      since,
+      ageSeconds,
+      holder: item.holder,
+      ...parseError,
+    };
   }
 
   if (item.reason === 'flagged') {
-    return { openTasks: item.openTasks };
+    const { openTasks } = item;
+
+    return { id, title, reason: item.reason, since, ageSeconds, openTasks, ...parseError };
   }
 
   if (item.reason === 'blockedFinding') {
-    return { fingerprint: item.fingerprint, claim: item.claim };
+    const { fingerprint, claim } = item;
+
+    return { id, title, reason: item.reason, since, ageSeconds, fingerprint, claim, ...parseError };
   }
 
-  return {};
+  return { id, title, reason: item.reason, since, ageSeconds, ...parseError };
 };
 
-const itemView = (item: NeedItem<CliTicket>): NeedView => ({
-  id: item.ticket.id,
-  title: item.ticket.frontMatter.title,
-  reason: item.reason,
-  since: item.since,
-  ageSeconds: item.ageSeconds,
-  ...reasonFields(item),
-  ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
-});
-
-const itemSubject = (view: NeedView): string => {
-  if (view.fingerprint !== undefined && view.claim !== undefined) {
-    return `${view.fingerprint}  ${view.claim}`;
-  }
-
-  return view.title;
-};
+const itemSubject = (view: NeedView): string =>
+  view.reason === 'blockedFinding' ? `${view.fingerprint}  ${view.claim}` : view.title;
 
 const itemLine = (view: NeedView): string => {
   const line = `${view.id}  ${view.reason}  ${shortAge(view.ageSeconds)}  ${itemSubject(view)}`;
-  const tasks = view.openTasks === undefined ? '' : `  ${view.openTasks.join(' ')}`;
+  const tasks = view.reason === 'flagged' ? `  ${view.openTasks.join(' ')}` : '';
   const suffix = view.parseError === undefined ? '' : `  parseError ${view.parseError}`;
 
   return `${line}${tasks}${suffix}\n`;

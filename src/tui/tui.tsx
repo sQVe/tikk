@@ -7,9 +7,10 @@ import type { ReactNode } from 'react';
 
 import type { CliFailure, NeedsReading, TreeGroup } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
-import { HomeView, singleLine } from './homeView.tsx';
-import { TreeView, treeRowsOf } from './treeView.tsx';
-import type { TreeRow } from './treeView.tsx';
+import { homeRowsOf } from './homeView.tsx';
+import { RowList, singleLine } from './rowList.tsx';
+import type { ListRow } from './rowList.tsx';
+import { treeRowsOf } from './treeView.tsx';
 import { viewCommands } from './viewKeymap.ts';
 import type { ViewIntent } from './viewKeymap.ts';
 
@@ -36,26 +37,50 @@ type Loaded<Value> =
 
 type ViewName = 'home' | 'tree';
 
-interface Row {
-  key: string;
-  id: string | null;
-}
-
 interface Selection {
   index: number;
   key: string | undefined;
 }
 
+interface ListState<Value> {
+  loaded: Loaded<Value>;
+  rows: ListRow[];
+  selection: Selection;
+}
+
 const errorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
 
+const clampedIndex = (index: number, count: number): number =>
+  Math.max(0, Math.min(count - 1, index));
+
+// The selected row stays selected after a reload while it exists. Otherwise the index stays.
+const resolvedSelection = (selection: Selection, rows: readonly ListRow[]): Selection => {
+  const found = rows.findIndex((row) => row.key === selection.key);
+  const index = found === -1 ? clampedIndex(selection.index, rows.length) : found;
+
+  return { index, key: rows[index]?.key };
+};
+
+const loadedState = <Value,>(
+  current: ListState<Value>,
+  loaded: Loaded<Value>,
+  rows: ListRow[],
+): ListState<Value> => ({ loaded, rows, selection: resolvedSelection(current.selection, rows) });
+
 // Each change starts a new load. The session runs loads in order, so the last result is the newest.
-const useLoaded = <Value,>(
+// A load commits its rows and the selection resolved against them in one update.
+const useList = <Value,>(
   enabled: boolean,
   load: () => Promise<Result<Value, CliFailure>>,
   generation: number,
-): Loaded<Value> => {
-  const [loaded, setLoaded] = useState<Loaded<Value>>({ state: 'loading' });
+  rowsOf: (value: Value) => ListRow[],
+) => {
+  const [state, setState] = useState<ListState<Value>>({
+    loaded: { state: 'loading' },
+    rows: [],
+    selection: { index: 0, key: undefined },
+  });
 
   useEffect(() => {
     if (!enabled) {
@@ -64,18 +89,28 @@ const useLoaded = <Value,>(
 
     load()
       .then((result) => {
-        setLoaded(
+        setState((current) =>
           result.ok
-            ? { state: 'loaded', value: result.value }
-            : { state: 'failed', message: result.reason.message },
+            ? loadedState(current, { state: 'loaded', value: result.value }, rowsOf(result.value))
+            : loadedState(current, { state: 'failed', message: result.reason.message }, []),
         );
       })
       .catch((error: unknown) => {
-        setLoaded({ state: 'failed', message: errorMessage(error, 'The list did not load.') });
-      });
-  }, [enabled, load, generation]);
+        const message = errorMessage(error, 'The list did not load.');
 
-  return loaded;
+        setState((current) => loadedState(current, { state: 'failed', message }, []));
+      });
+  }, [enabled, load, generation, rowsOf]);
+
+  const move = (step: number) => {
+    setState((current) => {
+      const index = clampedIndex(current.selection.index + step, current.rows.length);
+
+      return { ...current, selection: { index, key: current.rows[index]?.key } };
+    });
+  };
+
+  return [state, move] as const;
 };
 
 const useGeneration = (onChange: TuiEffects['onChange']): number => {
@@ -108,52 +143,7 @@ const homeStatusOf = (loaded: Loaded<NeedsReading>): string => {
   return loaded.value.reconcileProblems.map((problem) => problem.message).join('; ');
 };
 
-const homeRowsOf = (loaded: Loaded<NeedsReading>): Row[] =>
-  loaded.state === 'loaded'
-    ? loaded.value.items.map((item) => ({ key: `${item.id}:${item.reason}`, id: item.id }))
-    : [];
-
-const treeRowsOfLoaded = (loaded: Loaded<TreeGroup[]>): TreeRow[] =>
-  loaded.state === 'loaded' ? treeRowsOf(loaded.value) : [];
-
-const clampedIndex = (index: number, count: number): number =>
-  Math.max(0, Math.min(count - 1, index));
-
-// The selected row stays selected after a reload while it exists. Otherwise the index stays.
-const resolvedSelection = (selection: Selection, rows: readonly Row[]): Selection => {
-  const found = rows.findIndex((row) => row.key === selection.key);
-  const index = found === -1 ? clampedIndex(selection.index, rows.length) : found;
-
-  return { index, key: rows[index]?.key };
-};
-
-const sameSelection = (first: Selection, second: Selection): boolean =>
-  first.index === second.index && first.key === second.key;
-
-// Stores the selection as shown, so the next reload starts from the row the user sees.
-const useResolvedSelection = (rowsByView: Record<ViewName, readonly Row[]>) => {
-  const [selection, setSelection] = useState<Record<ViewName, Selection>>({
-    home: { index: 0, key: undefined },
-    tree: { index: 0, key: undefined },
-  });
-
-  const resolved = {
-    home: resolvedSelection(selection.home, rowsByView.home),
-    tree: resolvedSelection(selection.tree, rowsByView.tree),
-  };
-
-  const homeChanged = !sameSelection(resolved.home, selection.home);
-  const treeChanged = !sameSelection(resolved.tree, selection.tree);
-
-  // A key can change the selection before this effect runs, and that change wins.
-  useEffect(() => {
-    if (homeChanged || treeChanged) {
-      setSelection((current) => (current === selection ? resolved : current));
-    }
-  });
-
-  return [resolved, setSelection] as const;
-};
+const homeRowsOfReading = (reading: NeedsReading): ListRow[] => homeRowsOf(reading.items);
 
 const Screen = ({ effects, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
   const [view, setView] = useState<ViewName>('home');
@@ -162,19 +152,12 @@ const Screen = ({ effects, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
   const [notice, setNotice] = useState('');
   const { height } = useTerminalDimensions();
   const generation = useGeneration(effects.onChange);
-  const home = useLoaded(true, effects.load, generation);
-  const tree = useLoaded(treeRequested, effects.loadTree, generation);
-  const treeRows = treeRowsOfLoaded(tree);
-  const homeRows = homeRowsOf(home);
-  const [selection, setSelection] = useResolvedSelection({ home: homeRows, tree: treeRows });
-  const rows = view === 'home' ? homeRows : treeRows;
-  const selected = selection[view].index;
-
-  const move = (step: number) => {
-    const index = clampedIndex(selected + step, rows.length);
-
-    setSelection((current) => ({ ...current, [view]: { index, key: rows[index]?.key } }));
-  };
+  const [home, moveHome] = useList(true, effects.load, generation, homeRowsOfReading);
+  const [tree, moveTree] = useList(treeRequested, effects.loadTree, generation, treeRowsOf);
+  const current = view === 'home' ? home : tree;
+  const { rows } = current;
+  const selected = current.selection.index;
+  const move = view === 'home' ? moveHome : moveTree;
 
   const edit = (id: string) => {
     effects
@@ -236,16 +219,18 @@ const Screen = ({ effects, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
   );
 
   const listHeight = Math.max(1, height - 1);
-  const viewStatus = view === 'home' ? homeStatusOf(home) : failureStatus(tree);
+  const viewStatus = view === 'home' ? homeStatusOf(home.loaded) : failureStatus(tree.loaded);
   const status = notice === '' ? viewStatus : notice;
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      {view === 'home' && home.state === 'loaded' ? (
-        <HomeView items={home.value.items} selected={selected} height={listHeight} />
-      ) : null}
-      {view === 'tree' && tree.state === 'loaded' ? (
-        <TreeView rows={treeRows} selected={selected} height={listHeight} />
+      {current.loaded.state === 'loaded' ? (
+        <RowList
+          rows={rows}
+          selected={selected}
+          height={listHeight}
+          emptyMessage={view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'}
+        />
       ) : null}
       <text wrapMode="none" truncate height={1}>
         {singleLine(status)}
