@@ -26,6 +26,12 @@ describe('redactSecrets', () => {
     expect(redactSecrets(`before ${secret} after`)).toBe('before [redacted] after');
   });
 
+  it('replaces the credentials of a URL and keeps its host and path', () => {
+    expect(redactSecrets('https://x-access-token:abc123@github.com/o/r.git')).toBe(
+      'https://[redacted]@github.com/o/r.git',
+    );
+  });
+
   it('leaves text without secrets unchanged', () => {
     expect(redactSecrets('plain log line')).toBe('plain log line');
   });

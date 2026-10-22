@@ -6,6 +6,7 @@ const secretPatterns: RegExp[] = [
   /\bxox[a-z]-[A-Za-z0-9-]{10,}/g,
   /\bbearer\s+[A-Za-z0-9._~+/=-]{10,}/gi,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /(?<=:\/\/)[^\s/@]+(?=@)/g,
 ];
 
 export const redactSecrets = (text: string): string =>

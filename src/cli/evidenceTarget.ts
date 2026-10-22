@@ -1,3 +1,4 @@
+import { redactSecrets } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments } from './cliArguments.ts';
@@ -50,7 +51,7 @@ export const readEvidenceTarget = (
   return {
     ok: true,
     value: {
-      repository: repository.value,
+      repository: redactSecrets(repository.value),
       head: head.value,
       base: base.value,
       changeHash: changeHash.value,

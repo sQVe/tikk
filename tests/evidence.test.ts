@@ -135,6 +135,31 @@ it('marks a check stale for its head when the given change hash differs', async 
   expect(edited.checks.map((check) => check.current)).toEqual([false]);
 });
 
+it('stores a check without the credentials of its repository URL', async () => {
+  const id = await createTask();
+  const flags = targetFlags('aaa').with(1, 'https://user:abc123secret@github.com/o/r.git');
+
+  const added = await cli().runJson<{ check: { target: { repository: string } } }>([
+    'check',
+    'add',
+    id,
+    '--command',
+    'bun run check',
+    '--exit-code',
+    '0',
+    ...flags,
+  ]);
+
+  const files = await Array.fromAsync(new Bun.Glob('**/*.jsonl').scan({ cwd: cli().storePath }));
+
+  const stored = await Promise.all(
+    files.map((file) => Bun.file(join(cli().storePath, file)).text()),
+  );
+
+  expect(added.check.target.repository).toBe('https://[redacted]@github.com/o/r.git');
+  expect(stored.join('')).not.toContain('abc123secret');
+});
+
 it('stores a redacted check log by hash', async () => {
   const id = await createTask();
   const logFile = join(cli().home, 'check.log');
