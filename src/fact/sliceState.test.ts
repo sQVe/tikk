@@ -180,6 +180,34 @@ describe('deriveSliceState', () => {
     expect(result.state).toBe('mergedUnverified');
   });
 
+  it('derives mergedUnverified from an audit that mixes met and not-met verdicts', () => {
+    const audit = auditFact('aaa', 'met', {
+      at: '2026-10-20T11:00:00.000Z',
+      verdicts: [
+        { criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' },
+        { criterion: 'extra', verdict: 'not-met', evidence: 'Failed.' },
+      ],
+    });
+
+    const result = derive(slice, [slice], [prFact(), audit], now);
+
+    expect(result.state).toBe('mergedUnverified');
+  });
+
+  it('follows the newest linked PR over a merged fact of another PR', () => {
+    const other = prFact({
+      number: 8,
+      state: 'open',
+      mergeCommit: undefined,
+      inTrunk: false,
+      at: '2026-10-20T11:00:00.000Z',
+    });
+
+    const result = derive(slice, [slice], [prFact(), other], now);
+
+    expect(result).toMatchObject({ state: 'inReview', pr: { number: 8 } });
+  });
+
   it('keeps a merge confirmed in trunk over a newer fact that says it is not', () => {
     const outsideTrunk = prFact({ inTrunk: false, at: '2026-10-20T11:00:00.000Z' });
     const result = derive(slice, [slice], [prFact(), outsideTrunk], now);

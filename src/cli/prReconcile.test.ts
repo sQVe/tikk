@@ -111,6 +111,22 @@ it('does not call gh for a PR that is merged in trunk', async () => {
   expect(ghCalls).toEqual([]);
 });
 
+it('appends a fact when only the trunk membership of a merged PR changes', async () => {
+  const outsideTrunk = prFact('demo-3467', {
+    state: 'merged',
+    base: 'release',
+    mergeCommit: 'merge1',
+    inTrunk: false,
+  });
+
+  const { appends } = await reconcile(['demo-3467'], [outsideTrunk], {
+    7: { state: 'MERGED', base: 'release', mergeCommit: 'merge1', compare: 'behind' },
+  });
+
+  expect(appends).toHaveLength(1);
+  expect(appends[0]?.fact).toMatchObject({ base: 'release', inTrunk: true });
+});
+
 it('marks a PR merged into another branch in trunk when the compare says behind', async () => {
   const { appends } = await reconcile(['demo-3467'], [prFact('demo-3467', {})], {
     7: { state: 'MERGED', base: 'release', mergeCommit: 'merge1', compare: 'behind' },
