@@ -1,15 +1,17 @@
 import type { Fact } from './factLine.ts';
 
-export type CheckFact = Extract<Fact, { kind: 'check' }>;
+type EvidenceKind = 'check' | 'qa';
 
-export type CheckRecord = CheckFact & { current: boolean };
+type EvidenceFact<Kind extends EvidenceKind> = Extract<Fact, { kind: Kind }>;
+
+export type EvidenceRecord<Kind extends EvidenceKind> = EvidenceFact<Kind> & { current: boolean };
 
 export interface CodeState {
   head: string;
   changeHash?: string;
 }
 
-const sawState = (fact: CheckFact, state: CodeState): boolean => {
+const sawState = (fact: Extract<Fact, { target: unknown }>, state: CodeState): boolean => {
   if (fact.target.head !== state.head) {
     return false;
   }
@@ -17,8 +19,25 @@ const sawState = (fact: CheckFact, state: CodeState): boolean => {
   return state.changeHash === undefined || fact.target.changeHash === state.changeHash;
 };
 
-export const selectChecks = (facts: Fact[], ticketId: string, state: CodeState): CheckRecord[] =>
+const selectEvidence = <Kind extends EvidenceKind>(
+  facts: Fact[],
+  kind: Kind,
+  ticketId: string,
+  state: CodeState,
+): EvidenceRecord<Kind>[] =>
   facts
-    .filter((fact): fact is CheckFact => fact.kind === 'check' && fact.ticket === ticketId)
+    .filter((fact): fact is EvidenceFact<Kind> => fact.kind === kind && fact.ticket === ticketId)
     .toReversed()
     .map((fact) => Object.assign({}, fact, { current: sawState(fact, state) }));
+
+export const selectChecks = (
+  facts: Fact[],
+  ticketId: string,
+  state: CodeState,
+): EvidenceRecord<'check'>[] => selectEvidence(facts, 'check', ticketId, state);
+
+export const selectQaRuns = (
+  facts: Fact[],
+  ticketId: string,
+  state: CodeState,
+): EvidenceRecord<'qa'>[] => selectEvidence(facts, 'qa', ticketId, state);

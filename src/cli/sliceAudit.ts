@@ -18,6 +18,8 @@ interface AuditArguments {
   path: string;
 }
 
+type QaFact = Extract<Fact, { kind: 'qa' }>;
+
 const usage =
   'Usage: tikk audit <slice> --repository <owner/name> --head <sha> --base <sha> --change-hash <hash> --verdicts-file <path> [--json]';
 
@@ -73,6 +75,57 @@ const checkCriteria = (slice: CliTicket, audit: AuditFact): string | undefined =
   return undefined;
 };
 
+const checkCitation = (
+  slice: CliTicket,
+  audit: AuditFact,
+  verdict: AuditFact['verdicts'][number],
+  run: QaFact | undefined,
+  runId: string,
+): string | undefined => {
+  if (run === undefined) {
+    return `QA run ${runId} is not a QA run of slice ${slice.id}.`;
+  }
+
+  if (run.target.repository !== audit.repository || run.target.head !== audit.head) {
+    return `QA run ${runId} is for another repository or head than this audit.`;
+  }
+
+  const scenarios = run.scenarios.filter((scenario) =>
+    scenario.criteria.includes(verdict.criterion),
+  );
+
+  if (scenarios.length === 0) {
+    return `QA run ${runId} has no scenario for criterion ${verdict.criterion}.`;
+  }
+
+  const unmet = scenarios.some((scenario) => scenario.verdict !== 'pass');
+
+  if (verdict.verdict === 'met' && unmet) {
+    return `QA run ${runId} has a scenario for ${verdict.criterion} that did not pass, so the verdict cannot be met.`;
+  }
+
+  return undefined;
+};
+
+const checkCitations = (slice: CliTicket, audit: AuditFact, facts: Fact[]): string | undefined => {
+  const runs = facts.filter(
+    (fact): fact is QaFact => fact.kind === 'qa' && fact.ticket === slice.id,
+  );
+
+  for (const verdict of audit.verdicts) {
+    for (const runId of verdict.qa ?? []) {
+      const run = runs.find((candidate) => candidate.run === runId);
+      const problem = checkCitation(slice, audit, verdict, run, runId);
+
+      if (problem !== undefined) {
+        return problem;
+      }
+    }
+  }
+
+  return undefined;
+};
+
 const appendAudit = async (
   input: CommandInput,
   slice: CliTicket,
@@ -83,6 +136,18 @@ const appendAudit = async (
 
   if (problem !== undefined) {
     return invalidArguments(problem);
+  }
+
+  const facts = await input.session.listFacts([slice.id]);
+
+  if (!facts.ok) {
+    return storeFailure(facts.reason.message);
+  }
+
+  const citation = checkCitations(slice, audit, facts.value);
+
+  if (citation !== undefined) {
+    return invalidArguments(citation);
   }
 
   const appended = await input.session.appendFact(machine, audit);

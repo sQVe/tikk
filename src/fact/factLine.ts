@@ -86,6 +86,7 @@ const auditVerdictSchema = z.strictObject({
   criterion: z.string().min(1),
   verdict: z.enum(['met', 'not-met', 'not-run', 'deferred']),
   evidence: z.string().min(1),
+  qa: z.array(z.string().min(1)).min(1).optional(),
 });
 
 const auditSchema = z.strictObject({
@@ -117,6 +118,24 @@ const checkSchema = z.strictObject({
     .string()
     .regex(/^[0-9a-f]{64}$/, 'Log must be a SHA-256 hash in lower-case hex.')
     .optional(),
+});
+
+const qaScenarioSchema = z.strictObject({
+  name: nonEmpty,
+  criteria: z.array(nonEmpty).min(1),
+  observed: nonEmpty,
+  verdict: z.enum(['pass', 'fail', 'blocked']),
+});
+
+const qaSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('qa'),
+  // An audit names its repository as owner/name and cites only runs of the same repository.
+  target: targetSchema.extend({ repository: repositorySchema }),
+  run: z.string().regex(/^[0-9a-f]{12}$/, 'Run must be 12 lower-case hex characters.'),
+  scenarios: z.array(qaScenarioSchema).min(1),
+  artifacts: z.array(z.string()),
+  gaps: z.array(z.string()),
 });
 
 export const reviewFindingSchema = z.strictObject({
@@ -161,6 +180,7 @@ const factSchema = z.discriminatedUnion('kind', [
   prSchema,
   auditSchema,
   checkSchema,
+  qaSchema,
   reviewSchema,
   findingSchema,
 ]);

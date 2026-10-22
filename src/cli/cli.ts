@@ -3,10 +3,12 @@ import { sweepArchive } from './archiveSweep.ts';
 import { checkCommand } from './checkCommand.ts';
 import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
+import { coverageCommand } from './coverageCommand.ts';
 import { findingCommand } from './findingCommand.ts';
 import { needsCommand } from './needsCommand.ts';
 import { prCommand } from './prLink.ts';
 import { reconcileCommand } from './prReconcile.ts';
+import { qaCommand } from './qaCommand.ts';
 import { readyCommand } from './readyCommand.ts';
 import { reviewCommand } from './reviewCommand.ts';
 import { sliceAudit } from './sliceAudit.ts';
@@ -53,10 +55,12 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['check', checkCommand],
   ['review', reviewCommand],
   ['finding', findingCommand],
+  ['coverage', coverageCommand],
+  ['qa', qaCommand],
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

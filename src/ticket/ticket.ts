@@ -13,6 +13,8 @@ export {
 export { ticketFrontMatterSchema, type TicketFrontMatter } from './ticketSchema.ts';
 export { createTicketSlug } from './ticketSlug.ts';
 
+export { findCoverageGaps, type CoverageGap } from './ticketCoverage.ts';
+
 export {
   checkTicketTree,
   collectTicketTree,

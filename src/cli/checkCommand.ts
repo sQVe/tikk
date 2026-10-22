@@ -3,11 +3,15 @@ import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments, stringValue } from './cliArguments.ts';
 import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
-import { appendEvidence, readEvidenceTarget, targetOptions } from './evidenceTarget.ts';
+import {
+  appendEvidence,
+  readEvidenceListing,
+  readEvidenceTarget,
+  targetOptions,
+} from './evidenceTarget.ts';
 import { readTarget, requireValue } from './taskCommand.ts';
 import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
-import { findTicket, storeFailure } from './ticketView.ts';
 
 const addUsage =
   'Usage: tikk check add <id> --command <c> --exit-code <n> --repository <r> --head <h> --base <b> --change-hash <c> [--log-file <path>] [--json]';
@@ -131,44 +135,14 @@ const checkAdd = async (input: CommandInput): Promise<CommandResult> => {
 };
 
 const checkList = async (input: CommandInput): Promise<CommandResult> => {
-  const target = readTarget(
-    input.args,
-    { head: { type: 'string' }, 'change-hash': { type: 'string' } },
-    listUsage,
-  );
+  const listing = await readEvidenceListing(input, listUsage);
 
-  if (!target.ok) {
-    return target;
+  if (!listing.ok) {
+    return listing;
   }
 
-  const head = requireValue(target.value.values, 'head', listUsage);
-
-  if (!head.ok) {
-    return head;
-  }
-
-  const changeHash = stringValue(target.value.values, 'change-hash');
-
-  if (changeHash === '') {
-    return invalidArguments(`Give a value for --change-hash. ${listUsage}`);
-  }
-
-  const ticket = findTicket(input.session, target.value.rawId);
-
-  if (!ticket.ok) {
-    return ticket;
-  }
-
-  const facts = await input.session.listFacts([ticket.value.id]);
-
-  if (!facts.ok) {
-    return storeFailure(facts.reason.message);
-  }
-
-  const checks = selectChecks(facts.value, ticket.value.id, {
-    head: head.value,
-    ...(changeHash === undefined ? {} : { changeHash }),
-  });
+  const { ticketId, facts, state } = listing.value;
+  const checks = selectChecks(facts, ticketId, state);
 
   const lines = checks.map((check) => {
     const mark = check.current ? 'current' : 'stale';

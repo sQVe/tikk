@@ -1,16 +1,24 @@
 import { redactSecrets } from '../fact/fact.ts';
-import type { Fact } from '../fact/fact.ts';
+import type { CodeState, Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
-import { invalidArguments } from './cliArguments.ts';
+import type { TicketId } from '../ticket/ticket.ts';
+import { invalidArguments, stringValue } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput } from './cliEffects.ts';
-import { requireValue } from './taskCommand.ts';
+import { readTarget, requireValue } from './taskCommand.ts';
+import { findTicket } from './ticketView.ts';
 
 export interface EvidenceTarget {
   repository: string;
   head: string;
   base: string;
   changeHash: string;
+}
+
+export interface EvidenceListing {
+  ticketId: TicketId;
+  facts: Fact[];
+  state: CodeState;
 }
 
 export const targetOptions = {
@@ -57,6 +65,49 @@ export const readEvidenceTarget = (
       changeHash: changeHash.value,
     },
   };
+};
+
+export const readEvidenceListing = async (
+  input: CommandInput,
+  usage: string,
+): Promise<Result<EvidenceListing, CliFailure>> => {
+  const target = readTarget(
+    input.args,
+    { head: { type: 'string' }, 'change-hash': { type: 'string' } },
+    usage,
+  );
+
+  if (!target.ok) {
+    return target;
+  }
+
+  const head = requireValue(target.value.values, 'head', usage);
+
+  if (!head.ok) {
+    return head;
+  }
+
+  const changeHash = stringValue(target.value.values, 'change-hash');
+
+  if (changeHash === '') {
+    return invalidArguments(`Give a value for --change-hash. ${usage}`);
+  }
+
+  const ticket = findTicket(input.session, target.value.rawId);
+
+  if (!ticket.ok) {
+    return ticket;
+  }
+
+  const facts = await input.session.listFacts([ticket.value.id]);
+
+  if (!facts.ok) {
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+  }
+
+  const state = { head: head.value, ...(changeHash === undefined ? {} : { changeHash }) };
+
+  return { ok: true, value: { ticketId: ticket.value.id, facts: facts.value, state } };
 };
 
 export const appendEvidence = async (
