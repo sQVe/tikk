@@ -120,6 +120,17 @@ it('submits past a failed tree check with --force --reason and records the reaso
   });
 });
 
+it('refuses --force without --reason on a sound tree and changes nothing', async () => {
+  const { fakeSession, result } = await run(
+    taskSubmit,
+    ['demo-3467', '--holder', 'agent', '--force'],
+    { facts: [claimBy('agent')] },
+  );
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
+});
+
 it('refuses --force with an empty --reason and changes nothing', async () => {
   const { fakeSession, result } = await run(
     taskSubmit,

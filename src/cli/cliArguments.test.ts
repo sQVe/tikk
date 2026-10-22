@@ -1,9 +1,11 @@
 import { expect, it } from 'bun:test';
 
 import {
+  forceOptions,
   invalidArguments,
   parseCommandArguments,
   readBodyFile,
+  readForce,
   stringValue,
 } from './cliArguments.ts';
 import { makeEffects } from './cliHarness.ts';
@@ -77,5 +79,21 @@ it('fails with a message that names a body file it cannot read', async () => {
   if (!result.ok) {
     expect(result.reason.code).toBe('invalidArguments');
     expect(result.reason.message).toContain('/missing.md');
+  }
+});
+
+it('refuses --force with a blank --reason', () => {
+  const parsed = parseCommandArguments(['--force', '--reason', '   '], forceOptions);
+
+  expect(parsed.ok).toBe(true);
+
+  if (parsed.ok) {
+    const forced = readForce(parsed.value.values);
+
+    expect(forced.ok).toBe(false);
+
+    if (!forced.ok) {
+      expect(forced.reason.code).toBe('invalidArguments');
+    }
   }
 });

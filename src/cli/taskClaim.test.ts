@@ -382,3 +382,12 @@ it('refuses --reason without --force and changes nothing', async () => {
   expect(failureOf(result).code).toBe('invalidArguments');
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
+
+it('reports a storeError when the facts of the task cannot be read', async () => {
+  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+    session: { overrides: { listStateFacts: () => failed('The facts are damaged.') } },
+  });
+
+  expect(failureOf(result).code).toBe('storeError');
+  expect(fakeSession.appends).toEqual([]);
+});
