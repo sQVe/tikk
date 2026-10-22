@@ -130,7 +130,8 @@ const qaScenarioSchema = z.strictObject({
 const qaSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('qa'),
-  target: targetSchema,
+  // An audit names its repository as owner/name and cites only runs of the same repository.
+  target: targetSchema.extend({ repository: repositorySchema }),
   run: z.string().regex(/^[0-9a-f]{12}$/, 'Run must be 12 lower-case hex characters.'),
   scenarios: z.array(qaScenarioSchema).min(1),
   artifacts: z.array(z.string()),

@@ -124,3 +124,11 @@ it('marks each run current or stale in the text listing', async () => {
     ].toSorted(),
   );
 });
+
+it('refuses a repository that is not owner/name and appends nothing', async () => {
+  const flags = addFlags('head1').map((flag) => (flag === 'acme/app' ? 'app' : flag));
+  const { result, fakeSession } = await run(flags, {});
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(fakeSession.appends).toEqual([]);
+});
