@@ -65,10 +65,14 @@ const aliasSchema = z.strictObject({
   from: ticketIdSchema,
 });
 
+const repositorySchema = z
+  .string()
+  .regex(/^[^/\s]+\/[^/\s]+$/, 'Repository must look like owner/name.');
+
 const prSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('pr'),
-  repository: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'Repository must look like owner/name.'),
+  repository: repositorySchema,
   number: z.number().int().positive(),
   state: z.enum(['open', 'closed', 'merged']),
   base: z.string().min(1),
@@ -87,6 +91,8 @@ const auditVerdictSchema = z.strictObject({
 const auditSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('audit'),
+  repository: repositorySchema,
+  changeHash: z.string().min(1),
   head: z.string().min(1),
   base: z.string().min(1),
   verdicts: z.array(auditVerdictSchema).min(1),

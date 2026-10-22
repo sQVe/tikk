@@ -98,6 +98,8 @@ const mergedFact = makeFact({
 const auditFact = makeFact({
   ticket: 'demo-3469',
   kind: 'audit',
+  repository: 'sqve/tikk',
+  changeHash: 'hash1',
   head: 'aaa',
   base: 'main',
   verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],

@@ -9,6 +9,8 @@ const line = (extra: Record<string, unknown>, overrides: Record<string, unknown>
 
 const auditExtra = (verdict: string): Record<string, unknown> => ({
   kind: 'audit',
+  repository: 'sqve/tikk',
+  changeHash: 'hash1',
   head: 'aaa',
   base: 'main',
   verdicts: [{ criterion: 'It works.', verdict, evidence: 'Ran it.' }],
@@ -56,6 +58,14 @@ describe('parseFactLine', () => {
     const audit = parseFactLine(line(auditExtra('met')));
 
     expect([pr.ok, audit.ok]).toEqual([true, true]);
+  });
+
+  it('rejects an audit fact without a change hash or with a malformed repository', () => {
+    const { changeHash: _hash, ...withoutHash } = auditExtra('met');
+
+    expect(parseFactLine(line(withoutHash)).ok).toBe(false);
+    expect(parseFactLine(line({ ...auditExtra('met'), changeHash: '' })).ok).toBe(false);
+    expect(parseFactLine(line({ ...auditExtra('met'), repository: 'tikk' })).ok).toBe(false);
   });
 
   it('rejects an audit fact whose verdict is not one of the four values', () => {

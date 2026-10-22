@@ -24,6 +24,8 @@ const prFact = (extra: Record<string, unknown> = {}): Fact =>
 const auditFact = (head: string, verdict = 'met', extra: Record<string, unknown> = {}): Fact =>
   makeFact('3469', {
     kind: 'audit',
+    repository: 'sqve/tikk',
+    changeHash: 'hash1',
     head,
     base: 'main',
     verdicts: [{ criterion: 'It works.', verdict, evidence: 'Ran it.' }],
@@ -136,6 +138,8 @@ describe('deriveSliceState', () => {
 
     const audit = makeFact('3469', {
       kind: 'audit',
+      repository: 'sqve/tikk',
+      changeHash: 'hash1',
       head: 'aaa',
       base: 'main',
       verdicts: [{ criterion: 'works', verdict: 'met', evidence: 'Ran it.' }],
@@ -143,6 +147,12 @@ describe('deriveSliceState', () => {
 
     expect(derive(audited, [audited], [prFact(), audit], now).state).toBe('done');
     expect(derive(grown, [grown], [prFact(), audit], now).state).toBe('mergedUnverified');
+  });
+
+  it('derives mergedUnverified from an all-met audit for another repository with the same head', () => {
+    const audit = auditFact('aaa', 'met', { repository: 'other/repo' });
+
+    expect(derive(slice, [slice], [prFact(), audit], now).state).toBe('mergedUnverified');
   });
 
   it('derives mergedUnverified from an all-met audit for another head', () => {

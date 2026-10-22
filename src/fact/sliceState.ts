@@ -57,7 +57,9 @@ const winningPrFact = (own: Fact[]): PrFact | undefined => {
 const isAuditFact = (fact: Fact): fact is AuditFact => fact.kind === 'audit';
 
 const decidingAudit = (own: Fact[], pr: PrFact): AuditFact | undefined =>
-  own.filter(isAuditFact).findLast((fact) => fact.head === pr.head);
+  own
+    .filter(isAuditFact)
+    .findLast((fact) => fact.head === pr.head && fact.repository === pr.repository);
 
 const meetsEveryCriterion = (slice: SliceTicket, audit: AuditFact): boolean => {
   const met = new Set(

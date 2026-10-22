@@ -78,9 +78,19 @@ const audit = async (
   return { result, appends: fakeSession.appends };
 };
 
-const fullArguments = ['demo-3467', '--head', 'head1', '--base', 'main', '--verdicts-file'].concat(
+const fullArguments = [
+  'demo-3467',
+  '--repository',
+  'acme/app',
+  '--head',
+  'head1',
+  '--base',
+  'main',
+  '--change-hash',
+  'hash1',
+  '--verdicts-file',
   verdictsPath,
-);
+];
 
 it('appends one audit fact and shows the slice as done', async () => {
   const { result, appends } = await audit(fullArguments);
@@ -91,6 +101,8 @@ it('appends one audit fact and shows the slice as done', async () => {
   expect(appends[0]?.fact).toMatchObject({
     kind: 'audit',
     ticket: 'demo-3467',
+    repository: 'acme/app',
+    changeHash: 'hash1',
     head: 'head1',
     base: 'main',
     verdicts: [
@@ -100,16 +112,27 @@ it('appends one audit fact and shows the slice as done', async () => {
   });
 });
 
-it.each([
-  ['--head', ['demo-3467', '--base', 'main', '--verdicts-file', verdictsPath]],
-  ['--base', ['demo-3467', '--head', 'head1', '--verdicts-file', verdictsPath]],
-  ['--verdicts-file', ['demo-3467', '--head', 'head1', '--base', 'main']],
-])('refuses a missing %s with the usage', async (_flag, args) => {
+it.each(['--repository', '--head', '--base', '--change-hash', '--verdicts-file'])(
+  'refuses a missing %s with the usage',
+  async (flag) => {
+    const at = fullArguments.indexOf(flag);
+    const args = fullArguments.filter((_value, index) => index !== at && index !== at + 1);
+    const { result, appends } = await audit(args);
+    const failure = failureOf(result);
+
+    expect(failure.code).toBe('invalidArguments');
+    expect(failure.message).toContain('Usage: tikk audit');
+    expect(appends).toEqual([]);
+  },
+);
+
+it('refuses a malformed repository and appends nothing', async () => {
+  const args = fullArguments.map((value) => (value === 'acme/app' ? 'app' : value));
   const { result, appends } = await audit(args);
   const failure = failureOf(result);
 
   expect(failure.code).toBe('invalidArguments');
-  expect(failure.message).toContain('Usage: tikk audit');
+  expect(failure.message).toContain('owner/name');
   expect(appends).toEqual([]);
 });
 

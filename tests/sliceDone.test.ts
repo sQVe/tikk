@@ -75,7 +75,11 @@ const createSlice = async (): Promise<string> => {
 
 const showSlice = (id: string): Promise<SliceShow> => cli().runJson<SliceShow>(['show', id]);
 
-const auditAllMet = async (id: string, head: string): Promise<SliceShow> => {
+const auditAllMet = async (
+  id: string,
+  head: string,
+  repository = 'acme/app',
+): Promise<SliceShow> => {
   const verdicts = await writeFixtureFile(
     'verdicts.yaml',
     '- criterion: works\n  verdict: met\n  evidence: The check passed\n',
@@ -84,10 +88,14 @@ const auditAllMet = async (id: string, head: string): Promise<SliceShow> => {
   return cli().runJson<SliceShow>([
     'audit',
     id,
+    '--repository',
+    repository,
     '--head',
     head,
     '--base',
     'main',
+    '--change-hash',
+    'hash1',
     '--verdicts-file',
     verdicts,
   ]);
@@ -134,6 +142,15 @@ it('keeps the slice unverified when the audit is for another head', async () => 
 
   await cli().runJson(['pr', 'link', id, prUrl]);
   await auditAllMet(id, 'older-head');
+
+  expect((await showSlice(id)).state).toBe('mergedUnverified');
+});
+
+it('keeps the slice unverified when the audit is for another repository', async () => {
+  const id = await createSlice();
+
+  await cli().runJson(['pr', 'link', id, prUrl]);
+  await auditAllMet(id, 'head1', 'other/repo');
 
   expect((await showSlice(id)).state).toBe('mergedUnverified');
 });

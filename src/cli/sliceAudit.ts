@@ -9,7 +9,19 @@ import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
 type AuditFact = Extract<Fact, { kind: 'audit' }>;
 
-const usage = 'Usage: tikk audit <slice> --head <sha> --base <sha> --verdicts-file <path> [--json]';
+interface AuditArguments {
+  rawId: string;
+  repository: string;
+  head: string;
+  base: string;
+  changeHash: string;
+  path: string;
+}
+
+const usage =
+  'Usage: tikk audit <slice> --repository <owner/name> --head <sha> --base <sha> --change-hash <hash> --verdicts-file <path> [--json]';
+
+const ownerNamePattern = /^[^/\s]+\/[^/\s]+$/;
 
 const readVerdictsFile = async (
   input: CommandInput,
@@ -86,10 +98,14 @@ const appendAudit = async (
   return showAfterRefresh(input.session, input.effects.now(), slice.id);
 };
 
-export const sliceAudit = async (input: CommandInput): Promise<CommandResult> => {
-  const parsed = parseCommandArguments(input.args, {
+const parseAuditArguments = (
+  args: string[],
+): { ok: true; value: AuditArguments } | ReturnType<typeof invalidArguments> => {
+  const parsed = parseCommandArguments(args, {
+    repository: { type: 'string' },
     head: { type: 'string' },
     base: { type: 'string' },
+    'change-hash': { type: 'string' },
     'verdicts-file': { type: 'string' },
   });
 
@@ -99,17 +115,39 @@ export const sliceAudit = async (input: CommandInput): Promise<CommandResult> =>
 
   const { values, positionals } = parsed.value;
   const [rawId, ...extra] = positionals;
+  const repository = stringValue(values, 'repository');
   const head = stringValue(values, 'head');
   const base = stringValue(values, 'base');
+  const changeHash = stringValue(values, 'change-hash');
   const path = stringValue(values, 'verdicts-file');
 
   if (rawId === undefined || extra.length > 0) {
     return invalidArguments(usage);
   }
 
-  if (head === undefined || base === undefined || path === undefined) {
+  if (repository === undefined || head === undefined || base === undefined) {
     return invalidArguments(usage);
   }
+
+  if (changeHash === undefined || path === undefined) {
+    return invalidArguments(usage);
+  }
+
+  if (!ownerNamePattern.test(repository)) {
+    return invalidArguments(`"${repository}" is not a repository. Use owner/name.`);
+  }
+
+  return { ok: true, value: { rawId, repository, head, base, changeHash, path } };
+};
+
+export const sliceAudit = async (input: CommandInput): Promise<CommandResult> => {
+  const parsed = parseAuditArguments(input.args);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const { rawId, repository, head, base, changeHash, path } = parsed.value;
 
   const found = findTicket(input.session, rawId);
 
@@ -141,8 +179,10 @@ export const sliceAudit = async (input: CommandInput): Promise<CommandResult> =>
     ticket: found.value.id,
     at: input.effects.now().toISOString(),
     machine: machine.value,
+    repository,
     head,
     base,
+    changeHash,
     verdicts: verdicts.value,
   };
 
