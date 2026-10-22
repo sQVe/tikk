@@ -7,6 +7,7 @@
   "type": "module",
   "scripts": {
     "build": "bun build --compile src/index.ts --outfile dist/tikk",
+    "install:local": "bun run scripts/installLocal.ts",
     "changeset": "bunx --bun changeset",
     "changeset:check": "bunx --bun changeset status --since=origin/main",
     "changeset:version": "bunx --bun changeset version && bunx --bun vp fmt",
