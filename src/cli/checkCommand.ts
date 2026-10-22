@@ -12,7 +12,7 @@ import { findTicket, storeFailure } from './ticketView.ts';
 const addUsage =
   'Usage: tikk check add <id> --command <c> --exit-code <n> --repository <r> --head <h> --base <b> --change-hash <c> [--log-file <path>] [--json]';
 
-const listUsage = 'Usage: tikk check ls <id> --head <h> [--json]';
+const listUsage = 'Usage: tikk check ls <id> --head <h> [--change-hash <c>] [--json]';
 
 const subcommandUsage = 'Usage: tikk check <add|ls> <id> [arguments] [--json]';
 
@@ -131,7 +131,11 @@ const checkAdd = async (input: CommandInput): Promise<CommandResult> => {
 };
 
 const checkList = async (input: CommandInput): Promise<CommandResult> => {
-  const target = readTarget(input.args, { head: { type: 'string' } }, listUsage);
+  const target = readTarget(
+    input.args,
+    { head: { type: 'string' }, 'change-hash': { type: 'string' } },
+    listUsage,
+  );
 
   if (!target.ok) {
     return target;
@@ -141,6 +145,12 @@ const checkList = async (input: CommandInput): Promise<CommandResult> => {
 
   if (!head.ok) {
     return head;
+  }
+
+  const changeHash = stringValue(target.value.values, 'change-hash');
+
+  if (changeHash === '') {
+    return invalidArguments(`Give a value for --change-hash. ${listUsage}`);
   }
 
   const ticket = findTicket(input.session, target.value.rawId);
@@ -155,7 +165,10 @@ const checkList = async (input: CommandInput): Promise<CommandResult> => {
     return storeFailure(facts.reason.message);
   }
 
-  const checks = selectChecks(facts.value, ticket.value.id, head.value);
+  const checks = selectChecks(facts.value, ticket.value.id, {
+    head: head.value,
+    ...(changeHash === undefined ? {} : { changeHash }),
+  });
 
   const lines = checks.map((check) => {
     const mark = check.current ? 'current' : 'stale';

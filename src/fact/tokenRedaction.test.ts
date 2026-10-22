@@ -19,6 +19,8 @@ describe('redactSecrets', () => {
     ['sk key', `sk-${'a'.repeat(30)}`],
     ['Slack', 'xoxb-1234567890-abcdef'],
     ['Bearer', 'Bearer abcdefghij1234567890'],
+    ['lower-case bearer', 'bearer abcdefghij1234567890'],
+    ['upper-case bearer', 'BEARER abcdefghij1234567890'],
     ['PEM', '-----BEGIN RSA PRIVATE KEY-----\nMIIB\nabc=\n-----END RSA PRIVATE KEY-----'],
   ])('replaces a %s secret', (_name, secret) => {
     expect(redactSecrets(`before ${secret} after`)).toBe('before [redacted] after');

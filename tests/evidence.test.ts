@@ -111,6 +111,30 @@ it('marks a check current for its head and stale for another', async () => {
   expect(stale.checks.map((check) => check.current)).toEqual([false]);
 });
 
+it('marks a check stale for its head when the given change hash differs', async () => {
+  const id = await createTask();
+
+  await cli().runJson([
+    'check',
+    'add',
+    id,
+    '--command',
+    'bun run check',
+    '--exit-code',
+    '0',
+    ...targetFlags('aaa'),
+  ]);
+
+  const listFor = (changeHash: string) =>
+    cli().runJson<CheckListing>(['check', 'ls', id, '--head', 'aaa', '--change-hash', changeHash]);
+
+  const same = await listFor('hash1');
+  const edited = await listFor('hash2');
+
+  expect(same.checks.map((check) => check.current)).toEqual([true]);
+  expect(edited.checks.map((check) => check.current)).toEqual([false]);
+});
+
 it('stores a redacted check log by hash', async () => {
   const id = await createTask();
   const logFile = join(cli().home, 'check.log');
@@ -156,6 +180,35 @@ it('lists a blocked finding in needs with its fingerprint', async () => {
 
   expect(item?.id).toBe(id);
   expect(item?.fingerprint).toBe('fp-1');
+});
+
+it('stores a finding reason with its token redacted', async () => {
+  const id = await createTask();
+  const token = `ghp_${'a1B2'.repeat(9)}`;
+
+  await addReview(id, await writeFindings('findings.json', ['fp-1']));
+
+  await cli().runJson([
+    'finding',
+    'set',
+    id,
+    'fp-1',
+    '--status',
+    'blocked',
+    '--reason',
+    `Push failed with ${token}`,
+    '--actor',
+    'agent',
+  ]);
+
+  const files = await Array.fromAsync(new Bun.Glob('**/*.jsonl').scan({ cwd: cli().storePath }));
+
+  const stored = await Promise.all(
+    files.map((file) => Bun.file(join(cli().storePath, file)).text()),
+  );
+
+  expect(stored.join('')).toContain('Push failed with [redacted]');
+  expect(stored.join('')).not.toContain(token);
 });
 
 it('marks a finding unchanged when a later review holds its fingerprint', async () => {

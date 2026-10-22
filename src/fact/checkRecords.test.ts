@@ -14,8 +14,23 @@ describe('selectChecks', () => {
       exitCode: 0,
     });
 
-    expect(selectChecks([fact], 'me-3467', 'aaa')[0]?.current).toBe(true);
-    expect(selectChecks([fact], 'me-3467', 'bbb')[0]?.current).toBe(false);
+    expect(selectChecks([fact], 'me-3467', { head: 'aaa' })[0]?.current).toBe(true);
+    expect(selectChecks([fact], 'me-3467', { head: 'bbb' })[0]?.current).toBe(false);
+  });
+
+  it('marks a check stale for the same head when a given change hash differs', () => {
+    const fact = makeFact('3467', {
+      kind: 'check',
+      target: target('aaa'),
+      command: 'x',
+      exitCode: 0,
+    });
+
+    const same = selectChecks([fact], 'me-3467', { head: 'aaa', changeHash: 'c' });
+    const edited = selectChecks([fact], 'me-3467', { head: 'aaa', changeHash: 'd' });
+
+    expect(same[0]?.current).toBe(true);
+    expect(edited[0]?.current).toBe(false);
   });
 
   it('returns only the ticket checks, newest first', () => {
@@ -41,7 +56,9 @@ describe('selectChecks', () => {
       exitCode: 0,
     });
 
-    const commands = selectChecks([older, newer, other], 'me-3467', 'a').map((c) => c.command);
+    const commands = selectChecks([older, newer, other], 'me-3467', { head: 'a' }).map(
+      (c) => c.command,
+    );
 
     expect(commands).toEqual(['new', 'old']);
   });

@@ -26,6 +26,38 @@ const addFlags = [
   'hash1',
 ];
 
+it('marks each check current or stale in the text listing', async () => {
+  const fakeSession = makeSession({ tickets: [makeTicket('demo-3467')] });
+  const { effects } = makeEffects({ session: fakeSession });
+  const session = fakeSession.session;
+
+  for (const head of ['aaa', 'bbb']) {
+    const flags = addFlags.map((flag) => (flag === 'aaa' ? head : flag));
+    const args = ['add', 'demo-3467', ...flags.with(1, `test ${head}`)];
+
+    await checkCommand({ args, json: false, effects, session });
+  }
+
+  await session.refresh();
+
+  const listed = await checkCommand({
+    args: ['ls', 'demo-3467', '--head', 'aaa'],
+    json: false,
+    effects,
+    session,
+  });
+
+  const lines = listed.ok ? listed.value.text.split('\n').filter(Boolean).toSorted() : [];
+
+  expect(lines).toEqual(['demo-3467  0  current  test aaa', 'demo-3467  0  stale  test bbb']);
+});
+
+it('refuses ls with an empty change hash', async () => {
+  const { result } = await run(['ls', 'demo-3467', '--head', 'aaa', '--change-hash', '']);
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+});
+
 it('refuses an unknown subcommand', async () => {
   const { result } = await run(['nope']);
 

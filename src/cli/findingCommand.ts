@@ -1,4 +1,4 @@
-import { selectFindings } from '../fact/fact.ts';
+import { redactSecrets, selectFindings } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
@@ -96,7 +96,7 @@ const findingSet = async (input: CommandInput): Promise<CommandResult> => {
       fingerprint,
       status: findingStatus,
       actor: actor.value,
-      reason: reason.value,
+      reason: redactSecrets(reason.value),
     };
 
     const appended = await appendEvidence(input, fact);
