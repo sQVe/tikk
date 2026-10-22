@@ -180,6 +180,13 @@ describe('deriveSliceState', () => {
     expect(result.state).toBe('mergedUnverified');
   });
 
+  it('keeps a merge confirmed in trunk over a newer fact that says it is not', () => {
+    const outsideTrunk = prFact({ inTrunk: false, at: '2026-10-20T11:00:00.000Z' });
+    const result = derive(slice, [slice], [prFact(), outsideTrunk], now);
+
+    expect(result.state).toBe('mergedUnverified');
+  });
+
   it('flags a merged slice with an open task and names the task', () => {
     const result = derive(slice, [slice, task], [prFact()], now);
 

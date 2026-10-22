@@ -51,7 +51,12 @@ const winningPrFact = (own: Fact[]): PrFact | undefined => {
     (fact) => fact.repository === newest.repository && fact.number === newest.number,
   );
 
-  return samePr.findLast((fact) => fact.mergeCommit !== undefined) ?? newest;
+  // A slow reconcile can append an observation older than the one before it. A merge stays merged,
+  // and a merge seen in trunk stays in trunk, whatever order the facts arrive in.
+  const inTrunk = samePr.findLast((fact) => fact.state === 'merged' && fact.inTrunk);
+  const merged = samePr.findLast((fact) => fact.mergeCommit !== undefined);
+
+  return inTrunk ?? merged ?? newest;
 };
 
 const isAuditFact = (fact: Fact): fact is AuditFact => fact.kind === 'audit';
