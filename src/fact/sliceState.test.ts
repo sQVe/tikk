@@ -74,6 +74,33 @@ describe('deriveSliceState', () => {
     });
   });
 
+  it('dates an active slice from a submitted log and ignores other logs', () => {
+    const claim = makeFact('3478', {
+      kind: 'claim',
+      holder: 'agent',
+      leaseEnd: '2026-10-20T13:00:00.000Z',
+      at: '2026-10-20T10:30:00.000Z',
+    });
+
+    const submitted = makeFact('3478', {
+      kind: 'log',
+      type: 'submitted',
+      text: 'Done.',
+      at: '2026-10-20T11:00:00.000Z',
+    });
+
+    const progress = makeFact('3478', {
+      kind: 'log',
+      type: 'progress',
+      text: 'More.',
+      at: '2026-10-20T11:30:00.000Z',
+    });
+
+    const result = derive(slice, [slice, task], [claim, submitted, progress], now);
+
+    expect(result).toMatchObject({ state: 'active', since: '2026-10-20T11:00:00.000Z' });
+  });
+
   it('derives inReview from an open PR', () => {
     const result = derive(slice, [slice], [prFact({ state: 'open' })], now);
 
@@ -91,6 +118,31 @@ describe('deriveSliceState', () => {
     const result = derive(slice, [slice], [prFact(), audit], now);
 
     expect(result).toMatchObject({ state: 'done', since: prFact().at });
+  });
+
+  it('derives mergedUnverified once a criterion is added after the audit', () => {
+    const audited = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [{ id: 'works', check: 'Run it.', expected: 'It works.' }],
+    });
+
+    const grown = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [
+        { id: 'works', check: 'Run it.', expected: 'It works.' },
+        { id: 'fast', check: 'Time it.', expected: 'It is fast.' },
+      ],
+    });
+
+    const audit = makeFact('3469', {
+      kind: 'audit',
+      head: 'aaa',
+      base: 'main',
+      verdicts: [{ criterion: 'works', verdict: 'met', evidence: 'Ran it.' }],
+    });
+
+    expect(derive(audited, [audited], [prFact(), audit], now).state).toBe('done');
+    expect(derive(grown, [grown], [prFact(), audit], now).state).toBe('mergedUnverified');
   });
 
   it('derives mergedUnverified from an all-met audit for another head', () => {

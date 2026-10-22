@@ -6,7 +6,7 @@ export type SliceStateName = 'planned' | 'active' | 'inReview' | 'mergedUnverifi
 
 interface SliceTicket {
   id: TicketId;
-  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent'>;
+  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'criteria'>;
 }
 
 interface SlicePr {
@@ -58,6 +58,17 @@ const isAuditFact = (fact: Fact): fact is AuditFact => fact.kind === 'audit';
 
 const decidingAudit = (own: Fact[], pr: PrFact): AuditFact | undefined =>
   own.filter(isAuditFact).findLast((fact) => fact.head === pr.head);
+
+const meetsEveryCriterion = (slice: SliceTicket, audit: AuditFact): boolean => {
+  const met = new Set(
+    audit.verdicts.filter((entry) => entry.verdict === 'met').map((entry) => entry.criterion),
+  );
+
+  const allVerdictsMet = audit.verdicts.every((entry) => entry.verdict === 'met');
+  const criteria = slice.frontMatter.criteria ?? [];
+
+  return allVerdictsMet && criteria.every((criterion) => met.has(criterion.id));
+};
 
 const isStarted = (state: string): boolean =>
   state === 'active' || state === 'submitted' || state === 'done';
@@ -114,7 +125,7 @@ export const buildSliceIndex = (tickets: SliceTicket[], facts: Fact[]): SliceInd
 export const selectSlicePr = (sliceId: TicketId, index: SliceIndex): SlicePr | null => {
   const pr = winningPrFact(index.factsByTicket.get(sliceId) ?? []);
 
-  return pr === undefined || pr.state === 'closed' ? null : prView(pr);
+  return pr === undefined ? null : prView(pr);
 };
 
 export const deriveSliceState = (slice: SliceTicket, index: SliceIndex, now: Date): SliceState => {
@@ -153,9 +164,8 @@ export const deriveSliceState = (slice: SliceTicket, index: SliceIndex, now: Dat
   const openTasks = tasks.filter((task) => isOpenTask(task.state)).map((task) => task.id);
   const flags = { flagged: openTasks.length > 0, openTasks, pr: view };
   const audit = decidingAudit(own, pr);
-  const verified = audit?.verdicts.every((entry) => entry.verdict === 'met') ?? false;
 
-  if (audit !== undefined && verified) {
+  if (audit !== undefined && meetsEveryCriterion(slice, audit)) {
     return pending('done', [pr.at, audit.at], now, flags);
   }
 

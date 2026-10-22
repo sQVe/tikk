@@ -33,13 +33,15 @@ const appendLink = async (
     return storeFailure(facts.reason.message);
   }
 
-  const known = facts.value.findLast(
-    (fact) =>
-      fact.kind === 'pr' && fact.repository === ref.repository && fact.number === ref.number,
-  );
+  const known = facts.value
+    .filter((fact) => fact.kind === 'pr')
+    .findLast((fact) => fact.repository === ref.repository && fact.number === ref.number);
+
+  const selected = facts.value.findLast((fact) => fact.kind === 'pr');
 
   const unchanged =
     known?.kind === 'pr' &&
+    known === selected &&
     !differsFromObservation({ ...known, mergeCommit: known.mergeCommit ?? null }, seen);
 
   if (!unchanged) {

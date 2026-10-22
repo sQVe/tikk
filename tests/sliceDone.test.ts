@@ -153,6 +153,21 @@ it('shows a slice as mergedUnverified after one ready once gh reports the merge'
   expect((await showSlice(id)).state).toBe('mergedUnverified');
 });
 
+it('sees a merge after a linked PR closed and reopened', async () => {
+  await fakeGh().setPullRequest({ ...open, state: 'CLOSED' });
+
+  const id = await createSlice();
+
+  await cli().runJson(['pr', 'link', id, prUrl]);
+
+  expect((await showSlice(id)).state).toBe('planned');
+
+  await fakeGh().setPullRequest(merged);
+  await cli().runJson(['ready']);
+
+  expect((await showSlice(id)).state).toBe('mergedUnverified');
+});
+
 it('flags a merged slice that still has an open task', async () => {
   const id = await createSlice();
   const task = await cli().runJson<{ id: string }>(['new', 'task', 'A task', '--parent', id]);

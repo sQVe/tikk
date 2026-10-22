@@ -135,6 +135,39 @@ it('lists a merged slice with an open task as flagged with the task ID', async (
   expect(output.text).toBe('demo-3469  flagged  1h  A title  demo-3478\n');
 });
 
+it('still flags a merged slice whose open task is archived', async () => {
+  const base = makeTicket('demo-3478').frontMatter;
+
+  const task = makeTicket('demo-3478', {
+    frontMatter: { ...base, parent: ticketIdOf('demo-3469'), archived: '2026-10-01' },
+  });
+
+  const slice = makeKindTicket('demo-3469', 'slice');
+  const output = successOf(await needs([], [slice, task], [mergedFact, auditFact]));
+
+  expect(output.json).toMatchObject({
+    items: [{ id: 'demo-3469', reason: 'flagged', openTasks: ['demo-3478'] }],
+  });
+});
+
+it('does not flag a merged slice because of an archived canceled task', async () => {
+  const base = makeTicket('demo-3478').frontMatter;
+
+  const task = makeTicket('demo-3478', {
+    frontMatter: {
+      ...base,
+      parent: ticketIdOf('demo-3469'),
+      archived: '2026-10-01',
+      status: 'canceled',
+    },
+  });
+
+  const slice = makeKindTicket('demo-3469', 'slice');
+  const output = successOf(await needs([], [slice, task], [mergedFact, auditFact]));
+
+  expect(output.json).toEqual({ items: [], reconcileProblems: [] });
+});
+
 it('leaves out a done slice', async () => {
   const slice = makeKindTicket('demo-3469', 'slice');
   const output = successOf(await needs([], [slice], [mergedFact, auditFact]));

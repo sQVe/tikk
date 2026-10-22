@@ -65,7 +65,7 @@ export const needsCommand = async ({
     return reconciled;
   }
 
-  const tickets = session.listTickets({ includeArchived: false });
+  const tickets = session.listTickets({ includeArchived: true });
   const facts = await session.listFacts();
 
   if (!facts.ok) {

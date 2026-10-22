@@ -17,11 +17,23 @@ const url = 'https://github.com/acme/app/pull/7';
 const link = async (
   args: string[],
   gh: Parameters<typeof fakeGh>[0],
-  options: { kind?: 'slice' | 'task'; facts?: Fact[] } = {},
+  options: {
+    kind?: 'slice' | 'task';
+    facts?: Fact[];
+    appendFailure?: { kind: 'invalid' | 'failed'; message: string };
+  } = {},
 ) => {
+  const { appendFailure: reason } = options;
+
+  const failing =
+    reason === undefined
+      ? {}
+      : { appendFact: () => Promise.resolve({ ok: false as const, reason }) };
+
   const fakeSession = makeSession({
     tickets: [makeKindTicket('demo-3467', options.kind ?? 'slice')],
     facts: options.facts ?? [],
+    overrides: failing,
   });
 
   const fakeEffects = makeEffects({ session: fakeSession, runGh: fakeGh(gh) });
@@ -35,6 +47,18 @@ const link = async (
 
   return { result, appends: fakeSession.appends, ghCalls: fakeEffects.ghCalls };
 };
+
+const prFact = (number: number) =>
+  makeFact({
+    kind: 'pr',
+    repository: 'acme/app',
+    number,
+    state: 'open',
+    base: 'main',
+    head: 'head1',
+    trunk: 'main',
+    inTrunk: false,
+  });
 
 it('links an open PR and shows the slice as in review', async () => {
   const { result, appends } = await link(['demo-3467', url], { 7: { state: 'OPEN' } });
@@ -81,6 +105,18 @@ it('appends nothing when the same PR is linked again unchanged', async () => {
   expect(appends).toEqual([]);
 });
 
+it('selects an earlier PR again when it is linked after a later one', async () => {
+  const { result, appends } = await link(
+    ['demo-3467', url],
+    { 7: { state: 'OPEN' } },
+    { facts: [prFact(7), prFact(8)] },
+  );
+
+  expect(appends).toHaveLength(1);
+  expect(appends[0]?.fact).toMatchObject({ kind: 'pr', number: 7 });
+  expect(successOf(result).json).toMatchObject({ pr: { number: 7 } });
+});
+
 it('refuses a task ticket and does not call gh', async () => {
   const { result, appends, ghCalls } = await link(
     ['demo-3467', url],
@@ -114,4 +150,18 @@ it('returns ghError and appends nothing when gh fails', async () => {
   expect(failure.code).toBe('ghError');
   expect(failure.message).toContain('not logged in');
   expect(appends).toEqual([]);
+});
+
+it('reports a fact the store refuses as invalid arguments', async () => {
+  const appendFailure = { kind: 'invalid' as const, message: 'Fact is wrong.' };
+  const { result } = await link(['demo-3467', url], { 7: { state: 'OPEN' } }, { appendFailure });
+
+  expect(failureOf(result)).toMatchObject({ code: 'invalidArguments', message: 'Fact is wrong.' });
+});
+
+it('reports a store write failure as a store error', async () => {
+  const appendFailure = { kind: 'failed' as const, message: 'Disk is full.' };
+  const { result } = await link(['demo-3467', url], { 7: { state: 'OPEN' } }, { appendFailure });
+
+  expect(failureOf(result)).toMatchObject({ code: 'storeError', message: 'Disk is full.' });
 });

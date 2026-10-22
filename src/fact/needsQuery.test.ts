@@ -215,6 +215,20 @@ describe('selectNeeds for slices', () => {
     expect(items[0]).toMatchObject({ reason: 'flagged', openTasks: [task.id] });
   });
 
+  it('still flags a merged slice whose open task is archived', () => {
+    const task = makeTicket('3478', { parent: '3469', archived: '2026-10-01' });
+    const items = selectNeeds([slice, task], [merged, audit], now);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ reason: 'flagged', openTasks: [task.id] });
+  });
+
+  it('does not flag a merged slice because of an archived canceled task', () => {
+    const task = makeTicket('3478', { parent: '3469', archived: '2026-10-01', status: 'canceled' });
+
+    expect(selectNeeds([slice, task], [merged, audit], now)).toEqual([]);
+  });
+
   it('leaves out a done slice', () => {
     expect(selectNeeds([slice], [merged, audit], now)).toEqual([]);
   });

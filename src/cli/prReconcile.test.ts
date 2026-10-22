@@ -6,10 +6,12 @@ import {
   makeEffects,
   makeFact,
   makeKindTicket,
+  failureOf,
   makeSession,
+  successOf,
   ticketIdOf,
 } from './cliHarness.ts';
-import { reconcilePullRequests } from './prReconcile.ts';
+import { reconcileBeforeRead, reconcileCommand, reconcilePullRequests } from './prReconcile.ts';
 
 const prFact = (ticket: string, fields: Record<string, unknown>): Fact =>
   makeFact({
@@ -43,7 +45,12 @@ const reconcile = async (
     session: fakeSession.session,
   });
 
-  return { outcome, appends: fakeSession.appends, ghCalls: fakeEffects.ghCalls };
+  return {
+    outcome,
+    appends: fakeSession.appends,
+    ghCalls: fakeEffects.ghCalls,
+    scheduleCalls: fakeEffects.scheduleCalls,
+  };
 };
 
 it('appends a merged fact when gh reports an open PR as merged', async () => {
@@ -68,6 +75,18 @@ it('appends a merged fact when gh reports an open PR as merged', async () => {
     trunk: 'main',
     inTrunk: true,
   });
+});
+
+it('appends a merged fact when gh reports a closed PR as merged after it reopened', async () => {
+  const { outcome, appends } = await reconcile(
+    ['demo-3467'],
+    [prFact('demo-3467', { state: 'closed' })],
+    { 7: { state: 'MERGED', mergeCommit: 'merge1' } },
+  );
+
+  expect(outcome.checked).toEqual([ticketIdOf('demo-3467')]);
+  expect(outcome.updated).toEqual([{ id: ticketIdOf('demo-3467'), state: 'merged' }]);
+  expect(appends[0]?.fact).toMatchObject({ kind: 'pr', state: 'merged', mergeCommit: 'merge1' });
 });
 
 it('appends nothing when gh reports what the newest fact already says', async () => {
@@ -170,4 +189,105 @@ it('returns one problem without ticket and appends nothing when the store is loc
   ]);
 
   expect(fakeSession.appends).toEqual([]);
+});
+
+it('schedules a sync after a reconcile that appended', async () => {
+  const { scheduleCalls } = await reconcile(['demo-3467'], [prFact('demo-3467', {})], {
+    7: { state: 'MERGED', mergeCommit: 'merge1' },
+  });
+
+  expect(scheduleCalls()).toBe(1);
+});
+
+it('schedules no sync after a reconcile that appended nothing', async () => {
+  const { scheduleCalls } = await reconcile(['demo-3467'], [prFact('demo-3467', {})], {
+    7: { state: 'OPEN' },
+  });
+
+  expect(scheduleCalls()).toBe(0);
+});
+
+const readReconciled = async (gh: Parameters<typeof fakeGh>[0]) => {
+  let refreshes = 0;
+
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: {
+      refresh: () => {
+        refreshes += 1;
+
+        return Promise.resolve({ ok: true, value: undefined });
+      },
+    },
+  });
+
+  const { effects } = makeEffects({ session: fakeSession, runGh: fakeGh(gh) });
+  const result = await reconcileBeforeRead({ effects, session: fakeSession.session });
+
+  return { result, refreshes: () => refreshes };
+};
+
+it('refreshes the session after a reconcile that appended', async () => {
+  const { result, refreshes } = await readReconciled({
+    7: { state: 'MERGED', mergeCommit: 'merge1' },
+  });
+
+  expect(result).toEqual({ ok: true, value: [] });
+  expect(refreshes()).toBe(1);
+});
+
+it('does not refresh the session after a reconcile that appended nothing', async () => {
+  const { result, refreshes } = await readReconciled({ 7: { state: 'OPEN' } });
+
+  expect(result).toEqual({ ok: true, value: [] });
+  expect(refreshes()).toBe(0);
+});
+
+const reconcileArguments = async (args: string[]) => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+  });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'OPEN' } }),
+  });
+
+  const result = await reconcileCommand({
+    args,
+    json: true,
+    effects: fakeEffects.effects,
+    session: fakeSession.session,
+  });
+
+  return { result, ghCalls: fakeEffects.ghCalls, appends: fakeSession.appends };
+};
+
+it('refuses a positional argument with the usage and calls no gh', async () => {
+  const { result, ghCalls, appends } = await reconcileArguments(['demo-3467']);
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('Usage: tikk reconcile');
+  expect(ghCalls).toEqual([]);
+  expect(appends).toEqual([]);
+});
+
+it('refuses an unknown flag and calls no gh', async () => {
+  const { result, ghCalls } = await reconcileArguments(['--force']);
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(ghCalls).toEqual([]);
+});
+
+it('lists the slices it checked and updated', async () => {
+  const { result } = await reconcileArguments([]);
+
+  expect(successOf(result).json).toEqual({
+    checked: ['demo-3467'],
+    updated: [],
+    problems: [],
+  });
 });

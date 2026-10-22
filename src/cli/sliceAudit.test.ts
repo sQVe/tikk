@@ -39,8 +39,20 @@ const allMet = [
 
 const audit = async (
   args: string[],
-  options: { text?: string; kind?: 'slice' | 'task'; withFile?: boolean } = {},
+  options: {
+    text?: string;
+    kind?: 'slice' | 'task';
+    withFile?: boolean;
+    appendFailure?: { kind: 'invalid' | 'failed'; message: string };
+  } = {},
 ) => {
+  const { appendFailure: reason } = options;
+
+  const appendFailure =
+    reason === undefined
+      ? {}
+      : { appendFact: () => Promise.resolve({ ok: false as const, reason }) };
+
   const fakeSession = makeSession({
     tickets: [slice(options.kind)],
     facts: [
@@ -56,6 +68,7 @@ const audit = async (
         inTrunk: true,
       }),
     ],
+    overrides: appendFailure,
   });
 
   const files = options.withFile === false ? {} : { [verdictsPath]: options.text ?? allMet };
@@ -116,6 +129,29 @@ it('refuses a verdicts file that is not a list', async () => {
   expect(failure.code).toBe('invalidArguments');
   expect(failure.message).toContain('YAML list');
   expect(appends).toEqual([]);
+});
+
+it('refuses a verdicts file that is not valid YAML', async () => {
+  const { result, appends } = await audit(fullArguments, { text: '- [unclosed\n' });
+  const failure = failureOf(result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('is not valid YAML');
+  expect(appends).toEqual([]);
+});
+
+it('reports a fact the store refuses as invalid arguments', async () => {
+  const appendFailure = { kind: 'invalid' as const, message: 'Fact is wrong.' };
+  const failure = failureOf((await audit(fullArguments, { appendFailure })).result);
+
+  expect(failure).toMatchObject({ code: 'invalidArguments', message: 'Fact is wrong.' });
+});
+
+it('reports a store write failure as a store error', async () => {
+  const appendFailure = { kind: 'failed' as const, message: 'Disk is full.' };
+  const failure = failureOf((await audit(fullArguments, { appendFailure })).result);
+
+  expect(failure).toMatchObject({ code: 'storeError', message: 'Disk is full.' });
 });
 
 it('refuses a verdict that the fact schema rejects', async () => {
