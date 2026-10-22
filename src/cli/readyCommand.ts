@@ -2,6 +2,8 @@ import { selectReady } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { problemLines, reconcileBeforeRead } from './prReconcile.ts';
+import type { ReconcileProblem } from './prReconcile.ts';
 import { findTicket, ticketView } from './ticketView.ts';
 
 type Selection = ReturnType<typeof selectReady<CliTicket>>;
@@ -93,7 +95,11 @@ const chooseKind = (
   return invalidArguments(`Ticket ${parent} is a ${parentKind}; --parent takes a plan or slice.`);
 };
 
-const readyText = (selection: Selection, unreadable: CliTicket[]): string => {
+const readyText = (
+  selection: Selection,
+  unreadable: CliTicket[],
+  problems: ReconcileProblem[],
+): string => {
   const candidateLines = selection.candidates.map(
     ({ ticket, state }) => `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
   );
@@ -108,7 +114,7 @@ const readyText = (selection: Selection, unreadable: CliTicket[]): string => {
     (ticket) => `skipped: ${ticket.id}  parseError  ${ticket.path}\n`,
   );
 
-  return [...candidateLines, ...skippedLines, ...unreadableLines].join('');
+  return [...candidateLines, ...skippedLines, ...unreadableLines].join('') + problemLines(problems);
 };
 
 export const readyCommand = async ({
@@ -128,6 +134,12 @@ export const readyCommand = async ({
 
   if (parsed.value.positionals.length > 0) {
     return invalidArguments(usage);
+  }
+
+  const reconciled = await reconcileBeforeRead({ effects, session });
+
+  if (!reconciled.ok) {
+    return reconciled;
   }
 
   const project = stringValue(parsed.value.values, 'project');
@@ -168,8 +180,9 @@ export const readyCommand = async ({
       json: {
         candidates,
         skipped: [...selection.skipped.map(skippedView), ...unreadable.map(parseErrorView)],
+        reconcileProblems: reconciled.value,
       },
-      text: readyText(selection, unreadable),
+      text: readyText(selection, unreadable, reconciled.value),
     },
   };
 };

@@ -2,6 +2,7 @@ import { selectNeeds } from '../fact/fact.ts';
 import type { NeedItem } from '../fact/fact.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { problemLines, reconcileBeforeRead } from './prReconcile.ts';
 
 const secondsPerMinute = 60;
 const secondsPerHour = 3600;
@@ -58,6 +59,12 @@ export const needsCommand = async ({
     return invalidArguments('Usage: tikk needs [--json]');
   }
 
+  const reconciled = await reconcileBeforeRead({ effects, session });
+
+  if (!reconciled.ok) {
+    return reconciled;
+  }
+
   const tickets = session.listTickets({ includeArchived: false });
   const facts = await session.listFacts();
 
@@ -69,6 +76,9 @@ export const needsCommand = async ({
 
   return {
     ok: true,
-    value: { json: { items: items.map(itemView) }, text: items.map(itemLine).join('') },
+    value: {
+      json: { items: items.map(itemView), reconcileProblems: reconciled.value },
+      text: items.map(itemLine).join('') + problemLines(reconciled.value),
+    },
   };
 };

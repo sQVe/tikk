@@ -12,6 +12,7 @@ import {
   projectNameOf,
   successOf,
   ticketIdOf,
+  fakeGh,
 } from './cliHarness.ts';
 import { readyCommand } from './readyCommand.ts';
 
@@ -43,6 +44,7 @@ it('lists open tasks as candidates and names the blockers of a skipped task', as
         blockers: [{ id: 'demo-3468', state: 'open' }],
       },
     ],
+    reconcileProblems: [],
   });
 
   expect(output.json).not.toHaveProperty('candidates.0.body');
@@ -153,7 +155,7 @@ it('lists neither a broken slice nor a broken archived task among the unreadable
   const archived = taskWith('demo-3468', { archived: '2026-10-01' });
   const output = successOf(await ready([], [brokenSlice, { ...archived, error: 'Bad.' }]));
 
-  expect(output.json).toEqual({ candidates: [], skipped: [] });
+  expect(output.json).toEqual({ candidates: [], skipped: [], reconcileProblems: [] });
 });
 
 it('lists tasks for --kind task', async () => {
@@ -237,4 +239,43 @@ it('reports an unreadable slice as parseError and still resolves an archived par
     candidates: [],
     skipped: [{ id: 'demo-3467', reason: 'parseError' }],
   });
+});
+
+const openPr = makeFact({
+  kind: 'pr',
+  ticket: 'demo-3469',
+  repository: 'acme/app',
+  number: 7,
+  state: 'open',
+  base: 'main',
+  head: 'head1',
+  trunk: 'main',
+  inTrunk: false,
+});
+
+it('returns the list with one reconcile problem when gh fails', async () => {
+  const fakeSession = makeSession({
+    tickets: [
+      makeTicket('demo-3467', { frontMatter: { ...makeTicket('demo-3467').frontMatter, rank: 1 } }),
+      makeKindTicket('demo-3469', 'slice'),
+    ],
+    facts: [openPr],
+  });
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'OPEN', error: 'offline' } }),
+  });
+
+  const output = successOf(
+    await readyCommand({ args: [], json: true, effects, session: fakeSession.session }),
+  );
+
+  expect(output.json).toMatchObject({
+    candidates: [expect.objectContaining({ id: 'demo-3467' })],
+    reconcileProblems: [expect.objectContaining({ ticket: 'demo-3469', number: 7 })],
+  });
+
+  expect(output.text).toContain('problem: ');
+  expect(output.text).toContain('offline');
 });

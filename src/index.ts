@@ -304,6 +304,34 @@ const initLocalStore = async (): Promise<
   return { ok: true, value: { store: store.root, created } };
 };
 
+// GH_PROMPT_DISABLED makes gh fail instead of asking questions, since no one may be at the terminal.
+const runGh: CliEffects['runGh'] = async (args) => {
+  try {
+    const child = Bun.spawn(['gh', ...args], {
+      env: { ...Bun.env, GH_PROMPT_DISABLED: '1' },
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    const [stdout, stderr, exitCode] = await Promise.all([
+      child.stdout.text(),
+      child.stderr.text(),
+      child.exited,
+    ]);
+
+    if (exitCode === 0) {
+      return { ok: true, value: stdout };
+    }
+
+    return { ok: false, reason: { message: `"gh ${args.join(' ')}" failed: ${stderr.trim()}` } };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'gh did not start.';
+
+    return { ok: false, reason: { message } };
+  }
+};
+
 const writeBlob: SyncFunctions['writeBlob'] = async (root, text) => {
   const child = Bun.spawn(['git', '-C', root, 'hash-object', '-w', '--stdin'], {
     stdin: new TextEncoder().encode(text),
@@ -535,6 +563,7 @@ const effects: CliEffects = {
   openSession,
   resolveProject: () => resolveProject(process.cwd(), projectEffects),
   resolveMachine: () => resolveMachine(projectEffects),
+  runGh,
   readTextFile,
   runEditor,
   now: () => new Date(),

@@ -43,6 +43,7 @@ export interface FakeSession {
 export interface EffectsOptions {
   session?: FakeSession;
   files?: Record<string, string>;
+  runGh?: CliEffects['runGh'];
   overrides?: Partial<CliEffects>;
 }
 
@@ -55,6 +56,16 @@ export interface FakeEffects {
   scheduleCalls: () => number;
   remoteUrls: string[];
   editorPaths: string[];
+  ghCalls: string[][];
+}
+
+interface FakePullRequest {
+  state: 'OPEN' | 'MERGED' | 'CLOSED';
+  base?: string;
+  head?: string;
+  mergeCommit?: string;
+  compare?: string;
+  error?: string;
 }
 
 const fakeNow = new Date('2026-10-20T12:00:00.000Z');
@@ -274,10 +285,22 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
   };
 };
 
+export const failed = (message: string): Promise<Result<never, { message: string }>> =>
+  Promise.resolve({ ok: false, reason: { message } });
+
+const recordGh =
+  (calls: string[][], reply: CliEffects['runGh'] | undefined): CliEffects['runGh'] =>
+  (args) => {
+    calls.push(args);
+
+    return reply === undefined ? failed('gh is not available.') : reply(args);
+  };
+
 export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
   const fakeSession = options.session ?? makeSession();
   const editorPaths: string[] = [];
   const remoteUrls: string[] = [];
+  const ghCalls: string[][] = [];
   let syncCount = 0;
   let scheduleCount = 0;
   let initCount = 0;
@@ -339,6 +362,7 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
       return Promise.resolve({ ok: true, value: undefined });
     },
     resolveMachine: () => Promise.resolve({ ok: true, value: 'laptop' }),
+    runGh: recordGh(ghCalls, options.runGh),
     now: () => fakeNow,
     ...options.overrides,
   };
@@ -352,11 +376,9 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
     scheduleCalls: () => scheduleCount,
     remoteUrls,
     editorPaths,
+    ghCalls,
   };
 };
-
-export const failed = (message: string): Promise<Result<never, { message: string }>> =>
-  Promise.resolve({ ok: false, reason: { message } });
 
 export const successOf = (result: CommandResult): { json: unknown; text: string } => {
   invariant(result.ok, 'The command should succeed.');
@@ -369,3 +391,47 @@ export const failureOf = (result: CommandResult): CliFailure => {
 
   return result.reason;
 };
+
+const ghOutput = (value: unknown): Promise<Result<string, { message: string }>> =>
+  Promise.resolve({ ok: true, value: JSON.stringify(value) });
+
+const mergeCommitOf = (pullRequest: FakePullRequest): { oid: string } | null =>
+  pullRequest.mergeCommit === undefined ? null : { oid: pullRequest.mergeCommit };
+
+const viewPullRequest = (
+  pullRequest: FakePullRequest | undefined,
+  number: number,
+  trunk: string,
+): Promise<Result<string, { message: string }>> => {
+  if (pullRequest === undefined || pullRequest.error !== undefined) {
+    return failed(pullRequest?.error ?? `no pull request ${number}`);
+  }
+
+  return ghOutput({
+    number,
+    state: pullRequest.state,
+    baseRefName: pullRequest.base ?? trunk,
+    headRefOid: pullRequest.head ?? 'head1',
+    mergeCommit: mergeCommitOf(pullRequest),
+  });
+};
+
+// Answers `gh pr view`, `gh repo view`, and `gh api` for pull requests keyed by number.
+export const fakeGh =
+  (pullRequests: Record<number, FakePullRequest>, trunk = 'main'): CliEffects['runGh'] =>
+  (args) => {
+    if (args[0] === 'repo') {
+      return ghOutput({ defaultBranchRef: { name: trunk } });
+    }
+
+    if (args[0] === 'api') {
+      const mergeCommit = args[1]?.split('...').at(-1);
+      const match = Object.values(pullRequests).find((pr) => pr.mergeCommit === mergeCommit);
+
+      return Promise.resolve({ ok: true, value: `${match?.compare ?? 'ahead'}\n` });
+    }
+
+    const number = Number(args[2]);
+
+    return viewPullRequest(pullRequests[number], number, trunk);
+  };

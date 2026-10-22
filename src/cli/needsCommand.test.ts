@@ -11,6 +11,7 @@ import {
   makeTicket,
   successOf,
   ticketIdOf,
+  fakeGh,
 } from './cliHarness.ts';
 import { needsCommand } from './needsCommand.ts';
 
@@ -46,6 +47,7 @@ it('lists a claim whose lease ended with its holder, and not a live lease', asyn
         holder: 'agent',
       },
     ],
+    reconcileProblems: [],
   });
 });
 
@@ -60,7 +62,7 @@ it('prints nothing when no task waits on the user', async () => {
   const output = successOf(await needs([], [makeTicket('demo-3467')]));
 
   expect(output.text).toBe('');
-  expect(output.json).toEqual({ items: [] });
+  expect(output.json).toEqual({ items: [], reconcileProblems: [] });
 });
 
 it('refuses a positional argument', async () => {
@@ -114,6 +116,7 @@ it('lists a merged slice with no audit as mergedUnverified', async () => {
         ageSeconds: 3600,
       },
     ],
+    reconcileProblems: [],
   });
 });
 
@@ -136,5 +139,43 @@ it('leaves out a done slice', async () => {
   const slice = makeKindTicket('demo-3469', 'slice');
   const output = successOf(await needs([], [slice], [mergedFact, auditFact]));
 
-  expect(output.json).toEqual({ items: [] });
+  expect(output.json).toEqual({ items: [], reconcileProblems: [] });
+});
+
+it('returns the list with one reconcile problem when gh fails', async () => {
+  const question = makeFact({ kind: 'log', type: 'question', text: 'Why?' });
+
+  const openPr = makeFact({
+    kind: 'pr',
+    ticket: 'demo-3469',
+    repository: 'acme/app',
+    number: 7,
+    state: 'open',
+    base: 'main',
+    head: 'head1',
+    trunk: 'main',
+    inTrunk: false,
+  });
+
+  const fakeSession = makeSession({
+    tickets: [makeTicket('demo-3467'), makeKindTicket('demo-3469', 'slice')],
+    facts: [question, openPr],
+  });
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'OPEN', error: 'offline' } }),
+  });
+
+  const output = successOf(
+    await needsCommand({ args: [], json: true, effects, session: fakeSession.session }),
+  );
+
+  expect(output.json).toMatchObject({
+    items: [expect.objectContaining({ id: 'demo-3467', reason: 'question' })],
+    reconcileProblems: [expect.objectContaining({ ticket: 'demo-3469', number: 7 })],
+  });
+
+  expect(output.text).toContain('demo-3467  question');
+  expect(output.text).toContain('problem: ');
 });
