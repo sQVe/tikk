@@ -95,3 +95,32 @@ it('marks a run at another head as not current in the listing', async () => {
 
   expect(successOf(listed).json).toMatchObject({ runs: [{ kind: 'qa', current: false }] });
 });
+
+it('marks each run current or stale in the text listing', async () => {
+  const fakeSession = makeSession({ tickets: [slice()] });
+  const { effects } = makeEffects({ session: fakeSession, files: { [runPath]: runFor('a') } });
+  const session = fakeSession.session;
+
+  for (const head of ['head1', 'head2']) {
+    await qaCommand({ args: addFlags(head), json: false, effects, session });
+  }
+
+  await session.refresh();
+
+  const listed = await qaCommand({
+    args: ['ls', 'demo-3467', '--head', 'head1'],
+    json: false,
+    effects,
+    session,
+  });
+
+  const runs = successOf(listed).json as { runs: { run: string; target: { head: string } }[] };
+  const runOf = (head: string) => runs.runs.find((entry) => entry.target.head === head)?.run;
+
+  expect(successOf(listed).text.split('\n').filter(Boolean).toSorted()).toEqual(
+    [
+      `demo-3467  ${runOf('head1')}  current  1 scenarios`,
+      `demo-3467  ${runOf('head2')}  stale  1 scenarios`,
+    ].toSorted(),
+  );
+});
