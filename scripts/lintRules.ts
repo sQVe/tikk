@@ -22,7 +22,7 @@ type ImportSource =
   | ESTree.ExportAllDeclaration;
 
 const folderModules = new Set(['ticket', 'fact', 'store', 'cache', 'sync', 'cli']);
-const flatModules = new Set(['invariant', 'result', 'project', 'index']);
+const flatModules = new Set(['invariant', 'result', 'project', 'github', 'index']);
 
 const allowedImports = new Map<string, Set<string>>([
   ['invariant', new Set()],
@@ -33,7 +33,8 @@ const allowedImports = new Map<string, Set<string>>([
   ['cache', new Set(['ticket', 'fact', 'invariant', 'result'])],
   ['sync', new Set(['ticket', 'invariant', 'result'])],
   ['project', new Set(['ticket', 'invariant', 'result'])],
-  ['cli', new Set(['ticket', 'fact', 'invariant', 'result'])],
+  ['github', new Set(['result'])],
+  ['cli', new Set(['ticket', 'fact', 'github', 'invariant', 'result'])],
   ['index', new Set([...folderModules, ...flatModules])],
 ]);
 
@@ -47,6 +48,7 @@ const packagePolicies = new Map<string, PackagePolicy>([
   ['cache', { builtins: true, packages: ['zod'] }],
   ['sync', { builtins: true, packages: ['zod'] }],
   ['project', { builtins: true, packages: ['zod'] }],
+  ['github', { builtins: false, packages: ['zod'] }],
   ['cli', { builtins: false, packages: ['node:util'] }],
   ['index', builtinsOnly],
 ]);

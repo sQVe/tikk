@@ -65,6 +65,39 @@ const aliasSchema = z.strictObject({
   from: ticketIdSchema,
 });
 
+const repositorySchema = z
+  .string()
+  .regex(/^[^/\s]+\/[^/\s]+$/, 'Repository must look like owner/name.');
+
+const prSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('pr'),
+  repository: repositorySchema,
+  number: z.number().int().positive(),
+  state: z.enum(['open', 'closed', 'merged']),
+  base: z.string().min(1),
+  head: z.string().min(1),
+  mergeCommit: z.string().min(1).optional(),
+  trunk: z.string().min(1),
+  inTrunk: z.boolean(),
+});
+
+const auditVerdictSchema = z.strictObject({
+  criterion: z.string().min(1),
+  verdict: z.enum(['met', 'not-met', 'not-run', 'deferred']),
+  evidence: z.string().min(1),
+});
+
+const auditSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('audit'),
+  repository: repositorySchema,
+  changeHash: z.string().min(1),
+  head: z.string().min(1),
+  base: z.string().min(1),
+  verdicts: z.array(auditVerdictSchema).min(1),
+});
+
 const factSchema = z.discriminatedUnion('kind', [
   claimSchema,
   releaseSchema,
@@ -73,6 +106,8 @@ const factSchema = z.discriminatedUnion('kind', [
   statusSchema,
   unarchiveSchema,
   aliasSchema,
+  prSchema,
+  auditSchema,
 ]);
 
 export type Fact = z.output<typeof factSchema>;

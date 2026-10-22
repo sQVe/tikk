@@ -1,6 +1,8 @@
 import type { Fact } from './factLine.ts';
+import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
+import type { SliceStateName } from './sliceState.ts';
 import { deriveTaskStateFromOwnFacts } from './taskState.ts';
-import type { TaskState, TaskStateName, TaskTicket } from './taskState.ts';
+import type { TaskClaim, TaskStateName, TaskTicket } from './taskState.ts';
 
 export interface ReadyScope {
   kind?: 'task' | 'slice';
@@ -13,9 +15,16 @@ interface Blocker {
   state: string;
 }
 
+type ReadyStateName = TaskStateName | SliceStateName;
+
+interface Consideration {
+  state: ReadyStateName;
+  claim: TaskClaim | null;
+}
+
 interface ReadyCandidate<Ticket extends TaskTicket> {
   ticket: Ticket;
-  state: TaskStateName;
+  state: ReadyStateName;
 }
 
 interface SkippedTask<Ticket extends TaskTicket> {
@@ -31,7 +40,7 @@ export interface ReadySelection<Ticket extends TaskTicket> {
   skipped: SkippedTask<Ticket>[];
 }
 
-const consideredStates = new Set<TaskStateName>(['open', 'active', 'submitted']);
+const consideredStates = new Set<ReadyStateName>(['open', 'active', 'submitted', 'planned']);
 const clearingStates = new Set(['done', 'canceled', 'closed']);
 
 const inScope = (ticket: TaskTicket, scope: ReadyScope): boolean => {
@@ -62,58 +71,44 @@ const compareRank = (left: TaskTicket, right: TaskTicket): number => {
   return left.id < right.id ? -1 : Number(left.id > right.id);
 };
 
-const groupByTicket = (facts: Fact[]): Map<string, Fact[]> => {
-  const grouped = new Map<string, Fact[]>();
-
-  for (const fact of facts) {
-    const own = grouped.get(fact.ticket);
-
-    if (own === undefined) {
-      grouped.set(fact.ticket, [fact]);
-    } else {
-      own.push(fact);
-    }
-  }
-
-  return grouped;
-};
-
-const deriveStates = (tickets: TaskTicket[], facts: Fact[], now: Date): Map<string, TaskState> => {
-  const grouped = groupByTicket(facts);
-  const states = new Map<string, TaskState>();
+const deriveStates = (
+  tickets: TaskTicket[],
+  facts: Fact[],
+  now: Date,
+): Map<string, Consideration> => {
+  const index = buildSliceIndex(tickets, facts);
+  const states = new Map<string, Consideration>();
 
   for (const ticket of tickets) {
-    if (ticket.frontMatter.kind === 'task') {
-      states.set(ticket.id, deriveTaskStateFromOwnFacts(ticket, grouped.get(ticket.id) ?? [], now));
+    const { kind, status } = ticket.frontMatter;
+
+    if (kind === 'task') {
+      states.set(
+        ticket.id,
+        deriveTaskStateFromOwnFacts(ticket, index.factsByTicket.get(ticket.id) ?? [], now),
+      );
+    }
+
+    if (kind === 'slice' && status === 'open') {
+      states.set(ticket.id, {
+        state: deriveSliceState(ticket, index, now).state,
+        claim: null,
+      });
     }
   }
 
   return states;
 };
 
-// A slice has no claims, so its status is its state. A slice that is done comes from PR facts.
-const sliceState = (ticket: TaskTicket): TaskState | undefined => {
-  const { status } = ticket.frontMatter;
-
-  return status === 'open' ? { state: 'open', claim: null } : undefined;
-};
-
-const considerationOf = (
-  ticket: TaskTicket,
-  states: Map<string, TaskState>,
-): TaskState | undefined =>
-  ticket.frontMatter.kind === 'slice' ? sliceState(ticket) : states.get(ticket.id);
-
-const blockerState = (target: TaskTicket | undefined, states: Map<string, TaskState>): string => {
+const blockerState = (
+  target: TaskTicket | undefined,
+  states: Map<string, Consideration>,
+): string => {
   if (target === undefined) {
     return 'missing';
   }
 
-  if (target.frontMatter.kind !== 'task') {
-    return target.frontMatter.status;
-  }
-
-  return states.get(target.id)?.state ?? 'missing';
+  return states.get(target.id)?.state ?? target.frontMatter.status;
 };
 
 export const selectReady = <Ticket extends TaskTicket>(
@@ -127,8 +122,8 @@ export const selectReady = <Ticket extends TaskTicket>(
 
   const considered: {
     ticket: Ticket;
-    state: TaskStateName;
-    claim: TaskState['claim'];
+    state: ReadyStateName;
+    claim: TaskClaim | null;
   }[] = [];
 
   for (const ticket of tickets) {
@@ -136,7 +131,7 @@ export const selectReady = <Ticket extends TaskTicket>(
       continue;
     }
 
-    const derived = considerationOf(ticket, states);
+    const derived = states.get(ticket.id);
 
     if (derived !== undefined && consideredStates.has(derived.state)) {
       considered.push({ ticket, state: derived.state, claim: derived.claim });

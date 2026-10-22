@@ -2,6 +2,7 @@ import { selectNeeds } from '../fact/fact.ts';
 import type { NeedItem } from '../fact/fact.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { problemLines, reconcileBeforeRead } from './prReconcile.ts';
 
 const secondsPerMinute = 60;
 const secondsPerHour = 3600;
@@ -30,15 +31,17 @@ const itemView = (item: NeedItem<CliTicket>): Record<string, unknown> => ({
   since: item.since,
   ageSeconds: item.ageSeconds,
   ...(item.holder === undefined ? {} : { holder: item.holder }),
+  ...(item.openTasks === undefined ? {} : { openTasks: item.openTasks }),
   ...(item.ticket.error === null ? {} : { parseError: item.ticket.path }),
 });
 
 const itemLine = (item: NeedItem<CliTicket>): string => {
   const { ticket } = item;
   const line = `${ticket.id}  ${item.reason}  ${shortAge(item.ageSeconds)}  ${ticket.frontMatter.title}`;
+  const tasks = item.openTasks === undefined ? '' : `  ${item.openTasks.join(' ')}`;
   const suffix = ticket.error === null ? '' : `  parseError ${ticket.path}`;
 
-  return `${line}${suffix}\n`;
+  return `${line}${tasks}${suffix}\n`;
 };
 
 export const needsCommand = async ({
@@ -56,7 +59,13 @@ export const needsCommand = async ({
     return invalidArguments('Usage: tikk needs [--json]');
   }
 
-  const tickets = session.listTickets({ includeArchived: false });
+  const reconciled = await reconcileBeforeRead({ effects, session });
+
+  if (!reconciled.ok) {
+    return reconciled;
+  }
+
+  const tickets = session.listTickets({ includeArchived: true });
   const facts = await session.listFacts();
 
   if (!facts.ok) {
@@ -67,6 +76,9 @@ export const needsCommand = async ({
 
   return {
     ok: true,
-    value: { json: { items: items.map(itemView) }, text: items.map(itemLine).join('') },
+    value: {
+      json: { items: items.map(itemView), reconcileProblems: reconciled.value },
+      text: items.map(itemLine).join('') + problemLines(reconciled.value),
+    },
   };
 };
