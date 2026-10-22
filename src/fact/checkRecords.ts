@@ -4,7 +4,6 @@ export type CheckFact = Extract<Fact, { kind: 'check' }>;
 
 export type CheckRecord = CheckFact & { current: boolean };
 
-// The code state a caller has now. Without a change hash, the head alone decides.
 export interface CodeState {
   head: string;
   changeHash?: string;
