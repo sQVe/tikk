@@ -34,6 +34,13 @@ interface CliMessage {
   message: string;
 }
 
+export interface EditorCleanupFailure {
+  kind: 'cleanup';
+  message: string;
+}
+
+type EditorFailure = EditorCleanupFailure | { kind: 'cancelled' | 'failed'; message: string };
+
 interface CreatedFile {
   id: TicketId;
   path: string;
@@ -127,7 +134,7 @@ export interface CliEffects {
   openSession: () => Promise<Result<CliSession, SessionReason>>;
   resolveProject: () => Promise<Result<ProjectName, CliMessage>>;
   readTextFile: (path: string) => Promise<string | undefined>;
-  runEditor: (path: string) => Promise<Result<undefined, CliMessage>>;
+  runEditor: (path: string, signal: AbortSignal) => Promise<Result<undefined, EditorFailure>>;
   resolveMachine: () => Promise<Result<string, CliMessage>>;
   runGh: (args: string[], signal: AbortSignal) => Promise<Result<string, CliMessage>>;
   now: () => Date;

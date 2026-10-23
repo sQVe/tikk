@@ -28,7 +28,11 @@
     "release:github": "bunx --bun changeset tag"
   },
   "dependencies": {
+    "@opentui/core": "0.5.14",
+    "@opentui/keymap": "0.5.14",
+    "@opentui/react": "0.5.14",
     "nanoid": "6.0.2",
+    "react": "19.3.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -43,6 +47,7 @@
     "@stryker-mutator/instrumenter": "10.0.0",
     "@stryker-mutator/util": "10.0.0",
     "@types/bun": "1.4.2",
+    "@types/react": "19.3.0",
     "knip": "6.37.0",
     "typescript": "7.0.2",
     "vite-plus": "0.3.0"

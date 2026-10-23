@@ -47,8 +47,10 @@ controls the renderer's lifetime, every exit path, and every terminal handoff.
 
 ### Negative
 
-- The suspend and resume sequence is not yet verified on the pinned OpenTUI version. The first
-  action that lends the terminal must prove it in a pseudo-terminal test.
+- The suspend and resume sequence depends on the pinned OpenTUI version. Pseudo-terminal tests
+  verify it: `$EDITOR` reads a line typed into the lent terminal, the TUI resumes, shows the edit,
+  and takes keys again. Shutdown during the editor kills it and restores the terminal. An OpenTUI
+  upgrade must keep those tests passing.
 - Bounded waits can cut off a slow child process at quit.
 
 ## Alternatives considered

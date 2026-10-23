@@ -58,10 +58,11 @@ const addRun = async (id: string, verdict = 'pass'): Promise<string> => {
 
 const audit = async (id: string, run: string) => {
   const verdictsFile = join(cli().home, `verdicts-${run}.yaml`);
+  const citation = JSON.stringify(run);
 
   await Bun.write(
     verdictsFile,
-    `- criterion: a\n  verdict: met\n  evidence: Seen in QA\n  qa: [${run}]\n`,
+    `- criterion: a\n  verdict: met\n  evidence: Seen in QA\n  qa: [${citation}]\n`,
   );
 
   return cli().run([
@@ -92,6 +93,47 @@ afterEach(async () => {
 it('records an audit that cites a QA run for its criterion', async () => {
   const id = await createSlice();
   const run = await addRun(id);
+  const result = await audit(id, run);
+
+  expect(result.exitCode).toBe(0);
+});
+
+it('records an audit that cites a stored numeric-only QA run ID', async () => {
+  const id = await createSlice();
+  const run = '123456789012';
+
+  const fact = {
+    version: 1,
+    kind: 'qa',
+    ticket: id,
+    at: '2026-10-22T12:00:00.000Z',
+    machine: 'numeric-run',
+    target: { repository: 'acme/app', head: 'head1', base: 'main', changeHash: 'hash1' },
+    run,
+    scenarios: [{ name: 'Open the page', criteria: ['a'], observed: 'It loads', verdict: 'pass' }],
+    artifacts: [],
+    gaps: [],
+  };
+
+  const serialized = JSON.stringify(fact);
+
+  await Bun.write(
+    join(cli().storePath, 'facts', 'numeric-run', '2026-10.jsonl'),
+    `${serialized}\n`,
+  );
+
+  const listed = await cli().runJson<{ runs: { run: string }[] }>([
+    'qa',
+    'ls',
+    id,
+    '--head',
+    'head1',
+    '--change-hash',
+    'hash1',
+  ]);
+
+  expect(listed.runs.map((entry) => entry.run)).toEqual([run]);
+
   const result = await audit(id, run);
 
   expect(result.exitCode).toBe(0);

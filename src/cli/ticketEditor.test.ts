@@ -1,17 +1,14 @@
 import { expect, it } from 'bun:test';
 
-import {
-  failed,
-  failureOf,
-  makeEffects,
-  makeSession,
-  makeTicket,
-  successOf,
-} from './cliHarness.ts';
+import type { CliEffects } from './cliEffects.ts';
+import { failureOf, makeEffects, makeSession, makeTicket, successOf } from './cliHarness.ts';
 import type { EffectsOptions, SessionOptions } from './cliHarness.ts';
 import { ticketEditor } from './ticketEditor.ts';
 
 const target = makeTicket('demo-3467');
+
+const failEditor: CliEffects['runEditor'] = () =>
+  Promise.resolve({ ok: false, reason: { kind: 'failed', message: 'Editor exited for /store.' } });
 
 const open = (
   rawId: string,
@@ -78,13 +75,7 @@ it('does not open the editor for an invalid ID', async () => {
 });
 
 it('returns a storeError when the editor fails', async () => {
-  const { result } = open(
-    'demo-3467',
-    {},
-    {
-      overrides: { runEditor: () => failed('Editor exited for /store.') },
-    },
-  );
+  const { result } = open('demo-3467', {}, { overrides: { runEditor: failEditor } });
 
   const reason = failureOf(await result);
 
@@ -126,13 +117,7 @@ it('schedules one background sync after the editor succeeds', async () => {
 });
 
 it('schedules no background sync when the editor fails', async () => {
-  const { fakeEffects, result } = open(
-    'demo-3467',
-    {},
-    {
-      overrides: { runEditor: () => failed('Editor exited for /store.') },
-    },
-  );
+  const { fakeEffects, result } = open('demo-3467', {}, { overrides: { runEditor: failEditor } });
 
   await result;
 

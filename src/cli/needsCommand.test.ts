@@ -236,3 +236,64 @@ it('prints a blocked finding with its fingerprint and claim', async () => {
 
   expect(output.text).toBe('demo-3467  blockedFinding  1h  fp-1  Wrong\n');
 });
+
+const itemsJson = (output: { json: unknown }): string =>
+  JSON.stringify((output.json as { items: unknown }).items);
+
+it('keeps the key order of each reason in the JSON', async () => {
+  const question = makeFact({ kind: 'log', type: 'question', text: 'Why?' });
+  const questionOutput = successOf(await needs([], [makeTicket('demo-3467')], [question]));
+
+  expect(itemsJson(questionOutput)).toBe(
+    '[{"id":"demo-3467","title":"A title","reason":"question","since":"2026-10-20T11:00:00.000Z","ageSeconds":3600}]',
+  );
+
+  const ended = makeFact({ kind: 'claim', holder: 'agent', leaseEnd: '2026-10-20T11:59:00.000Z' });
+  const staleOutput = successOf(await needs([], [makeTicket('demo-3467')], [ended]));
+
+  expect(itemsJson(staleOutput)).toBe(
+    '[{"id":"demo-3467","title":"A title","reason":"staleClaim","since":"2026-10-20T11:59:00.000Z","ageSeconds":60,"holder":"agent"}]',
+  );
+
+  const task = makeTicket('demo-3478', {
+    frontMatter: { ...makeTicket('demo-3478').frontMatter, parent: ticketIdOf('demo-3469') },
+  });
+
+  const slice = makeKindTicket('demo-3469', 'slice');
+  const flaggedOutput = successOf(await needs([], [slice, task], [mergedFact, auditFact]));
+
+  expect(itemsJson(flaggedOutput)).toBe(
+    '[{"id":"demo-3469","title":"A title","reason":"flagged","since":"2026-10-20T11:00:00.000Z","ageSeconds":3600,"openTasks":["demo-3478"]}]',
+  );
+
+  const review = makeFact({
+    kind: 'review',
+    target: { repository: 'tikk', head: 'aaa', base: 'main', changeHash: 'h' },
+    captureHash: 'c',
+    mode: 'code',
+    findings: [{ fingerprint: 'fp-1', severity: 'high', location: 'a.ts:1', claim: 'Wrong' }],
+  });
+
+  const blocked = makeFact({
+    kind: 'finding',
+    fingerprint: 'fp-1',
+    status: 'blocked',
+    actor: 'agent',
+    reason: 'Needs a decision',
+  });
+
+  const broken = makeTicket('demo-3467', { error: 'Bad front matter.' });
+  const blockedOutput = successOf(await needs([], [broken], [review, blocked]));
+  const keys = Object.keys((JSON.parse(itemsJson(blockedOutput)) as object[])[0] ?? {});
+
+  expect(keys).toEqual([
+    'id',
+    'title',
+    'reason',
+    'since',
+    'ageSeconds',
+    'fingerprint',
+    'claim',
+    'parseError',
+  ]);
+});
