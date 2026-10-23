@@ -279,6 +279,67 @@ it('shows the tree rows on tab and the home items on a second tab', async () => 
   expect(home).not.toContain('Plan title');
 });
 
+it('shows a failed home read and recovers on a successful store refresh', async () => {
+  let failed = true;
+
+  const setup = await mount([], { width: 60, height: 8 }, [], [], {
+    load: async () => {
+      if (failed) {
+        return { ok: false, reason: { code: 'storeError', message: 'Home read failed.' } };
+      }
+
+      return { ok: true, value: { items: [needView(0, 'Recovered home')], reconcileProblems: [] } };
+    },
+  });
+
+  expect(setup.captureCharFrame()).toContain('Home read failed.');
+  expect(selectedLine(setup)).toBeUndefined();
+
+  await press(setup, 'e');
+  expect(edited).toEqual([]);
+
+  failed = false;
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).not.toContain('Home read failed.');
+  expect(selectedLine(setup)).toContain('Recovered home');
+
+  await press(setup, 'e');
+  expect(edited).toEqual(['demo-3400']);
+});
+
+it('shows a failed tree read and recovers on a successful store refresh', async () => {
+  let failed = true;
+
+  const setup = await mount([], { width: 60, height: 8 }, [], [], {
+    loadTree: async () => {
+      if (failed) {
+        return { ok: false, reason: { code: 'storeError', message: 'Tree read failed.' } };
+      }
+
+      return { ok: true, value: treeGroups() };
+    },
+  });
+
+  await press(setup, 'tab');
+
+  expect(setup.captureCharFrame()).toContain('Tree read failed.');
+  expect(selectedLine(setup)).toBeUndefined();
+
+  await press(setup, 'e');
+  expect(edited).toEqual([]);
+
+  failed = false;
+  await storeChanged(setup);
+
+  expect(setup.captureCharFrame()).not.toContain('Tree read failed.');
+  expect(selectedLine(setup)).toContain('Plan title');
+  expect(setup.captureCharFrame()).toContain('Task title');
+
+  await press(setup, 'e');
+  expect(edited).toEqual(['demo-3401']);
+});
+
 it('keeps the selected tree row in the frame when the tree is taller than the terminal', async () => {
   const slices = Array.from({ length: 8 }, (_, index) => ({
     id: `demo-${3410 + index}` as NeedView['id'],
