@@ -597,6 +597,58 @@ it.each(['process list failure', 'signal refusal'])(
   30_000,
 );
 
+it('keeps handling delayed SIGTERM during editor cleanup and restores the terminal', async () => {
+  await cli().runJson(['new', 'plan', 'aaaa', '--status', 'draft']);
+
+  const pidPath = join(cli().home, 'editor.pid');
+  const editorScript = stuckEditor(pidPath).replace("trap '' TERM", "trap '' TERM HUP");
+  const tikk = startTikk(await writeEditor(editorScript));
+  let editorPid: number | undefined;
+
+  try {
+    await tikk.waitForScreen('Nothing needs you.');
+
+    tikk.type('\t');
+    await tikk.waitForScreen('aaaa  draft');
+
+    const beforeEdit = tikk.terminal.output.length;
+
+    tikk.type('e');
+    await tikk.waitForOutput(editorReady, beforeEdit);
+
+    editorPid = Number(await readFile(pidPath, 'utf8'));
+
+    const stopping = Date.now();
+
+    tikk.child.kill('SIGTERM');
+    await Bun.sleep(250);
+
+    expect(tikk.child.exitCode).toBeNull();
+    expect(tikk.child.signalCode).toBeNull();
+    expect(isRunning(editorPid)).toBe(true);
+
+    tikk.child.kill('SIGTERM');
+
+    await waitFor(
+      () => tikk.child.exitCode !== null || tikk.child.signalCode !== null,
+      'bounded repeated-signal shutdown',
+    );
+
+    expect(Date.now() - stopping).toBeLessThan(6000);
+    expect(await tikk.child.exited).toBe(0);
+    expect(isRunning(editorPid)).toBe(false);
+    expect(screenOf(tikk.terminal.output).alternate).toBe(false);
+    expect(tikk.terminal.output.endsWith(showCursor)).toBe(true);
+  } finally {
+    if (editorPid !== undefined && isRunning(editorPid)) {
+      process.kill(editorPid, 'SIGKILL');
+    }
+
+    tikk.close();
+    await tikk.child.exited;
+  }
+}, 30_000);
+
 it('stops an editor that ignores SIGTERM at shutdown, restores the terminal, and exits', async () => {
   await cli().runJson(['new', 'plan', 'aaaa', '--status', 'draft']);
 

@@ -46,6 +46,7 @@ const start = async (options: StartOptions = {}) => {
   const exitCodes: number[] = [];
   const printed: unknown[] = [];
   const destroyedAtPrint: number[] = [];
+  const removedHandlers: { event: string; destroyed: number }[] = [];
   const root = createRoot(setup.renderer);
   const destroyRenderer = setup.renderer.destroy.bind(setup.renderer);
 
@@ -91,7 +92,10 @@ const start = async (options: StartOptions = {}) => {
     listen: (event, handler) => {
       handlers.set(event, handler);
 
-      return () => handlers.delete(event);
+      return () => {
+        removedHandlers.push({ event, destroyed: calls.destroy });
+        handlers.delete(event);
+      };
     },
     exit: (code) => exitCodes.push(code),
     printError: (error) => {
@@ -151,6 +155,7 @@ const start = async (options: StartOptions = {}) => {
     exitCodes,
     printed,
     destroyedAtPrint,
+    removedHandlers,
     closing,
     watcher,
     lending,
@@ -285,6 +290,74 @@ it('reports a cleanup failure after restoring the terminal exactly once and canc
   expect(destroyedAtPrint).toEqual([1]);
   expect(printed).toEqual(['Cannot stop editor processes.']);
   expect(exitCodes).toEqual([1]);
+});
+
+it('keeps exit handlers until restoration and preserves the first fatal failure during close', async () => {
+  const { app, handlers, calls, exitCodes, printed, removedHandlers, closing, watcher, lending } =
+    await start();
+
+  const release = Promise.withResolvers<undefined>();
+  const firstFailure = new Error('first failure');
+  const callbacks: string[] = [];
+
+  closing.gate = release.promise;
+
+  const running = app.effects?.lend(() => release.promise);
+
+  await settle();
+
+  const queued = app.effects?.lend(async () => {
+    callbacks.push('queued');
+  });
+
+  handlers.get('SIGTERM')?.();
+
+  expect(watcher.stops).toBe(1);
+
+  await settle();
+
+  expect([...handlers.keys()]).toEqual([
+    'SIGINT',
+    'SIGTERM',
+    'uncaughtException',
+    'unhandledRejection',
+  ]);
+
+  expect(removedHandlers).toEqual([]);
+  expect(calls).toEqual({ unmount: 1, destroy: 0, dispose: 0 });
+
+  handlers.get('uncaughtException')?.(firstFailure);
+  handlers.get('unhandledRejection')?.(new Error('later failure'));
+  handlers.get('SIGINT')?.();
+  handlers.get('SIGTERM')?.();
+  await settle();
+
+  expect(printed).toEqual([]);
+  expect(exitCodes).toEqual([]);
+  expect(watcher.stops).toBe(1);
+
+  release.resolve(undefined);
+  await running;
+
+  expect(await queued).toEqual({ ok: false, reason: 'cancelled' });
+
+  await settle();
+
+  expect(callbacks).toEqual([]);
+  expect(lending).toEqual(['suspend']);
+  expect(calls).toEqual({ unmount: 1, destroy: 1, dispose: 1 });
+  expect(handlers.size).toBe(0);
+
+  expect(removedHandlers).toEqual([
+    { event: 'SIGINT', destroyed: 1 },
+    { event: 'SIGTERM', destroyed: 1 },
+    { event: 'uncaughtException', destroyed: 1 },
+    { event: 'unhandledRejection', destroyed: 1 },
+  ]);
+
+  expect(printed).toEqual([firstFailure]);
+  expect(exitCodes).toEqual([1]);
+  expect(watcher.stops).toBe(1);
 });
 
 it('exits only after the session finishes closing its pending work', async () => {

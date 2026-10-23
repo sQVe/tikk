@@ -148,7 +148,7 @@ export const startTerminal = async (
 ): Promise<void> => {
   const { needs } = dependencies;
   const changes = createChangeFeed(dependencies.watch);
-  const removers: (() => void)[] = [changes.stop];
+  const removers: (() => void)[] = [];
   let shutdownPromise: Promise<void> | undefined;
   let fatal: { error: unknown } | undefined;
   let finishing = false;
@@ -165,13 +165,11 @@ export const startTerminal = async (
   };
 
   const runShutdown = async (): Promise<void> => {
+    changes.stop();
+
     const opened = await settledOpen();
 
     try {
-      for (const remove of removers.splice(0)) {
-        remove();
-      }
-
       opened?.root.unmount();
 
       const closed = await needs.close();
@@ -180,7 +178,13 @@ export const startTerminal = async (
         fatal ??= { error: closed.reason.message };
       }
     } finally {
-      opened?.renderer.destroy();
+      try {
+        opened?.renderer.destroy();
+      } finally {
+        for (const remove of removers.splice(0)) {
+          remove();
+        }
+      }
     }
   };
 
