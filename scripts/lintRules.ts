@@ -41,7 +41,6 @@ const allowedImports = new Map<string, Set<string>>([
 ]);
 
 const noPackages: PackagePolicy = { builtins: false, packages: [] };
-const builtinsOnly: PackagePolicy = { builtins: true, packages: [] };
 
 const packagePolicies = new Map<string, PackagePolicy>([
   ['ticket', { builtins: false, packages: ['zod'] }],
@@ -66,7 +65,7 @@ const packagePolicies = new Map<string, PackagePolicy>([
       packages: ['react', '@opentui/core', '@opentui/keymap', '@opentui/react'],
     },
   ],
-  ['index', builtinsOnly],
+  ['index', { builtins: true, packages: ['zod'] }],
 ]);
 
 // Files outside src/ that a module may import, relative to the package root.

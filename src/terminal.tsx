@@ -173,7 +173,12 @@ export const startTerminal = async (
       }
 
       opened?.root.unmount();
-      await needs.close();
+
+      const closed = await needs.close();
+
+      if (!closed.ok) {
+        fatal ??= { error: closed.reason.message };
+      }
     } finally {
       opened?.renderer.destroy();
     }

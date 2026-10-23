@@ -17,6 +17,8 @@ import {
 import { homedir, hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { z } from 'zod';
+
 import { openCache } from './cache/cache.ts';
 import type { CacheFiles, TicketCache } from './cache/cache.ts';
 import { openNeedsSession, runCli } from './cli/cli.ts';
@@ -66,6 +68,8 @@ import type {
   SyncScheduleFunctions,
 } from './sync/sync.ts';
 import type { TicketId } from './ticket/ticket.ts';
+
+type EditorCleanup = Result<undefined, { kind: 'cleanup'; message: string }>;
 
 const homeDirectory = homedir();
 const defaultStoreRoot = resolveStoreRoot({ tikkHome: Bun.env['TIKK_HOME'], homeDirectory });
@@ -346,6 +350,111 @@ const backgroundCommand = (): string[] => {
 };
 
 const editorKillDelayMilliseconds = 2000;
+const editorReapDelayMilliseconds = 50;
+
+const processRowSchema = z.tuple([
+  z.coerce.number().int().positive(),
+  z.coerce.number().int().nonnegative(),
+]);
+
+const descendantProcessIds = (roots: readonly number[], rows: [number, number][]): number[] => {
+  const owned = new Set(roots);
+  const pending = [...roots];
+
+  for (const parent of pending) {
+    for (const [pid, parentPid] of rows) {
+      if (parentPid === parent && !owned.has(pid)) {
+        owned.add(pid);
+        pending.push(pid);
+      }
+    }
+  }
+
+  return pending;
+};
+
+const editorProcessTree = (
+  roots: readonly number[],
+): Result<number[], { kind: 'cleanup'; message: string }> => {
+  try {
+    const listing = Bun.spawnSync(['ps', '-A', '-o', 'pid=', '-o', 'ppid='], {
+      stdout: 'pipe',
+      stderr: 'ignore',
+      timeout: 500,
+      killSignal: 'SIGKILL',
+    });
+
+    if (!listing.success) {
+      return { ok: false, reason: { kind: 'cleanup', message: 'Cannot list editor processes.' } };
+    }
+
+    const lines = listing.stdout.toString().trim().split('\n');
+    const rows = lines.map((line) => line.trim().split(/\s+/));
+    const parsed = z.array(processRowSchema).safeParse(rows);
+
+    if (!parsed.success) {
+      return {
+        ok: false,
+        reason: { kind: 'cleanup', message: 'Cannot read the editor process list.' },
+      };
+    }
+
+    return { ok: true, value: descendantProcessIds(roots, parsed.data) };
+  } catch {
+    return { ok: false, reason: { kind: 'cleanup', message: 'Cannot list editor processes.' } };
+  }
+};
+
+const signalEditorProcesses = (pids: readonly number[], signal: NodeJS.Signals): EditorCleanup => {
+  let failure: EditorCleanup | undefined;
+
+  // Editors share tikk's foreground terminal group. Only signal owned positive PIDs.
+  for (const pid of pids.toReversed()) {
+    try {
+      process.kill(pid, signal);
+    } catch (error) {
+      const missing = error instanceof Error && 'code' in error && error.code === 'ESRCH';
+
+      if (!missing) {
+        failure ??= {
+          ok: false,
+          reason: { kind: 'cleanup', message: `Cannot stop editor process ${pid}.` },
+        };
+      }
+    }
+  }
+
+  return failure ?? { ok: true, value: undefined };
+};
+
+const stopEditorTree = async (editorPid: number): Promise<EditorCleanup> => {
+  const tree = editorProcessTree([editorPid]);
+  const owned = tree.ok ? tree.value : [editorPid];
+  const descendants = owned.filter((pid) => pid !== editorPid);
+  const targets = descendants.length === 0 ? owned : descendants;
+  const terminated = signalEditorProcesses(targets, 'SIGTERM');
+
+  await Bun.sleep(editorKillDelayMilliseconds);
+
+  const remaining = editorProcessTree(owned);
+  const remainingPids = remaining.ok ? remaining.value : owned;
+  const remainingDescendants = remainingPids.filter((pid) => pid !== editorPid);
+  const killed = signalEditorProcesses(remainingDescendants, 'SIGKILL');
+
+  if (remainingDescendants.length > 0) {
+    await Bun.sleep(editorReapDelayMilliseconds);
+  }
+
+  const stopped = signalEditorProcesses([editorPid], 'SIGKILL');
+
+  for (const result of [tree, terminated, remaining, killed, stopped]) {
+    if (!result.ok) {
+      return result;
+    }
+  }
+
+  return { ok: true, value: undefined };
+};
 
 const runEditor: CliEffects['runEditor'] = async (path, signal) => {
   const editor = Bun.env['EDITOR'] ?? 'vi';
@@ -358,14 +467,12 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
       stderr: 'inherit',
     });
 
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const interrupted = Promise.withResolvers<EditorCleanup>();
+    let stopping: Promise<EditorCleanup> | undefined;
 
     const stop = () => {
-      child.kill('SIGTERM');
-
-      killTimer = setTimeout(() => {
-        child.kill('SIGKILL');
-      }, editorKillDelayMilliseconds);
+      stopping ??= stopEditorTree(child.pid);
+      interrupted.resolve(stopping);
     };
 
     signal.addEventListener('abort', stop, { once: true });
@@ -374,25 +481,37 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
       stop();
     }
 
+    try {
+      await Promise.race([child.exited, interrupted.promise]);
+    } finally {
+      signal.removeEventListener('abort', stop);
+    }
+
+    const cleanup = await stopping;
+
+    if (cleanup !== undefined && !cleanup.ok) {
+      return cleanup;
+    }
+
     const exitCode = await child.exited;
 
-    signal.removeEventListener('abort', stop);
-    clearTimeout(killTimer);
-
     if (signal.aborted) {
-      return { ok: false, reason: { message: `The editor "${editor}" was stopped.` } };
+      return {
+        ok: false,
+        reason: { kind: 'cancelled', message: `The editor "${editor}" was stopped.` },
+      };
     }
 
     if (exitCode !== 0) {
       return {
         ok: false,
-        reason: { message: `The editor "${editor}" exited with ${exitCode}.` },
+        reason: { kind: 'failed', message: `The editor "${editor}" exited with ${exitCode}.` },
       };
     }
 
     return { ok: true, value: undefined };
   } catch {
-    return { ok: false, reason: { message: `Cannot run the editor "${editor}".` } };
+    return { ok: false, reason: { kind: 'failed', message: `Cannot run the editor "${editor}".` } };
   }
 };
 

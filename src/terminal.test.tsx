@@ -16,6 +16,7 @@ type Setup = Awaited<ReturnType<typeof createTestRenderer>>;
 interface StartOptions {
   edit?: NeedsSession['edit'];
   resume?: () => void;
+  closeFailure?: { kind: 'cleanup'; message: string };
 }
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -44,6 +45,7 @@ const start = async (options: StartOptions = {}) => {
   const app: { effects?: AppProps['effects'] } = {};
   const exitCodes: number[] = [];
   const printed: unknown[] = [];
+  const destroyedAtPrint: number[] = [];
   const root = createRoot(setup.renderer);
   const destroyRenderer = setup.renderer.destroy.bind(setup.renderer);
 
@@ -92,7 +94,10 @@ const start = async (options: StartOptions = {}) => {
       return () => handlers.delete(event);
     },
     exit: (code) => exitCodes.push(code),
-    printError: (error) => printed.push(error),
+    printError: (error) => {
+      printed.push(error);
+      destroyedAtPrint.push(calls.destroy);
+    },
   };
 
   const closing: { gate: Promise<unknown> } = { gate: Promise.resolve() };
@@ -114,6 +119,10 @@ const start = async (options: StartOptions = {}) => {
     close: async () => {
       await closing.gate;
       calls.dispose += 1;
+
+      return options.closeFailure === undefined
+        ? { ok: true, value: undefined }
+        : { ok: false, reason: options.closeFailure };
     },
   };
 
@@ -135,7 +144,18 @@ const start = async (options: StartOptions = {}) => {
 
   await settle();
 
-  return { setup, handlers, calls, exitCodes, printed, closing, watcher, lending, app };
+  return {
+    setup,
+    handlers,
+    calls,
+    exitCodes,
+    printed,
+    destroyedAtPrint,
+    closing,
+    watcher,
+    lending,
+    app,
+  };
 };
 
 afterEach(() => {
@@ -220,6 +240,50 @@ it('shuts down and exits 1 after a fatal error', async () => {
 
   expect(calls).toEqual({ unmount: 1, destroy: 1, dispose: 1 });
   expect(printed).toEqual([failure]);
+  expect(exitCodes).toEqual([1]);
+});
+
+it('reports a cleanup failure after restoring the terminal exactly once and cancels queued loans', async () => {
+  const { app, handlers, calls, exitCodes, printed, destroyedAtPrint, closing, lending } =
+    await start({
+      closeFailure: { kind: 'cleanup', message: 'Cannot stop editor processes.' },
+    });
+
+  const release = Promise.withResolvers<undefined>();
+  const queuedCallbacks: string[] = [];
+
+  closing.gate = release.promise;
+
+  const running = app.effects?.lend(() => release.promise);
+
+  await settle();
+
+  const queued = app.effects?.lend(async () => {
+    queuedCallbacks.push('queued');
+  });
+
+  const quit = handlers.get('SIGTERM');
+
+  quit?.();
+  quit?.();
+  await settle();
+
+  expect(calls.destroy).toBe(0);
+  expect(printed).toEqual([]);
+  expect(exitCodes).toEqual([]);
+
+  release.resolve(undefined);
+  await running;
+
+  expect(await queued).toEqual({ ok: false, reason: 'cancelled' });
+
+  await settle();
+
+  expect(queuedCallbacks).toEqual([]);
+  expect(lending).toEqual(['suspend']);
+  expect(calls).toEqual({ unmount: 1, destroy: 1, dispose: 1 });
+  expect(destroyedAtPrint).toEqual([1]);
+  expect(printed).toEqual(['Cannot stop editor processes.']);
   expect(exitCodes).toEqual([1]);
 });
 

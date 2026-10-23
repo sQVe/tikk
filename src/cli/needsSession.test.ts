@@ -256,7 +256,10 @@ it('returns the editor failure', async () => {
     session: fakeSession,
     overrides: {
       runEditor: () =>
-        Promise.resolve({ ok: false, reason: { message: 'The editor "vi" exited with 1.' } }),
+        Promise.resolve({
+          ok: false,
+          reason: { kind: 'failed', message: 'The editor "vi" exited with 1.' },
+        }),
     },
   });
 
@@ -279,6 +282,65 @@ it('returns the editor failure', async () => {
   }
 });
 
+it.each(['cancelled', 'cleanup'] as const)(
+  'preserves %s editor outcomes when closing twice and disposes the session once',
+  async (kind) => {
+    let disposals = 0;
+
+    const fakeSession = makeSession({
+      tickets: [makeTicket('demo-3467')],
+      overrides: {
+        [Symbol.dispose]: () => {
+          disposals += 1;
+        },
+      },
+    });
+
+    const signals: AbortSignal[] = [];
+    const reason = { kind, message: 'Editor stopped.' };
+
+    const fakeEffects = makeEffects({
+      session: fakeSession,
+      overrides: {
+        runEditor: (_path, signal) => {
+          signals.push(signal);
+
+          return new Promise((resolve) => {
+            signal.addEventListener('abort', () => {
+              resolve({ ok: false, reason });
+            });
+          });
+        },
+      },
+    });
+
+    const opened = await openNeedsSession(fakeEffects.effects);
+
+    expect(opened.ok).toBe(true);
+
+    if (!opened.ok) {
+      return;
+    }
+
+    const editing = opened.value.edit('demo-3467');
+
+    await waitFor(() => signals.length > 0);
+
+    const first = opened.value.close();
+    const second = opened.value.close();
+
+    const expected: Awaited<ReturnType<typeof opened.value.close>> =
+      kind === 'cleanup'
+        ? { ok: false, reason: { kind: 'cleanup', message: reason.message } }
+        : { ok: true, value: undefined };
+
+    expect(await first).toEqual(expected);
+    expect(await second).toEqual(expected);
+    expect((await editing).ok).toBe(false);
+    expect(disposals).toBe(1);
+  },
+);
+
 it('stops the editor of a pending edit when the session closes', async () => {
   const fakeSession = makeSession({ tickets: [makeTicket('demo-3467')] });
   const signals: AbortSignal[] = [];
@@ -291,7 +353,10 @@ it('stops the editor of a pending edit when the session closes', async () => {
 
         return new Promise((resolve) => {
           signal.addEventListener('abort', () => {
-            resolve({ ok: false, reason: { message: 'The editor was stopped.' } });
+            resolve({
+              ok: false,
+              reason: { kind: 'cancelled', message: 'The editor was stopped.' },
+            });
           });
         });
       },

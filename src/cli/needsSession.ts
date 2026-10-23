@@ -1,7 +1,7 @@
 import { buildPlanTree } from '../fact/fact.ts';
 import type { TreeGroup } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
-import type { CliEffects, CliFailure } from './cliEffects.ts';
+import type { CliEffects, CliFailure, EditorCleanupFailure } from './cliEffects.ts';
 import { readNeeds } from './needsCommand.ts';
 import type { NeedsReading } from './needsCommand.ts';
 import { refreshSession } from './sessionRefresh.ts';
@@ -11,7 +11,7 @@ export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
-  close: () => Promise<void>;
+  close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
 
 export const openNeedsSession = async (
@@ -27,11 +27,21 @@ export const openNeedsSession = async (
   const closing = new AbortController();
   const pending = new Set<Promise<unknown>>();
   let previous: Promise<unknown> = Promise.resolve();
+  let cleanupFailure: EditorCleanupFailure | undefined;
+  let closingResult: ReturnType<NeedsSession['close']> | undefined;
 
   const loadEffects: CliEffects = {
     ...effects,
     runGh: (args, signal) => effects.runGh(args, AbortSignal.any([signal, closing.signal])),
-    runEditor: (path, signal) => effects.runEditor(path, AbortSignal.any([signal, closing.signal])),
+    runEditor: async (path, signal) => {
+      const result = await effects.runEditor(path, AbortSignal.any([signal, closing.signal]));
+
+      if (!result.ok && result.reason.kind === 'cleanup') {
+        cleanupFailure ??= result.reason;
+      }
+
+      return result;
+    },
   };
 
   const read = async (): Promise<Result<NeedsReading, CliFailure>> => {
@@ -85,10 +95,20 @@ export const openNeedsSession = async (
   const loadTree = () => track(readTree);
   const editTicket = (rawId: string) => track(() => edit(rawId));
 
-  const close = async (): Promise<void> => {
+  const finishClose: NeedsSession['close'] = async () => {
     closing.abort();
     await Promise.allSettled(pending);
     session[Symbol.dispose]();
+
+    return cleanupFailure === undefined
+      ? { ok: true, value: undefined }
+      : { ok: false, reason: cleanupFailure };
+  };
+
+  const close: NeedsSession['close'] = () => {
+    closingResult ??= finishClose();
+
+    return closingResult;
   };
 
   return { ok: true, value: { load, loadTree, edit: editTicket, close } };
