@@ -29,9 +29,9 @@ Tau calls `tikk ... --json`. This keeps tikk usable without Pi and gives Tau a c
 
 ### What stays local
 
-- `package.json` holds no runtime dependency yet. Later changes add OpenTUI React and zod when code
-  imports them.
-- There is no local lint plugin yet.
+- Local lint rules belong to tikk and live in `scripts/lintRules.ts`;
+  [ADR 0006](./0006-capability-modules.md) decides the module table.
+- Runtime dependencies join `package.json` when code first imports them.
 - ADRs after 0001 and the architecture section of `AGENTS.md` belong to tikk.
 
 ## Consequences

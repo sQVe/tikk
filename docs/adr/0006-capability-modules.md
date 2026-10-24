@@ -34,9 +34,7 @@ their owner, and lint refuses imports that cross the table.
 - A flat module is one file. A new module starts as a flat file. It becomes a folder when it needs a
   second source file.
 - A file outside the modules is an error.
-- tikk has no code yet. The design implies these modules as an expected start: ticket model, facts,
-  store and sync, cache, CLI, and TUI. The first change that adds code sets the exact list and the
-  table.
+- The module table lives in `scripts/lintRules.ts` and lists the current folder and flat modules.
 
 ### Import direction
 

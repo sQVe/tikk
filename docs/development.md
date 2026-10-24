@@ -58,13 +58,15 @@ ordinary rules only.
 Style commands accept file paths, for example `bun run style:fix src/index.ts`. Rename bindings and
 move helpers manually.
 
-Configure linting, formatting, and staged checks in [vite.config.ts](../vite.config.ts). Run
-installed command-line tools with `bunx --bun`, as the scripts do. The tools start with a Node
-shebang, so without `--bun` they run on Node instead of Bun.
+Configure linting, formatting, and staged checks in [vite.config.ts](../vite.config.ts). Local rules
+for module boundaries and throws live in [scripts/lintRules.ts](../scripts/lintRules.ts); read them
+before adding a module, changing an import edge, or deciding where a throw belongs. Run installed
+command-line tools with `bunx --bun`, as the scripts do. The tools start with a Node shebang, so
+without `--bun` they run on Node instead of Bun.
 
 ## Versioning
 
-Add a changeset for user-facing changes:
+Add a changeset when a change touches `src/**`:
 
 ```sh
 bun run changeset
@@ -74,7 +76,9 @@ Describe the behavior change for users. Commit the generated file under `.change
 change it describes.
 
 The [changeset check](../.github/workflows/changeset.yml) requires a changeset when a PR touches
-`src/`, but not for changes only to docs, tooling, or dependencies.
+`src/**`. It skips the check when the PR title is `chore: release version packages` or the head
+branch is `changeset-release/main`, which covers the release workflow's version PR. Changes only to
+docs, tooling, or dependencies do not need one.
 
 The [release workflow](../.github/workflows/release.yml) opens version PRs and creates Git tags and
 GitHub releases. tikk is private and is not published to npm.
