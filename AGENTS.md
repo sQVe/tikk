@@ -17,16 +17,22 @@ for people. It is built first for Tau, but works without it. Read
   not mix `&&` with `||`; name the inner group instead.
 - Comment only what the code cannot say, such as a constraint or a workaround. Do not describe the
   code's history.
-- Add a changeset with `bun run changeset` for user-facing changes.
+- Add a changeset with `bun run changeset` when a change touches `src/**`. Release PRs are exempt;
+  see [versioning](docs/development.md#versioning).
 - Before finishing a document, check its local links and verify the commands it gives against the
   repository.
 
 ## Architecture
 
-- `src/` holds capability modules with one public entry file per folder. The first change that adds
-  modules sets the import table in a local lint rule. Once it exists, do not silence it. Put types
-  beside the code that owns them. Do not add barrels, a shared `types.ts`, or `utils/`. See
-  [ADR 0006](docs/adr/0006-capability-modules.md).
+- `src/` holds capability modules with one public entry file per folder. Lint enforces the import
+  table in [`scripts/lintRules.ts`](scripts/lintRules.ts); update it with a new module or import
+  edge, and never silence it. Put types beside the code that owns them. Do not add barrels, a shared
+  `types.ts`, or `utils/`. See [ADR 0006](docs/adr/0006-capability-modules.md).
+- Facts under `facts/` are durable, append-only JSONL. Each line is versioned and never edited, and
+  evidence is bound to the code state it saw. The SQLite index is a disposable cache rebuilt from
+  tickets and facts. Never write secrets into facts. See
+  [ADR 0015](docs/adr/0015-facts-in-per-machine-jsonl.md) and
+  [ADR 0017](docs/adr/0017-disposable-sqlite-cache.md).
 - Return typed results for expected failures, and throw only through `invariant()`. Parse untrusted
   data once with zod where it enters. See
   [ADR 0005](docs/adr/0005-results-exceptions-and-zod-boundaries.md).

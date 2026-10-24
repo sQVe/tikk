@@ -28,8 +28,6 @@ reason to review a file, never a check that fails.
 - An owner is a user-facing noun for behavior that changes on its own, whether an entity or a
   capability. Use the same noun for it in every module, so its CLI, cache, and UI files share a
   prefix.
-- The design implies these owners as an expected start: `ticket`, `claim`, `fact`, `criteria`,
-  `sync`, and `needs`. The first change that adds code sets the real list.
 - Infrastructure that belongs to no feature has its own owner noun, such as `lock` or `clock`.
 - An owner may have several files, one per behavior that changes on its own, such as parsing,
   transitions, and effects. Keep a resource's lifetime or one state machine in one file.
