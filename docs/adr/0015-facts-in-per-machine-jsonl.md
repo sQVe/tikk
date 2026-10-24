@@ -16,9 +16,15 @@ Observed facts live in append-only JSONL under `facts/<machine>/`. Each machine 
 folder, so two machines never edit one file.
 
 Each line is one versioned JSON observation and is never edited. A correction is one more line, and
-the newest line wins. Evidence records carry the code state they saw: repository, head, base, and a
-change hash. Large logs and screenshots are stored by content hash. Secrets and raw session dumps
-never enter the store.
+the newest line wins. Across machines, facts are ordered by timestamp, then file path in lexical
+order, then line number, all ascending. The last fact in that order wins when observations replace
+the same state. File path and line number break timestamp ties deterministically; they do not
+establish which observation happened later in real time. Machine clocks can disagree, so timestamp
+order is not a guarantee of real-time order.
+
+Evidence records carry the code state they saw: repository, head, base, and a change hash. Large
+logs and screenshots are stored by content hash. Secrets and raw session dumps never enter the
+store.
 
 ## Consequences
 

@@ -24,7 +24,7 @@ status comes from triage facts. Criteria coverage is a query.
 - A `check`, `review`, `audit`, or `qa` record carries repository, head, base, and a change hash. A
   record for other code does not count for the current head.
 - A `review` holds `finding`s. A `check` holds none. Triage appends a fact that changes a finding's
-  status. The newest line wins, as for all facts.
+  status. The newest fact wins in the ordering defined by ADR 0015.
 - An `audit` holds one verdict per criterion.
 - A `qa` record is one QA run on a slice. It holds a run ID, scenarios, artifacts, and gaps. Each
   scenario has a name, the criteria it covers, what was observed, and a verdict of `pass`, `fail`,
@@ -35,6 +35,22 @@ status comes from triage facts. Criteria coverage is a query.
   record of the slice, was seen at another repository or head than the audit, or has no scenario for
   the verdict's criterion. It also refuses a `met` verdict that cites a run whose scenario for that
   criterion is `fail` or `blocked`.
+
+### Finding identity and continuity
+
+A finding's identity is its ticket plus its fingerprint. The same fingerprint on another ticket is
+not the same finding. Reviews retain that identity across code states. Finding details come from the
+newest review that contains the fingerprint; triage status comes from the newest explicit triage
+fact for that identity, or is `open` when none exists.
+
+A finding's match against the newest review is separate from its triage status. It is `new` when
+first seen there, `unchanged` when also seen in an earlier review, and `absent` when missing there.
+Absence does not clear explicit triage status or mean the finding is fixed. A blocked finding can
+therefore still need attention after it becomes absent.
+
+Persistent triage records a decision about a finding, not evidence that the finding remains in the
+current code. Neither continuity nor an `unchanged` match makes an earlier review current-code
+evidence; the review must still match the code state being assessed.
 
 ### Criteria
 
