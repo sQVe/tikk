@@ -9,6 +9,9 @@
     "!src/**/*.test.ts",
     "!src/**/*.test.tsx",
     "!src/index.ts",
+    "!src/storeEffects.ts",
+    "!src/sessionEffects.ts",
+    "!src/syncEffects.ts",
     "!src/**/*Harness.ts",
     "!src/**/*Harness.tsx"
   ],

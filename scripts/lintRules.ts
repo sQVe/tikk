@@ -22,7 +22,18 @@ type ImportSource =
   | ESTree.ExportAllDeclaration;
 
 const folderModules = new Set(['ticket', 'fact', 'store', 'cache', 'sync', 'cli', 'tui']);
-const flatModules = new Set(['invariant', 'result', 'project', 'github', 'index', 'terminal']);
+
+const flatModules = new Set([
+  'invariant',
+  'result',
+  'project',
+  'github',
+  'index',
+  'terminal',
+  'storeEffects',
+  'sessionEffects',
+  'syncEffects',
+]);
 
 const allowedImports = new Map<string, Set<string>>([
   ['invariant', new Set()],
@@ -37,6 +48,9 @@ const allowedImports = new Map<string, Set<string>>([
   ['cli', new Set(['ticket', 'fact', 'github', 'invariant', 'result'])],
   ['tui', new Set(['cli', 'invariant', 'result'])],
   ['terminal', new Set(['cli', 'tui'])],
+  ['storeEffects', new Set(['store'])],
+  ['sessionEffects', new Set(['cache', 'cli', 'result', 'store', 'storeEffects', 'ticket'])],
+  ['syncEffects', new Set(['cli', 'fact', 'project', 'store', 'storeEffects', 'sync'])],
   ['index', new Set([...folderModules, ...flatModules])],
 ]);
 
@@ -65,6 +79,9 @@ const packagePolicies = new Map<string, PackagePolicy>([
       packages: ['react', '@opentui/core', '@opentui/keymap', '@opentui/react'],
     },
   ],
+  ['storeEffects', { builtins: true, packages: [] }],
+  ['sessionEffects', { builtins: true, packages: [] }],
+  ['syncEffects', { builtins: true, packages: [] }],
   ['index', { builtins: true, packages: ['zod'] }],
 ]);
 
