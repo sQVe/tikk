@@ -56,10 +56,15 @@ it('outlines archived tickets with their parent and leaves out a file with an er
   const outlines: unknown = cache.listTicketOutlines();
 
   expect(outlines).toEqual([
-    { id: 'tikk-3a4b', frontMatter: { kind: 'task', status: 'open' } },
+    { id: 'tikk-3a4b', frontMatter: { kind: 'instruction', status: 'open' } },
     {
       id: 'tikk-3a4c',
-      frontMatter: { kind: 'task', status: 'open', parent: 'tikk-3a4b', archived: '2026-01-02' },
+      frontMatter: {
+        kind: 'instruction',
+        status: 'open',
+        parent: 'tikk-3a4b',
+        archived: '2026-01-02',
+      },
     },
   ]);
 });

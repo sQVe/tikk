@@ -2,14 +2,14 @@
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0018 (Plans, slices, tasks, and issues)](./0018-work-model-and-kinds.md),
+**Related**: [ADR 0018 (Plans, slices, instructions, and issues)](./0018-work-model-and-kinds.md),
 [ADR 0022 (Claims with leases and a ready queue)](./0022-claims-leases-and-ready-queue.md)
 
 ## Context
 
-The `parent` field gives a tree: plan above slice above task. Work also depends on other work, and
-workers find new work while they do a task. Ready queues, `discovered-from` links, and typed links
-are common across agent trackers.
+The `parent` field gives a tree: plan above slice above instruction. Work also depends on other
+work, and workers find new work while they do an instruction. Ready queues, `discovered-from` links,
+and typed links are common across agent trackers.
 
 ## Decision
 

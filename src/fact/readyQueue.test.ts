@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 
 import { selectReady } from './fact.ts';
-import { makeFact, makeTicket, now, taskId } from './factHarness.ts';
+import { makeFact, makeTicket, now, instructionId } from './factHarness.ts';
 
 const noScope = {};
 
 describe('selectReady', () => {
-  it('skips a task blocked by an open task and names the blocker', () => {
+  it('skips an instruction blocked by an open instruction and names the blocker', () => {
     const blocker = makeTicket('3469', { rank: 3 });
     const blocked = makeTicket('3478', { rank: 1, blockedBy: ['3469'] });
     const free = makeTicket('3479', { rank: 2 });
@@ -15,41 +15,49 @@ describe('selectReady', () => {
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([free.id, blocker.id]);
 
     expect(result.skipped).toEqual([
-      { ticket: blocked, reason: 'blocked', blockers: [{ id: taskId('3469'), state: 'open' }] },
+      {
+        ticket: blocked,
+        reason: 'blocked',
+        blockers: [{ id: instructionId('3469'), state: 'open' }],
+      },
     ]);
   });
 
   it('does not let a canceled blocker block', () => {
     const blocker = makeTicket('3469', { status: 'canceled' });
-    const task = makeTicket('3478', { blockedBy: ['3469'] });
-    const result = selectReady([blocker, task], [], now, noScope);
+    const instruction = makeTicket('3478', { blockedBy: ['3469'] });
+    const result = selectReady([blocker, instruction], [], now, noScope);
 
-    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([task.id]);
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([instruction.id]);
     expect(result.skipped).toEqual([]);
   });
 
-  it('does not let an accepted task or a closed issue block', () => {
+  it('does not let an accepted instruction or a closed issue block', () => {
     const accepted = makeTicket('3469');
     const issue = makeTicket('3478', { kind: 'issue', status: 'closed' });
-    const task = makeTicket('3479', { blockedBy: ['3469', '3478'] });
+    const instruction = makeTicket('3479', { blockedBy: ['3469', '3478'] });
     const facts = [makeFact('3469', { kind: 'accept' })];
-    const result = selectReady([accepted, issue, task], facts, now, noScope);
+    const result = selectReady([accepted, issue, instruction], facts, now, noScope);
 
-    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([task.id]);
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([instruction.id]);
   });
 
   it('blocks on a missing blocker and names it as missing', () => {
-    const task = makeTicket('3478', { blockedBy: ['3469'] });
-    const result = selectReady([task], [], now, noScope);
+    const instruction = makeTicket('3478', { blockedBy: ['3469'] });
+    const result = selectReady([instruction], [], now, noScope);
 
     expect(result.candidates).toEqual([]);
 
     expect(result.skipped).toEqual([
-      { ticket: task, reason: 'blocked', blockers: [{ id: taskId('3469'), state: 'missing' }] },
+      {
+        ticket: instruction,
+        reason: 'blocked',
+        blockers: [{ id: instructionId('3469'), state: 'missing' }],
+      },
     ]);
   });
 
-  it('skips an active task with its holder and lease end', () => {
+  it('skips an active instruction with its holder and lease end', () => {
     const active = makeTicket('3469', { rank: 1 });
     const free = makeTicket('3478', { rank: 2 });
 
@@ -66,7 +74,7 @@ describe('selectReady', () => {
     ]);
   });
 
-  it('skips a submitted task and omits skipped tasks after the last candidate', () => {
+  it('skips a submitted instruction and omits skipped instructions after the last candidate', () => {
     const submitted = makeTicket('3469', { rank: 1 });
     const free = makeTicket('3478', { rank: 2 });
     const later = makeTicket('3479', { rank: 3, blockedBy: ['3469'] });
@@ -77,7 +85,7 @@ describe('selectReady', () => {
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([free.id]);
   });
 
-  it('lists every considered task as skipped when there is no candidate', () => {
+  it('lists every considered instruction as skipped when there is no candidate', () => {
     const submitted = makeTicket('3469');
     const blocked = makeTicket('3478', { blockedBy: ['3469'] });
     const facts = [makeFact('3469', { kind: 'log', type: 'submitted', text: 'done' })];
@@ -87,7 +95,7 @@ describe('selectReady', () => {
     expect(result.skipped.map((entry) => entry.reason)).toEqual(['submitted', 'blocked']);
   });
 
-  it('orders ranked tasks first, then by ID, and ignores drafts, issues, and archived tasks', () => {
+  it('orders ranked instructions first, then by ID, and ignores drafts, issues, and archived instructions', () => {
     const unranked = makeTicket('3469');
     const ranked = makeTicket('3478', { rank: 5 });
     const draft = makeTicket('3479', { status: 'draft', rank: 0 });
@@ -115,9 +123,9 @@ describe('selectReady', () => {
     const plan = makeTicket('3469', { kind: 'plan' });
     const canceled = makeTicket('3478', { kind: 'slice', parent: '3469', status: 'canceled' });
     const slice = makeTicket('3479', { kind: 'slice', parent: '3469', blockedBy: ['3478'] });
-    const task = makeTicket('3489', { parent: '3469' });
+    const instruction = makeTicket('3489', { parent: '3469' });
     const scope = { kind: 'slice' as const, parent: plan.id };
-    const result = selectReady([plan, canceled, slice, task], [], now, scope);
+    const result = selectReady([plan, canceled, slice, instruction], [], now, scope);
 
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([slice.id]);
     expect(result.skipped).toEqual([]);
@@ -134,7 +142,7 @@ describe('selectReady', () => {
       blockedBy: ['3478'],
     });
 
-    const scope = { kind: 'slice' as const, parent: taskId('3469') };
+    const scope = { kind: 'slice' as const, parent: instructionId('3469') };
     const result = selectReady([draft, open, blocked], [], now, scope);
 
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([open.id]);

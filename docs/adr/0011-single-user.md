@@ -15,8 +15,9 @@ tikk serves one user and their agents. It has no ownership checks, no permission
 no assignees. Several machines belong to the same user and sync through one private repository
 ([ADR 0012](./0012-one-git-store-with-one-lock.md)).
 
-Multi-user collaboration, permissions, and assignees are non-goals. A worker that takes a task holds
-a claim with a lease, not an assignment ([ADR 0022](./0022-claims-leases-and-ready-queue.md)).
+Multi-user collaboration, permissions, and assignees are non-goals. A worker that takes an
+instruction holds a claim with a lease, not an assignment
+([ADR 0022](./0022-claims-leases-and-ready-queue.md)).
 
 ## Consequences
 
@@ -36,7 +37,7 @@ a claim with a lease, not an assignment ([ADR 0022](./0022-claims-leases-and-rea
 Add owners, permissions, and assignees from the start. Rejected because about 95% of the work is
 single-user, and it would bring back the ownership code that Linear forced on Tau.
 
-### Assign tasks to agents by name
+### Assign instructions to agents by name
 
-Record an assignee on each task. Rejected because a claim with a lease already shows which worker
-holds a task, and an assignee would need ownership checks.
+Record an assignee on each instruction. Rejected because a claim with a lease already shows which
+worker holds an instruction, and an assignee would need ownership checks.

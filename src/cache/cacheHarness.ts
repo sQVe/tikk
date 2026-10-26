@@ -65,7 +65,7 @@ export const ticketText = ({
   rank,
   blockedBy,
 }: TicketTextOptions): string => {
-  const lines = ['---', 'kind: task', `title: ${title}`, 'project: tikk', 'status: open'];
+  const lines = ['---', 'kind: instruction', `title: ${title}`, 'project: tikk', 'status: open'];
 
   if (archived !== undefined) {
     lines.push(`archived: ${archived}`);

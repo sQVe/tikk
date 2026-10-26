@@ -118,18 +118,22 @@ it('answers yes for a finished root with no status fact for its current status',
   expect(answers).toEqual({ precheck: true, rules: true });
 });
 
-const task = { id: 'tikk-3a4b', kind: 'task', status: 'open' };
+const instruction = { id: 'tikk-3a4b', kind: 'instruction', status: 'open' };
 
-const acceptedAt = (at: string): StoreFact => ({ ticket: task.id, at, fields: { kind: 'accept' } });
+const acceptedAt = (at: string): StoreFact => ({
+  ticket: instruction.id,
+  at,
+  fields: { kind: 'accept' },
+});
 
-it('answers no for a stand-alone task accepted 10 days ago', async () => {
-  const answers = await answersFor([task], [acceptedAt(tenDaysAgo)]);
+it('answers no for a stand-alone instruction accepted 10 days ago', async () => {
+  const answers = await answersFor([instruction], [acceptedAt(tenDaysAgo)]);
 
   expect(answers).toEqual({ precheck: false, rules: false });
 });
 
-it('answers yes for a stand-alone task accepted 15 days ago', async () => {
-  const answers = await answersFor([task], [acceptedAt(fifteenDaysAgo)]);
+it('answers yes for a stand-alone instruction accepted 15 days ago', async () => {
+  const answers = await answersFor([instruction], [acceptedAt(fifteenDaysAgo)]);
 
   expect(answers).toEqual({ precheck: true, rules: true });
 });
@@ -150,7 +154,7 @@ it('answers yes for an archived due root with a descendant that is not archived'
   const tickets = [
     { ...canceledPlan, archived: '2026-10-19' },
     { id: 'tikk-3a4c', kind: 'slice', status: 'open', parent: 'tikk-3a4b', archived: '2026-10-19' },
-    { id: 'tikk-3a4d', kind: 'task', status: 'open', parent: 'tikk-3a4c' },
+    { id: 'tikk-3a4d', kind: 'instruction', status: 'open', parent: 'tikk-3a4c' },
   ];
 
   expect(await answersFor(tickets, [canceledAt(fifteenDaysAgo)])).toEqual({
@@ -203,7 +207,7 @@ it('answers yes for a due root when only another ticket was unarchived after the
 it('answers no for a store with no finished root', async () => {
   const tickets = [
     { id: 'tikk-3a4b', kind: 'plan', status: 'open' },
-    { id: 'tikk-3a4c', kind: 'task', status: 'open' },
+    { id: 'tikk-3a4c', kind: 'instruction', status: 'open' },
   ];
 
   expect(await answersFor(tickets, [])).toEqual({ precheck: false, rules: false });

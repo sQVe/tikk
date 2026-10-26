@@ -15,7 +15,8 @@ A slice is done when its PR merged into trunk and its criteria are met for the m
 derived from facts and is never written to the file. A slice whose PR merged with no current audit
 shows as merged but unverified.
 
-Open tasks at merge stay open and flag the slice until each is accepted or canceled with a reason.
+Open instructions at merge stay open and flag the slice until each is accepted or canceled with a
+reason.
 
 PR facts come from `tikk reconcile`. It runs on `ready` and `needs`, and after `tikk pr link`. It
 checks every linked PR that tikk has not yet seen merged into trunk, closed ones included, so a
@@ -33,7 +34,7 @@ head match the PR at merge, and it has a `met` verdict for every current criteri
 ### Positive
 
 - Done means merged and verified against the merged code.
-- Open tasks never disappear at merge.
+- Open instructions never disappear at merge.
 
 ### Negative
 
@@ -47,6 +48,7 @@ head match the PR at merge, and it has a `met` verdict for every current criteri
 Mark the slice done when the PR merges. Rejected because done must be robust, and a merge does not
 show that the criteria are met.
 
-### Close open tasks at merge
+### Close open instructions at merge
 
-End unfinished tasks when the slice merges. Rejected because unfinished tasks never close silently.
+End unfinished instructions when the slice merges. Rejected because unfinished instructions never
+close silently.

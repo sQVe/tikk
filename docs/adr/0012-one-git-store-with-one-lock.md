@@ -42,7 +42,7 @@ private GitHub repository.
 
 - A store lock serializes writes from all agents on a machine.
 - Facts are permanent in Git, so a leaked secret needs a history rewrite.
-- Two offline machines can claim the same task. Reconcile must show the clash.
+- Two offline machines can claim the same instruction. Reconcile must show the clash.
 
 ## Alternatives considered
 

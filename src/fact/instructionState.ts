@@ -1,14 +1,14 @@
 import type { TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 
-export interface TaskTicket {
+export interface InstructionTicket {
   id: TicketId;
   frontMatter: TicketFrontMatter;
 }
 
-export type TaskStateName = 'draft' | 'open' | 'active' | 'submitted' | 'done' | 'canceled';
+export type InstructionStateName = 'draft' | 'open' | 'active' | 'submitted' | 'done' | 'canceled';
 
-export interface TaskClaim {
+export interface InstructionClaim {
   holder: string;
   leaseEnd: string;
   session: string | null;
@@ -19,9 +19,9 @@ interface StatusTicket {
   frontMatter: Pick<TicketFrontMatter, 'status'>;
 }
 
-export interface TaskState {
-  state: TaskStateName;
-  claim: TaskClaim | null;
+export interface InstructionState {
+  state: InstructionStateName;
+  claim: InstructionClaim | null;
 }
 
 const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number => {
@@ -36,13 +36,13 @@ const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number
   return -1;
 };
 
-const stateOnly = (state: TaskStateName): TaskState => ({ state, claim: null });
+const stateOnly = (state: InstructionStateName): InstructionState => ({ state, claim: null });
 
-export const deriveTaskStateFromOwnFacts = (
+export const deriveInstructionStateFromOwnFacts = (
   ticket: StatusTicket,
   own: Fact[],
   now: Date,
-): TaskState => {
+): InstructionState => {
   const { status } = ticket.frontMatter;
 
   if (status === 'canceled' || status === 'draft') {
@@ -86,8 +86,12 @@ export const deriveTaskStateFromOwnFacts = (
   return stateOnly('open');
 };
 
-export const deriveTaskState = (ticket: TaskTicket, facts: Fact[], now: Date): TaskState =>
-  deriveTaskStateFromOwnFacts(
+export const deriveInstructionState = (
+  ticket: InstructionTicket,
+  facts: Fact[],
+  now: Date,
+): InstructionState =>
+  deriveInstructionStateFromOwnFacts(
     ticket,
     facts.filter((fact) => fact.ticket === ticket.id),
     now,

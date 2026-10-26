@@ -9,8 +9,8 @@ import {
   readEvidenceTarget,
   targetOptions,
 } from './evidenceTarget.ts';
-import { readTarget, requireValue } from './taskCommand.ts';
-import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { readTarget, requireValue } from './instructionCommand.ts';
+import { refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 
 type QaFact = Extract<Fact, { kind: 'qa' }>;

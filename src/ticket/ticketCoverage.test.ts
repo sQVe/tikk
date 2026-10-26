@@ -19,7 +19,7 @@ invariant(project.ok, 'The test project must be valid.');
 
 const slicePlan = idOf('tikk-3a4b');
 const slice = idOf('tikk-3a4c');
-const task = idOf('tikk-3a4d');
+const instruction = idOf('tikk-3a4d');
 
 const criteria = ['a', 'b'].map((id) => ({ id, check: `check ${id}`, expected: `${id} holds` }));
 
@@ -29,7 +29,7 @@ const ticket = (
 ): { id: TicketId; frontMatter: TicketFrontMatter } => ({
   id,
   frontMatter: {
-    kind: 'task',
+    kind: 'instruction',
     title: 'T',
     project: project.value,
     blockedBy: [],
@@ -45,17 +45,17 @@ const plan = ticket(slicePlan, { kind: 'plan', criteria });
 const sliceFor = (fields: Partial<TicketFrontMatter>) =>
   ticket(slice, { kind: 'slice', parent: slicePlan, criteria, covers: ['a', 'b'], ...fields });
 
-const taskFor = (fields: Partial<TicketFrontMatter>) =>
-  ticket(task, { kind: 'task', parent: slice, ...fields });
+const instructionFor = (fields: Partial<TicketFrontMatter>) =>
+  ticket(instruction, { kind: 'instruction', parent: slice, ...fields });
 
-it('lets a task with no covers cover every criterion of its slice', () => {
-  const gaps = findCoverageGaps([plan, sliceFor({}), taskFor({})]);
+it('lets an instruction with no covers cover every criterion of its slice', () => {
+  const gaps = findCoverageGaps([plan, sliceFor({}), instructionFor({})]);
 
   expect(gaps).toEqual([]);
 });
 
-it('leaves the criteria a task does not name as gaps', () => {
-  const gaps = findCoverageGaps([plan, sliceFor({}), taskFor({ covers: ['a'] })]);
+it('leaves the criteria an instruction does not name as gaps', () => {
+  const gaps = findCoverageGaps([plan, sliceFor({}), instructionFor({ covers: ['a'] })]);
 
   expect(gaps).toEqual([{ ticket: slice, kind: 'slice', criterion: 'b' }]);
 });
@@ -69,13 +69,18 @@ it('treats a slice with no covers as covering no plan criterion', () => {
   ]);
 });
 
-it('counts nothing from a canceled slice or task', () => {
+it('counts nothing from a canceled slice or instruction', () => {
   const canceledSlice = findCoverageGaps([plan, sliceFor({ status: 'canceled' })]);
-  const canceledTask = findCoverageGaps([plan, sliceFor({}), taskFor({ status: 'canceled' })]);
+
+  const canceledInstruction = findCoverageGaps([
+    plan,
+    sliceFor({}),
+    instructionFor({ status: 'canceled' }),
+  ]);
 
   expect(canceledSlice.map((gap) => gap.ticket)).toEqual([slicePlan, slicePlan]);
 
-  expect(canceledTask).toEqual([
+  expect(canceledInstruction).toEqual([
     { ticket: slice, kind: 'slice', criterion: 'a' },
     { ticket: slice, kind: 'slice', criterion: 'b' },
   ]);
@@ -97,14 +102,14 @@ it('ignores a covers ID that names no criterion', () => {
   ]);
 });
 
-it('counts only slices for a plan and only tasks for a slice', () => {
-  const taskUnderPlan = ticket(task, { kind: 'task', parent: slicePlan });
+it('counts only slices for a plan and only instructions for a slice', () => {
+  const instructionUnderPlan = ticket(instruction, { kind: 'instruction', parent: slicePlan });
   const issueUnderSlice = ticket(idOf('tikk-3a4e'), { kind: 'issue', parent: slice });
 
   const gaps = findCoverageGaps([
     plan,
     sliceFor({ covers: undefined }),
-    taskUnderPlan,
+    instructionUnderPlan,
     issueUnderSlice,
   ]);
 

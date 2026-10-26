@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 
-import { deriveTaskState } from '../fact/fact.ts';
+import { deriveInstructionState } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { parseProjectName, parseTicketId } from '../ticket/ticket.ts';
 import type { CacheFiles, TicketCache } from './cache.ts';
@@ -243,7 +243,7 @@ for (const [name, sql] of factTampers) {
     expectDamageThenFactsFromFiles(sql));
 }
 
-it('lists only the facts that decide a task state', async () => {
+it('lists only the facts that decide an instruction state', async () => {
   const fake = createFakeFiles();
   const note = { kind: 'log', type: 'progress', text: 'A note' };
   const submitted = { kind: 'log', type: 'submitted', text: '' };
@@ -311,7 +311,7 @@ it('lists only the facts that date a finish or an unarchive as archive facts', a
   ).toEqual(['tikk-3a4b accept', 'tikk-3a4b status', 'tikk-3a4c unarchive']);
 });
 
-it('lists a release with the claim it ends, so the task is open again', async () => {
+it('lists a release with the claim it ends, so the instruction is open again', async () => {
   const fake = createFakeFiles();
   const claim = { kind: 'claim', holder: 'agent', leaseEnd: '2099-01-01T00:00:00.000Z' };
 
@@ -337,7 +337,7 @@ it('lists a release with the claim it ends, so the task is open again', async ()
   const ticket = {
     id: id.value,
     frontMatter: {
-      kind: 'task' as const,
+      kind: 'instruction' as const,
       title: 'T',
       project: project.value,
       blockedBy: [],
@@ -347,9 +347,9 @@ it('lists a release with the claim it ends, so the task is open again', async ()
     },
   };
 
-  expect(deriveTaskState(ticket, listed.value, new Date('2026-10-20T12:00:00.000Z')).state).toBe(
-    'open',
-  );
+  expect(
+    deriveInstructionState(ticket, listed.value, new Date('2026-10-20T12:00:00.000Z')).state,
+  ).toBe('open');
 });
 
 it('keeps an active claim visible to another handle while the facts are rebuilt', async () => {

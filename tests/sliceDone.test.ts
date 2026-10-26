@@ -11,7 +11,7 @@ import type { FakeGh, FakePullRequest } from './fakeGh.ts';
 interface SliceShow {
   state: string;
   flagged: boolean;
-  openTasks: string[];
+  openInstructions: string[];
 }
 
 interface NeedsListing {
@@ -224,14 +224,21 @@ it('lists ready work with one reconcile problem and appends no fact when gh cann
   expect(await readFacts()).toEqual(before);
 });
 
-it('flags a merged slice that still has an open task', async () => {
+it('flags a merged slice that still has an open instruction', async () => {
   const id = await createSlice();
-  const task = await cli().runJson<{ id: string }>(['new', 'task', 'A task', '--parent', id]);
+
+  const instruction = await cli().runJson<{ id: string }>([
+    'new',
+    'instruction',
+    'An instruction',
+    '--parent',
+    id,
+  ]);
 
   await cli().runJson(['pr', 'link', id, prUrl]);
 
   const shown = await showSlice(id);
 
   expect(shown.flagged).toBe(true);
-  expect(shown.openTasks).toEqual([task.id]);
+  expect(shown.openInstructions).toEqual([instruction.id]);
 });

@@ -2,7 +2,14 @@ import { expect, it } from 'bun:test';
 
 import packageJson from '../../package.json' with { type: 'json' };
 import { runCli } from './cli.ts';
-import { failed, makeEffects, makeSession, makeTicket } from './cliHarness.ts';
+import {
+  failed,
+  makeEffects,
+  makeKindTicket,
+  makeSession,
+  makeTicket,
+  ticketIdOf,
+} from './cliHarness.ts';
 import type { EffectsOptions, SessionOptions } from './cliHarness.ts';
 
 const run = async (
@@ -118,9 +125,23 @@ it('still writes json for an empty listing', async () => {
 
 it('dispatches every session command', async () => {
   const created = makeTicket('demo-3469');
-  const newRun = await run(['new', 'task', 'Made', '--json'], { created });
-  const listRun = await run(['ls', '--json']);
-  const editRun = await run(['edit', 'demo-3467', '--hash', 'h', '--title', 'X', '--json']);
+
+  const underSlice = makeTicket('demo-3467', {
+    frontMatter: { ...makeTicket('demo-3467').frontMatter, parent: ticketIdOf('demo-3468') },
+  });
+
+  const tickets = [underSlice, makeKindTicket('demo-3468', 'slice')];
+
+  const newRun = await run(['new', 'instruction', 'Made', '--parent', 'demo-3468', '--json'], {
+    created,
+    tickets,
+  });
+
+  const listRun = await run(['ls', '--json'], { tickets });
+
+  const editRun = await run(['edit', 'demo-3467', '--hash', 'h', '--title', 'X', '--json'], {
+    tickets,
+  });
 
   expect(newRun.fakeSession.creates).toHaveLength(1);
   expect(JSON.parse(listRun.stdout.join(''))).toHaveProperty('tickets');
@@ -168,11 +189,15 @@ it('passes a session failure through with its code', async () => {
 });
 
 it('returns a storeError and closes the session when the refresh fails', async () => {
-  const { exitCode, stdout, fakeSession } = await run(['new', 'task', 'Title', '--json'], {
-    overrides: {
-      refresh: () => Promise.resolve({ ok: false, reason: { message: 'Cannot scan /store.' } }),
+  const { exitCode, stdout, fakeSession } = await run(
+    ['new', 'instruction', 'Title', '--parent', 'demo-3468', '--json'],
+    {
+      tickets: [makeKindTicket('demo-3468', 'slice')],
+      overrides: {
+        refresh: () => Promise.resolve({ ok: false, reason: { message: 'Cannot scan /store.' } }),
+      },
     },
-  });
+  );
 
   const error = errorOf(stdout);
 

@@ -2,10 +2,10 @@ import { describe, expect, it } from 'bun:test';
 
 import { buildSliceIndex, deriveSliceState } from './fact.ts';
 import type { Fact } from './fact.ts';
-import { makeFact, makeTicket, now, taskId } from './factHarness.ts';
+import { makeFact, makeTicket, now, instructionId } from './factHarness.ts';
 
 const slice = makeTicket('3469', { kind: 'slice' });
-const task = makeTicket('3478', { parent: '3469' });
+const instruction = makeTicket('3478', { parent: '3469' });
 
 const prFact = (extra: Record<string, unknown> = {}): Fact =>
   makeFact('3469', {
@@ -47,8 +47,8 @@ describe('deriveSliceState', () => {
     expect(result.pr).toMatchObject({ number: 7, mergeCommit: 'bbb', checkedAt: prFact().at });
   });
 
-  it('derives planned from no PR and no started task', () => {
-    const result = derive(slice, [slice, task], [], now);
+  it('derives planned from no PR and no started instruction', () => {
+    const result = derive(slice, [slice, instruction], [], now);
 
     expect(result).toMatchObject({ state: 'planned', since: null, ageSeconds: null, pr: null });
   });
@@ -59,7 +59,7 @@ describe('deriveSliceState', () => {
     expect(result.state).toBe('planned');
   });
 
-  it('derives active from a started task and dates it from the task claim', () => {
+  it('derives active from a started instruction and dates it from the instruction claim', () => {
     const claim = makeFact('3478', {
       kind: 'claim',
       holder: 'agent',
@@ -67,7 +67,7 @@ describe('deriveSliceState', () => {
       at: '2026-10-20T11:00:00.000Z',
     });
 
-    const result = derive(slice, [slice, task], [claim], now);
+    const result = derive(slice, [slice, instruction], [claim], now);
 
     expect(result).toMatchObject({
       state: 'active',
@@ -98,7 +98,7 @@ describe('deriveSliceState', () => {
       at: '2026-10-20T11:30:00.000Z',
     });
 
-    const result = derive(slice, [slice, task], [claim, submitted, progress], now);
+    const result = derive(slice, [slice, instruction], [claim, submitted, progress], now);
 
     expect(result).toMatchObject({ state: 'active', since: '2026-10-20T11:00:00.000Z' });
   });
@@ -215,16 +215,16 @@ describe('deriveSliceState', () => {
     expect(result.state).toBe('mergedUnverified');
   });
 
-  it('flags a merged slice with an open task and names the task', () => {
-    const result = derive(slice, [slice, task], [prFact()], now);
+  it('flags a merged slice with an open instruction and names the instruction', () => {
+    const result = derive(slice, [slice, instruction], [prFact()], now);
 
-    expect(result).toMatchObject({ flagged: true, openTasks: [taskId('3478')] });
+    expect(result).toMatchObject({ flagged: true, openInstructions: [instructionId('3478')] });
   });
 
-  it('does not flag a merged slice whose tasks are done', () => {
+  it('does not flag a merged slice whose instructions are done', () => {
     const accept = makeFact('3478', { kind: 'accept' });
-    const result = derive(slice, [slice, task], [prFact(), accept], now);
+    const result = derive(slice, [slice, instruction], [prFact(), accept], now);
 
-    expect(result).toMatchObject({ flagged: false, openTasks: [] });
+    expect(result).toMatchObject({ flagged: false, openInstructions: [] });
   });
 });

@@ -4,8 +4,8 @@ import { invariant } from '../invariant.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
 import { appendEvidence } from './evidenceTarget.ts';
-import { readTarget, requireValue } from './taskCommand.ts';
-import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { readTarget, requireValue } from './instructionCommand.ts';
+import { refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, storeFailure } from './ticketView.ts';
 

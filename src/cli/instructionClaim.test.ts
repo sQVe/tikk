@@ -11,9 +11,10 @@ import {
   projectNameOf,
   successOf,
 } from './cliHarness.ts';
-import { taskClaim, taskRelease } from './taskClaim.ts';
+import { instructionClaim, instructionRelease } from './instructionClaim.ts';
 import {
-  task,
+  instruction,
+  parentSlice,
   claimBy,
   submittedBy,
   accepted,
@@ -24,11 +25,11 @@ import {
   orphan,
   parentOnly,
   blockedOnly,
-} from './taskHarness.ts';
-import type { RunOptions } from './taskHarness.ts';
+} from './instructionHarness.ts';
+import type { RunOptions } from './instructionHarness.ts';
 
-it('claims an open task under the lock with a lease from now', async () => {
-  const { fakeSession, result } = await run(taskClaim, [
+it('claims an open instruction under the lock with a lease from now', async () => {
+  const { fakeSession, result } = await run(instructionClaim, [
     'demo-3467',
     '--holder',
     'agent',
@@ -50,7 +51,7 @@ it('claims an open task under the lock with a lease from now', async () => {
       fact: {
         version: 1,
         kind: 'claim',
-        ticket: task.id,
+        ticket: instruction.id,
         at: '2026-10-20T12:00:00.000Z',
         machine: 'laptop',
         holder: 'agent',
@@ -63,13 +64,13 @@ it('claims an open task under the lock with a lease from now', async () => {
   expect(fakeSession.lockHeld()).toBe(false);
 });
 
-it('checks the task as it is on disk after the lock is taken', async () => {
-  const fakeSession = makeSession({ tickets: [task] });
+it('checks the instruction as it is on disk after the lock is taken', async () => {
+  const fakeSession = makeSession({ tickets: [parentSlice, instruction] });
   const { effects } = makeEffects({ session: fakeSession });
   const lockStore = fakeSession.session.lockStore;
 
   const canceled = makeTicket('demo-3467', {
-    frontMatter: { ...task.frontMatter, status: 'canceled' },
+    frontMatter: { ...instruction.frontMatter, status: 'canceled' },
   });
 
   fakeSession.session.lockStore = async () => {
@@ -78,7 +79,7 @@ it('checks the task as it is on disk after the lock is taken', async () => {
     return lockStore();
   };
 
-  const result = await taskClaim({
+  const result = await instructionClaim({
     args: ['demo-3467', '--holder', 'agent'],
     json: true,
     effects,
@@ -90,7 +91,7 @@ it('checks the task as it is on disk after the lock is taken', async () => {
 });
 
 it('claims for one hour when no lease is given', async () => {
-  const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent']);
+  const { result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent']);
 
   expect(successOf(result).json).toMatchObject({
     claim: { leaseEnd: '2026-10-20T13:00:00.000Z' },
@@ -99,7 +100,7 @@ it('claims for one hour when no lease is given', async () => {
 
 it('renews the lease of the same holder', async () => {
   const { fakeSession, result } = await run(
-    taskClaim,
+    instructionClaim,
     ['demo-3467', '--holder', 'agent', '--lease', '2h'],
     { facts: [claimBy('agent')] },
   );
@@ -111,15 +112,18 @@ it('renews the lease of the same holder', async () => {
   expect(fakeSession.appends).toHaveLength(1);
 });
 
-it('claims a task whose earlier lease ended', async () => {
+it('claims an instruction whose earlier lease ended', async () => {
   const stale = makeFact({ kind: 'claim', holder: 'other', leaseEnd: '2026-10-20T11:30:00.000Z' });
-  const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], { facts: [stale] });
+
+  const { result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
+    facts: [stale],
+  });
 
   expect(successOf(result).json).toMatchObject({ state: 'active', claim: { holder: 'agent' } });
 });
 
-it('refuses a claim on a task another holder has and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+it('refuses a claim on an instruction another holder has and writes nothing', async () => {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     facts: [claimBy('other')],
   });
 
@@ -127,23 +131,29 @@ it('refuses a claim on a task another holder has and writes nothing', async () =
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses a claim on a task that is not open and writes nothing', async () => {
+it('refuses a claim on an instruction that is not open and writes nothing', async () => {
   const cases: RunOptions[] = [
     { facts: [claimBy('other'), submittedBy('other')] },
     { facts: [claimBy('other'), submittedBy('other'), accepted] },
     {
-      tickets: [makeTicket('demo-3467', { frontMatter: { ...task.frontMatter, status: 'draft' } })],
+      tickets: [
+        parentSlice,
+        makeTicket('demo-3467', { frontMatter: { ...instruction.frontMatter, status: 'draft' } }),
+      ],
     },
     {
       tickets: [
-        makeTicket('demo-3467', { frontMatter: { ...task.frontMatter, status: 'canceled' } }),
+        parentSlice,
+        makeTicket('demo-3467', {
+          frontMatter: { ...instruction.frontMatter, status: 'canceled' },
+        }),
       ],
     },
   ];
 
   for (const options of cases) {
     const { fakeSession, result } = await run(
-      taskClaim,
+      instructionClaim,
       ['demo-3467', '--holder', 'agent'],
       options,
     );
@@ -156,7 +166,7 @@ it('refuses a claim on a task that is not open and writes nothing', async () => 
 it('refuses a claim with an invalid lease before it takes the lock', async () => {
   for (const lease of ['0s', '10', '5d', '-1m']) {
     const { fakeSession, result } = await run(
-      taskClaim,
+      instructionClaim,
       ['demo-3467', '--holder', 'agent', `--lease=${lease}`],
       { session: { overrides: lockRefused } },
     );
@@ -167,7 +177,7 @@ it('refuses a claim with an invalid lease before it takes the lock', async () =>
 });
 
 it('refuses a claim without a holder and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467']);
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467']);
 
   expect(failureOf(result).code).toBe('invalidArguments');
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
@@ -186,7 +196,7 @@ it('refuses a claim on an issue and writes nothing', async () => {
     },
   });
 
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     tickets: [issue],
   });
 
@@ -194,15 +204,15 @@ it('refuses a claim on an issue and writes nothing', async () => {
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses a claim on an unknown task and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3468', '--holder', 'agent']);
+it('refuses a claim on an unknown instruction and writes nothing', async () => {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3468', '--holder', 'agent']);
 
   expect(failureOf(result).code).toBe('notFound');
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
 it('fails with locked when the store lock is held and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     session: {
       overrides: {
         lockStore: () =>
@@ -223,7 +233,7 @@ it('fails with locked when the store lock is held and writes nothing', async () 
 });
 
 it('refuses a claim when the machine name is invalid and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     effects: { resolveMachine: () => failed('The host name "Bad Host" is not valid.') },
     session: { overrides: lockRefused },
   });
@@ -233,7 +243,7 @@ it('refuses a claim when the machine name is invalid and writes nothing', async 
 });
 
 it('releases the lock and fails when the cache refresh fails', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     session: { overrides: { refresh: () => failed('The cache failed.') } },
   });
 
@@ -242,7 +252,7 @@ it('releases the lock and fails when the cache refresh fails', async () => {
 });
 
 it('reports a failed append as a store error and releases the lock', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     session: {
       overrides: {
         appendFact: () =>
@@ -255,10 +265,14 @@ it('reports a failed append as a store error and releases the lock', async () =>
   expect(fakeSession.lockHeld()).toBe(false);
 });
 
-it('releases a task held by the same holder', async () => {
-  const { fakeSession, result } = await run(taskRelease, ['demo-3467', '--holder', 'agent'], {
-    facts: [claimBy('agent')],
-  });
+it('releases an instruction held by the same holder', async () => {
+  const { fakeSession, result } = await run(
+    instructionRelease,
+    ['demo-3467', '--holder', 'agent'],
+    {
+      facts: [claimBy('agent')],
+    },
+  );
 
   expect(successOf(result).json).toMatchObject({ state: 'open', claim: null });
 
@@ -267,11 +281,15 @@ it('releases a task held by the same holder', async () => {
   ]);
 });
 
-it('refuses a release by another holder or of an open task and writes nothing', async () => {
+it('refuses a release by another holder or of an open instruction and writes nothing', async () => {
   for (const facts of [[claimBy('other')], []]) {
-    const { fakeSession, result } = await run(taskRelease, ['demo-3467', '--holder', 'agent'], {
-      facts,
-    });
+    const { fakeSession, result } = await run(
+      instructionRelease,
+      ['demo-3467', '--holder', 'agent'],
+      {
+        facts,
+      },
+    );
 
     expect(failureOf(result).code).toBe('conflict');
     expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
@@ -280,20 +298,30 @@ it('refuses a release by another holder or of an open task and writes nothing', 
 
 it('refuses a lease longer than 30 days before it takes the lock', async () => {
   for (const lease of ['721h', '999999999999999999h']) {
-    const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent', '--lease', lease], {
-      session: { overrides: lockRefused },
-    });
+    const { result } = await run(
+      instructionClaim,
+      ['demo-3467', '--holder', 'agent', '--lease', lease],
+      {
+        session: { overrides: lockRefused },
+      },
+    );
 
     expect(failureOf(result).code).toBe('invalidArguments');
   }
 
-  const { result } = await run(taskClaim, ['demo-3467', '--holder', 'agent', '--lease', '720h']);
+  const { result } = await run(instructionClaim, [
+    'demo-3467',
+    '--holder',
+    'agent',
+    '--lease',
+    '720h',
+  ]);
 
   expect(successOf(result).json).toMatchObject({ claim: { leaseEnd: '2026-11-19T12:00:00.000Z' } });
 });
 
-it('refuses to claim a task whose parent does not exist and appends nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+it('refuses to claim an instruction whose parent does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     tickets: [parentOnly()],
   });
 
@@ -304,12 +332,12 @@ it('refuses to claim a task whose parent does not exist and appends nothing', as
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses to claim a task whose parent file has an error and appends nothing', async () => {
+it('refuses to claim an instruction whose parent file has an error and appends nothing', async () => {
   const parent = { ...makeTicket('demo-4789'), error: 'Broken.' };
 
   parent.frontMatter = { ...parent.frontMatter, kind: 'slice' };
 
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     tickets: [parentOnly(), parent],
   });
 
@@ -320,11 +348,11 @@ it('refuses to claim a task whose parent file has an error and appends nothing',
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses to claim a task blocked by a ticket whose file has an error', async () => {
+it('refuses to claim an instruction blocked by a ticket whose file has an error', async () => {
   const blocker = { ...makeTicket('demo-6789'), error: 'Broken.' };
 
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
-    tickets: [blockedOnly(), blocker],
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
+    tickets: [parentSlice, blockedOnly(), blocker],
   });
 
   const failure = failureOf(result);
@@ -334,9 +362,9 @@ it('refuses to claim a task blocked by a ticket whose file has an error', async 
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses to claim a task blocked by a ticket that does not exist and appends nothing', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
-    tickets: [blockedOnly()],
+it('refuses to claim an instruction blocked by a ticket that does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
+    tickets: [parentSlice, blockedOnly()],
   });
 
   const failure = failureOf(result);
@@ -348,7 +376,7 @@ it('refuses to claim a task blocked by a ticket that does not exist and appends 
 
 it('claims past a failed tree check with --force --reason and records the reason', async () => {
   const { fakeSession, result } = await run(
-    taskClaim,
+    instructionClaim,
     ['demo-3467', '--holder', 'agent', '--force', '--reason', 'Parent was deleted'],
     { tickets: [orphan()] },
   );
@@ -364,7 +392,7 @@ it('claims past a failed tree check with --force --reason and records the reason
 
 it('refuses --force without --reason and changes nothing', async () => {
   const { fakeSession, result } = await run(
-    taskClaim,
+    instructionClaim,
     ['demo-3467', '--holder', 'agent', '--force'],
     { tickets: [orphan()] },
   );
@@ -375,17 +403,17 @@ it('refuses --force without --reason and changes nothing', async () => {
 
 it('refuses --reason without --force and changes nothing', async () => {
   const { fakeSession, result } = await run(
-    taskClaim,
+    instructionClaim,
     ['demo-3467', '--holder', 'agent', '--reason', 'Because'],
-    { tickets: [task] },
+    { tickets: [parentSlice, instruction] },
   );
 
   expect(failureOf(result).code).toBe('invalidArguments');
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('reports a storeError when the facts of the task cannot be read', async () => {
-  const { fakeSession, result } = await run(taskClaim, ['demo-3467', '--holder', 'agent'], {
+it('reports a storeError when the facts of the instruction cannot be read', async () => {
+  const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
     session: { overrides: { listStateFacts: () => failed('The facts are damaged.') } },
   });
 
@@ -394,7 +422,7 @@ it('reports a storeError when the facts of the task cannot be read', async () =>
 });
 
 it('schedules a background sync after a write that succeeds, and after no other write', async () => {
-  const fakeSession = makeSession({ tickets: [task] });
+  const fakeSession = makeSession({ tickets: [parentSlice, instruction] });
   const { effects, scheduleCalls } = makeEffects({ session: fakeSession });
 
   const input = (args: string[]): CommandInput => ({
@@ -404,15 +432,15 @@ it('schedules a background sync after a write that succeeds, and after no other 
     session: fakeSession.session,
   });
 
-  failureOf(await taskClaim(input(['demo-3467'])));
+  failureOf(await instructionClaim(input(['demo-3467'])));
   expect(scheduleCalls()).toBe(0);
 
-  successOf(await taskClaim(input(['demo-3467', '--holder', 'agent'])));
+  successOf(await instructionClaim(input(['demo-3467', '--holder', 'agent'])));
   expect(scheduleCalls()).toBe(1);
 });
 
-it('fetches before the lock and merges under it before the claim reads the task', async () => {
-  const fakeSession = makeSession({ tickets: [task] });
+it('fetches before the lock and merges under it before the claim reads the instruction', async () => {
+  const fakeSession = makeSession({ tickets: [parentSlice, instruction] });
   const steps: string[] = [];
 
   const { effects } = makeEffects({
@@ -431,7 +459,7 @@ it('fetches before the lock and merges under it before the claim reads the task'
     },
   });
 
-  const result = await taskClaim({
+  const result = await instructionClaim({
     args: ['demo-3467', '--holder', 'agent'],
     json: true,
     effects,

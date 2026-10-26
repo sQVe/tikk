@@ -12,7 +12,7 @@ import type {
 import { findTicket } from './ticketView.ts';
 
 const gapLine = (gap: CoverageGap): string => {
-  const missing = gap.kind === 'plan' ? 'no slice covers it' : 'no task covers it';
+  const missing = gap.kind === 'plan' ? 'no slice covers it' : 'no instruction covers it';
 
   return `${gap.ticket}  ${gap.criterion}  ${missing}\n`;
 };

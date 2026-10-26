@@ -1,5 +1,5 @@
-import { buildSliceIndex, deriveSliceState, deriveTaskState } from '../fact/fact.ts';
-import type { SliceState, TaskClaim, TaskStateName } from '../fact/fact.ts';
+import { buildSliceIndex, deriveSliceState, deriveInstructionState } from '../fact/fact.ts';
+import type { SliceState, InstructionClaim, InstructionStateName } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
@@ -27,9 +27,9 @@ export interface TicketView {
   error: string | null;
 }
 
-export interface TaskView extends TicketView {
-  state: TaskStateName;
-  claim: TaskClaim | null;
+export interface InstructionView extends TicketView {
+  state: InstructionStateName;
+  claim: InstructionClaim | null;
 }
 
 interface SliceView extends TicketView, SliceState {}
@@ -63,20 +63,24 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
   return view;
 };
 
-const taskView = (ticket: CliTicket, state: TaskStateName, claim: TaskClaim | null): TaskView => ({
+const instructionView = (
+  ticket: CliTicket,
+  state: InstructionStateName,
+  claim: InstructionClaim | null,
+): InstructionView => ({
   ...ticketView(ticket, true),
   state,
   claim,
 });
 
-export const taskOutput = (
+export const instructionOutput = (
   ticket: CliTicket,
-  state: TaskStateName,
-  claim: TaskClaim | null,
+  state: InstructionStateName,
+  claim: InstructionClaim | null,
 ): CommandResult => ({
   ok: true,
   value: {
-    json: taskView(ticket, state, claim),
+    json: instructionView(ticket, state, claim),
     text: `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
   },
 });
@@ -103,11 +107,11 @@ const showSlice = async (
 ): Promise<CommandResult> => {
   const outlines = session.listTicketOutlines();
 
-  const taskIds = outlines
+  const instructionIds = outlines
     .filter((outline) => outline.frontMatter.parent === ticket.id)
     .map((outline) => outline.id);
 
-  const facts = await session.listStateFacts([ticket.id, ...taskIds]);
+  const facts = await session.listStateFacts([ticket.id, ...instructionIds]);
 
   if (!facts.ok) {
     return storeFailure(facts.reason.message);
@@ -128,7 +132,7 @@ export const showOutput = async (
     return showSlice(session, now, ticket);
   }
 
-  if (ticket.frontMatter.kind !== 'task') {
+  if (ticket.frontMatter.kind !== 'instruction') {
     return {
       ok: true,
       value: {
@@ -144,11 +148,11 @@ export const showOutput = async (
     return storeFailure(facts.reason.message);
   }
 
-  const { state, claim } = deriveTaskState(ticket, facts.value, now);
+  const { state, claim } = deriveInstructionState(ticket, facts.value, now);
 
   return {
     ok: true,
-    value: { json: taskView(ticket, state, claim), text: ticketText(ticket, state) },
+    value: { json: instructionView(ticket, state, claim), text: ticketText(ticket, state) },
   };
 };
 

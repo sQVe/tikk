@@ -3,10 +3,10 @@ import { appendFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
-import { createCliFixture } from './cliFixture.ts';
+import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture, CliRun } from './cliFixture.ts';
 
-interface ShownTask {
+interface ShownInstruction {
   id: string;
   path: string;
   hash: string;
@@ -25,6 +25,7 @@ interface ReadyListing {
 }
 
 let fixture: CliFixture | undefined;
+let parentSlice = '';
 
 const cli = (): CliFixture => {
   invariant(fixture !== undefined, 'The CLI fixture should be set up.');
@@ -42,11 +43,11 @@ const errorCodeOf = (result: CliRun): unknown => {
   return (parsed as { error: { code: string } }).error.code;
 };
 
-const createTask = (title: string): Promise<ShownTask> =>
-  runJson<ShownTask>(['new', 'task', title]);
+const createInstruction = (title: string): Promise<ShownInstruction> =>
+  runJson<ShownInstruction>(['new', 'instruction', title, '--parent', parentSlice]);
 
 const stateOf = async (id: string): Promise<string> => {
-  const shown = await runJson<ShownTask>(['show', id]);
+  const shown = await runJson<ShownInstruction>(['show', id]);
 
   return shown.state;
 };
@@ -54,18 +55,19 @@ const stateOf = async (id: string): Promise<string> => {
 beforeEach(async () => {
   fixture = await createCliFixture('tikk-claim-');
   await fixture.runChecked(['init']);
+  parentSlice = await createParentSlice(fixture);
 });
 
 afterEach(async () => {
   await fixture?.cleanup();
 });
 
-it('lets exactly one of two concurrent claims on a task succeed', async () => {
-  const task = await createTask('Contested task');
+it('lets exactly one of two concurrent claims on an instruction succeed', async () => {
+  const instruction = await createInstruction('Contested instruction');
 
   const results = await Promise.all([
-    run(['claim', task.id, '--holder', 'first']),
-    run(['claim', task.id, '--holder', 'second']),
+    run(['claim', instruction.id, '--holder', 'first']),
+    run(['claim', instruction.id, '--holder', 'second']),
   ]);
 
   const exitCodes = results
@@ -78,14 +80,14 @@ it('lets exactly one of two concurrent claims on a task succeed', async () => {
   expect(loser === undefined ? undefined : errorCodeOf(loser)).toBe('conflict');
 });
 
-it('lets another holder claim a task after its lease ends', async () => {
-  const task = await createTask('Short lease');
+it('lets another holder claim an instruction after its lease ends', async () => {
+  const instruction = await createInstruction('Short lease');
 
   // A claim whose lease ended long ago, written as another machine would write it.
   const expired = {
     version: 1,
     kind: 'claim',
-    ticket: task.id,
+    ticket: instruction.id,
     at: '2020-01-01T00:00:00.000Z',
     machine: 'other',
     holder: 'first',
@@ -96,26 +98,25 @@ it('lets another holder claim a task after its lease ends', async () => {
 
   await Bun.write(factFile, `${JSON.stringify(expired)}\n`);
 
-  const claimed = await runJson<ShownTask>(['claim', task.id, '--holder', 'second']);
+  const claimed = await runJson<ShownInstruction>(['claim', instruction.id, '--holder', 'second']);
 
   expect(claimed.state).toBe('active');
   expect(claimed.claim?.holder).toBe('second');
 
-  const blocked = await run(['claim', task.id, '--holder', 'third']);
+  const blocked = await run(['claim', instruction.id, '--holder', 'third']);
 
   expect(errorCodeOf(blocked)).toBe('conflict');
 });
 
-it('skips a task blocked by an open task and names the blocker', async () => {
-  const blocker = await createTask('Blocker');
-  const blocked = await createTask('Blocked');
+it('skips an instruction blocked by an open instruction and names the blocker', async () => {
+  const blocker = await createInstruction('Blocker');
+  const blocked = await createInstruction('Blocked');
   const blockerText = await Bun.file(blocker.path).text();
   const blockedText = await Bun.file(blocked.path).text();
   const blockedFrontMatter = `rank: 1\nblockedBy:\n  - ${blocker.id}`;
   // Bun versions differ in how they write an empty list, as `[]` on the same line or the next.
   const emptyBlockedBy = /blockedBy:\s*\[\]/;
 
-  // The ranks put the blocked task first, so the ready rule reports it as skipped.
   await Bun.write(blocker.path, blockerText.replace(emptyBlockedBy, 'rank: 2\nblockedBy: []'));
   await Bun.write(blocked.path, blockedText.replace(emptyBlockedBy, blockedFrontMatter));
 
@@ -134,42 +135,42 @@ it('skips a task blocked by an open task and names the blocker', async () => {
 });
 
 it('refuses a release by another holder', async () => {
-  const task = await createTask('Held task');
+  const instruction = await createInstruction('Held instruction');
 
-  await runJson(['claim', task.id, '--holder', 'first']);
-  const released = await run(['release', task.id, '--holder', 'second']);
+  await runJson(['claim', instruction.id, '--holder', 'first']);
+  const released = await run(['release', instruction.id, '--holder', 'second']);
 
   expect(released.exitCode).toBe(1);
   expect(errorCodeOf(released)).toBe('conflict');
-  expect(await stateOf(task.id)).toBe('active');
+  expect(await stateOf(instruction.id)).toBe('active');
 });
 
-it('reports a submitted and accepted task as done', async () => {
-  const task = await createTask('Finished task');
+it('reports a submitted and accepted instruction as done', async () => {
+  const instruction = await createInstruction('Finished instruction');
 
-  await runJson(['claim', task.id, '--holder', 'first']);
-  await runJson(['submit', task.id, '--holder', 'first', '--text', 'All done']);
-  const submitted = await stateOf(task.id);
+  await runJson(['claim', instruction.id, '--holder', 'first']);
+  await runJson(['submit', instruction.id, '--holder', 'first', '--text', 'All done']);
+  const submitted = await stateOf(instruction.id);
 
-  await runJson(['accept', task.id]);
+  await runJson(['accept', instruction.id]);
 
   expect(submitted).toBe('submitted');
-  expect(await stateOf(task.id)).toBe('done');
+  expect(await stateOf(instruction.id)).toBe('done');
 });
 
-it('reports a canceled task as canceled', async () => {
-  const task = await createTask('Dropped task');
+it('reports a canceled instruction as canceled', async () => {
+  const instruction = await createInstruction('Dropped instruction');
 
-  await runJson(['cancel', task.id]);
+  await runJson(['cancel', instruction.id]);
 
-  expect(await stateOf(task.id)).toBe('canceled');
+  expect(await stateOf(instruction.id)).toBe('canceled');
 });
 
-it('logs to a task in any state', async () => {
-  const open = await createTask('Open task');
-  const active = await createTask('Active task');
-  const done = await createTask('Done task');
-  const canceled = await createTask('Canceled task');
+it('logs to an instruction in any state', async () => {
+  const open = await createInstruction('Open instruction');
+  const active = await createInstruction('Active instruction');
+  const done = await createInstruction('Done instruction');
+  const canceled = await createInstruction('Canceled instruction');
 
   await runJson(['claim', active.id, '--holder', 'first']);
   await runJson(['claim', done.id, '--holder', 'first']);
@@ -178,8 +179,8 @@ it('logs to a task in any state', async () => {
   await runJson(['cancel', canceled.id]);
 
   const logged = await Promise.all(
-    [open, active, done, canceled].map((task) =>
-      run(['log', task.id, '--type', 'progress', '--text', 'A note']),
+    [open, active, done, canceled].map((instruction) =>
+      run(['log', instruction.id, '--type', 'progress', '--text', 'A note']),
     ),
   );
 
@@ -198,17 +199,17 @@ const readFactFiles = async (): Promise<Record<string, string>> => {
   return files;
 };
 
-it('refuses claim and submit on a task whose file has a parse error, but still logs', async () => {
-  const task = await createTask('Broken task');
+it('refuses claim and submit on an instruction whose file has a parse error, but still logs', async () => {
+  const instruction = await createInstruction('Broken instruction');
 
-  await runJson(['log', task.id, '--type', 'progress', '--text', 'Before the break']);
-  await Bun.write(task.path, '---\nkind: [task\n---\nBroken\n');
+  await runJson(['log', instruction.id, '--type', 'progress', '--text', 'Before the break']);
+  await Bun.write(instruction.path, '---\nkind: [instruction\n---\nBroken\n');
 
   const before = await readFactFiles();
-  const claimed = await run(['claim', task.id, '--holder', 'first']);
-  const submitted = await run(['submit', task.id, '--holder', 'first']);
+  const claimed = await run(['claim', instruction.id, '--holder', 'first']);
+  const submitted = await run(['submit', instruction.id, '--holder', 'first']);
   const after = await readFactFiles();
-  const logged = await run(['log', task.id, '--type', 'progress', '--text', 'A note']);
+  const logged = await run(['log', instruction.id, '--type', 'progress', '--text', 'A note']);
 
   expect([claimed.exitCode, submitted.exitCode]).toEqual([1, 1]);
   expect([errorCodeOf(claimed), errorCodeOf(submitted)]).toEqual(['parseError', 'parseError']);
@@ -217,16 +218,26 @@ it('refuses claim and submit on a task whose file has a parse error, but still l
 });
 
 it('refuses an empty log holder and an oversized lease without writing a fact', async () => {
-  const task = await createTask('Guarded task');
+  const instruction = await createInstruction('Guarded instruction');
 
-  await runJson(['log', task.id, '--type', 'progress', '--text', 'First note']);
+  await runJson(['log', instruction.id, '--type', 'progress', '--text', 'First note']);
 
   const before = await readFactFiles();
-  const logged = await run(['log', task.id, '--type', 'progress', '--text', 'A', '--holder', '']);
+
+  const logged = await run([
+    'log',
+    instruction.id,
+    '--type',
+    'progress',
+    '--text',
+    'A',
+    '--holder',
+    '',
+  ]);
 
   const claimed = await run([
     'claim',
-    task.id,
+    instruction.id,
     '--holder',
     'first',
     '--lease',
@@ -246,30 +257,37 @@ it('refuses an empty log holder and an oversized lease without writing a fact', 
 });
 
 it('saves the session log path of a claim and shows it', async () => {
-  const task = await createTask('Logged session');
+  const instruction = await createInstruction('Logged session');
 
-  await runJson(['claim', task.id, '--holder', 'first', '--session-log', '/tmp/session.log']);
+  await runJson([
+    'claim',
+    instruction.id,
+    '--holder',
+    'first',
+    '--session-log',
+    '/tmp/session.log',
+  ]);
 
-  const shown = await runJson<ShownTask & { claim: { sessionLog: string | null } }>([
+  const shown = await runJson<ShownInstruction & { claim: { sessionLog: string | null } }>([
     'show',
-    task.id,
+    instruction.id,
   ]);
 
   expect(shown.claim.sessionLog).toBe('/tmp/session.log');
 });
 
 it('keeps a claim that follows an unfinished fact line, and reports the broken line', async () => {
-  const task = await createTask('Interrupted write');
+  const instruction = await createInstruction('Interrupted write');
 
-  await runJson(['log', task.id, '--type', 'progress', '--text', 'First note']);
+  await runJson(['log', instruction.id, '--type', 'progress', '--text', 'First note']);
 
   const [factFile] = Object.keys(await readFactFiles());
   const factPath = join(cli().storePath, 'facts', factFile ?? '');
 
   await appendFile(factPath, '{"version":1,"kind":"cla');
-  await runJson(['claim', task.id, '--holder', 'first']);
+  await runJson(['claim', instruction.id, '--holder', 'first']);
 
-  const shown = await runJson<ShownTask>(['show', task.id]);
+  const shown = await runJson<ShownInstruction>(['show', instruction.id]);
   const listing = await runJson<{ errors: { path: string }[] }>(['ls']);
 
   expect(shown.state).toBe('active');
@@ -277,13 +295,13 @@ it('keeps a claim that follows an unfinished fact line, and reports the broken l
 });
 
 it('clears a lock left by a process that has exited', async () => {
-  const task = await createTask('Abandoned lock');
+  const instruction = await createInstruction('Abandoned lock');
   const child = Bun.spawn(['bun', '-e', '0'], { stdout: 'ignore', stderr: 'ignore' });
 
   await child.exited;
   await Bun.write(join(cli().storePath, '.git', 'tikk.lock'), `${child.pid}\n`);
 
-  const claimed = await run(['claim', task.id, '--holder', 'first']);
+  const claimed = await run(['claim', instruction.id, '--holder', 'first']);
 
   expect(claimed.exitCode).toBe(0);
   expect(await Bun.file(join(cli().storePath, '.git', 'tikk.lock')).exists()).toBe(false);

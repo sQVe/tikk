@@ -144,6 +144,18 @@ const runGit = async (args: string[]): Promise<void> => {
   invariant(exitCode === 0, `git ${args.join(' ')} exited with ${exitCode}.\nstderr: ${stderr}`);
 };
 
+export const createParentSlice = async (fixture: CliFixture): Promise<string> => {
+  const created = await fixture.runJson<{ id: string }>([
+    'new',
+    'slice',
+    'Parent slice',
+    '--status',
+    'draft',
+  ]);
+
+  return created.id;
+};
+
 // Two clients with their own homes and machine names, which share one bare remote in the first
 // home. Neither store exists until a test runs `tikk init`.
 export const createCloneFixtures = async (prefix: string): Promise<CloneFixtures> => {

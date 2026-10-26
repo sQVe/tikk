@@ -1,12 +1,16 @@
 import type { Fact } from './factLine.ts';
+import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
+import type {
+  InstructionClaim,
+  InstructionStateName,
+  InstructionTicket,
+} from './instructionState.ts';
 import { compareRank } from './rankOrder.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceStateName } from './sliceState.ts';
-import { deriveTaskStateFromOwnFacts } from './taskState.ts';
-import type { TaskClaim, TaskStateName, TaskTicket } from './taskState.ts';
 
 export interface ReadyScope {
-  kind?: 'task' | 'slice';
+  kind?: 'instruction' | 'slice';
   project?: string;
   parent?: string;
 }
@@ -16,19 +20,19 @@ interface Blocker {
   state: string;
 }
 
-type ReadyStateName = TaskStateName | SliceStateName;
+type ReadyStateName = InstructionStateName | SliceStateName;
 
 interface Consideration {
   state: ReadyStateName;
-  claim: TaskClaim | null;
+  claim: InstructionClaim | null;
 }
 
-interface ReadyCandidate<Ticket extends TaskTicket> {
+interface ReadyCandidate<Ticket extends InstructionTicket> {
   ticket: Ticket;
   state: ReadyStateName;
 }
 
-interface SkippedTask<Ticket extends TaskTicket> {
+interface SkippedInstruction<Ticket extends InstructionTicket> {
   ticket: Ticket;
   reason: 'blocked' | 'active' | 'submitted';
   blockers?: Blocker[];
@@ -36,15 +40,15 @@ interface SkippedTask<Ticket extends TaskTicket> {
   leaseEnd?: string;
 }
 
-export interface ReadySelection<Ticket extends TaskTicket> {
+export interface ReadySelection<Ticket extends InstructionTicket> {
   candidates: ReadyCandidate<Ticket>[];
-  skipped: SkippedTask<Ticket>[];
+  skipped: SkippedInstruction<Ticket>[];
 }
 
 const consideredStates = new Set<ReadyStateName>(['open', 'active', 'submitted', 'planned']);
 const clearingStates = new Set(['done', 'canceled', 'closed']);
 
-const inScope = (ticket: TaskTicket, scope: ReadyScope): boolean => {
+const inScope = (ticket: InstructionTicket, scope: ReadyScope): boolean => {
   const { frontMatter } = ticket;
 
   if (scope.project !== undefined && frontMatter.project !== scope.project) {
@@ -54,11 +58,12 @@ const inScope = (ticket: TaskTicket, scope: ReadyScope): boolean => {
   return scope.parent === undefined || frontMatter.parent === scope.parent;
 };
 
-const isCandidateKind = (ticket: TaskTicket, scope: ReadyScope): boolean =>
-  ticket.frontMatter.kind === (scope.kind ?? 'task') && ticket.frontMatter.archived === undefined;
+const isCandidateKind = (ticket: InstructionTicket, scope: ReadyScope): boolean =>
+  ticket.frontMatter.kind === (scope.kind ?? 'instruction') &&
+  ticket.frontMatter.archived === undefined;
 
 const deriveStates = (
-  tickets: TaskTicket[],
+  tickets: InstructionTicket[],
   facts: Fact[],
   now: Date,
 ): Map<string, Consideration> => {
@@ -68,10 +73,10 @@ const deriveStates = (
   for (const ticket of tickets) {
     const { kind, status } = ticket.frontMatter;
 
-    if (kind === 'task') {
+    if (kind === 'instruction') {
       states.set(
         ticket.id,
-        deriveTaskStateFromOwnFacts(ticket, index.factsByTicket.get(ticket.id) ?? [], now),
+        deriveInstructionStateFromOwnFacts(ticket, index.factsByTicket.get(ticket.id) ?? [], now),
       );
     }
 
@@ -87,7 +92,7 @@ const deriveStates = (
 };
 
 const blockerState = (
-  target: TaskTicket | undefined,
+  target: InstructionTicket | undefined,
   states: Map<string, Consideration>,
 ): string => {
   if (target === undefined) {
@@ -97,7 +102,7 @@ const blockerState = (
   return states.get(target.id)?.state ?? target.frontMatter.status;
 };
 
-export const selectReady = <Ticket extends TaskTicket>(
+export const selectReady = <Ticket extends InstructionTicket>(
   tickets: Ticket[],
   facts: Fact[],
   now: Date,
@@ -109,7 +114,7 @@ export const selectReady = <Ticket extends TaskTicket>(
   const considered: {
     ticket: Ticket;
     state: ReadyStateName;
-    claim: TaskClaim | null;
+    claim: InstructionClaim | null;
   }[] = [];
 
   for (const ticket of tickets) {
@@ -127,8 +132,8 @@ export const selectReady = <Ticket extends TaskTicket>(
   considered.sort((left, right) => compareRank(left.ticket, right.ticket));
 
   const candidates: ReadyCandidate<Ticket>[] = [];
-  const skipped: SkippedTask<Ticket>[] = [];
-  const pending: SkippedTask<Ticket>[] = [];
+  const skipped: SkippedInstruction<Ticket>[] = [];
+  const pending: SkippedInstruction<Ticket>[] = [];
 
   for (const { ticket, state, claim } of considered) {
     if (state === 'submitted') {

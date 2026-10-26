@@ -4,8 +4,8 @@ import type { Result } from '../result.ts';
 import { invalidArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
 import { appendEvidence, readEvidenceTarget, targetOptions } from './evidenceTarget.ts';
-import { readTarget, requireValue } from './taskCommand.ts';
-import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { readTarget, requireValue } from './instructionCommand.ts';
+import { refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, storeFailure } from './ticketView.ts';
 

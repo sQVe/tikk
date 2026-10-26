@@ -38,7 +38,7 @@ const create = (
   return { fakeSession, fakeEffects, result };
 };
 
-const ticketOfKind = (id: string, kind: 'plan' | 'slice' | 'task' | 'issue'): CliTicket =>
+const ticketOfKind = (id: string, kind: 'plan' | 'slice' | 'instruction' | 'issue'): CliTicket =>
   makeTicket(id, {
     frontMatter: {
       kind,
@@ -54,7 +54,13 @@ const ticketOfKind = (id: string, kind: 'plan' | 'slice' | 'task' | 'issue'): Cl
 const slice = (id: string): CliTicket => ticketOfKind(id, 'slice');
 
 it('creates a ticket in the resolved project and shows it', async () => {
-  const { fakeSession, fakeEffects, result } = create(['task', 'My title']);
+  const { fakeSession, fakeEffects, result } = create(
+    ['instruction', 'My title', '--parent', 'demo-3468'],
+    {},
+    {},
+    { tickets: [slice('demo-3468')] },
+  );
+
   const output = successOf(await result);
 
   expect(output.json).toMatchObject({ id: 'demo-3467', body: 'Made\n' });
@@ -62,15 +68,27 @@ it('creates a ticket in the resolved project and shows it', async () => {
   expect(fakeSession.creates[0]?.project).toBe('demo');
   expect(fakeSession.creates[0]?.title).toBe('My title');
   expect(fakeSession.creates[0]?.text).toContain('title: My title');
-  expect(fakeSession.creates[0]?.text).toContain('kind: task');
+  expect(fakeSession.creates[0]?.text).toContain('kind: instruction');
   expect(fakeSession.creates[0]?.text).toContain('status: open');
   expect(fakeEffects.resolveCalls()).toBe(1);
+});
+
+it('creates an instruction under a slice with --json', async () => {
+  const { fakeSession, result } = create(
+    ['instruction', 'Title', '--parent', 'demo-3468', '--json'],
+    {},
+    {},
+    { tickets: [slice('demo-3468')] },
+  );
+
+  expect(successOf(await result).json).toMatchObject({ id: 'demo-3467' });
+  expect(fakeSession.creates[0]?.text).toContain('parent: demo-3468');
 });
 
 it('uses --project, --parent, --status, and --body-file', async () => {
   const { fakeSession, fakeEffects, result } = create(
     [
-      'task',
+      'instruction',
       'Title',
       '--project',
       'other',
@@ -91,7 +109,7 @@ it('uses --project, --parent, --status, and --body-file', async () => {
   const created = fakeSession.creates[0];
 
   expect(created?.project).toBe('other');
-  expect(created?.text).toContain('kind: task');
+  expect(created?.text).toContain('kind: instruction');
   expect(created?.text).toContain('parent: other-3468');
   expect(created?.text).toContain('status: draft');
   expect(created?.text).toEndWith('From file\n');
@@ -99,7 +117,12 @@ it('uses --project, --parent, --status, and --body-file', async () => {
 });
 
 it('writes an empty body without --body-file', async () => {
-  const { fakeSession, result } = create(['task', 'Title']);
+  const { fakeSession, result } = create(
+    ['instruction', 'Title', '--parent', 'demo-3468'],
+    {},
+    {},
+    { tickets: [slice('demo-3468')] },
+  );
 
   successOf(await result);
 
@@ -110,15 +133,15 @@ it('writes an empty body without --body-file', async () => {
 
 const refusals: [string, string[]][] = [
   ['no kind', []],
-  ['no title', ['task']],
-  ['extra positionals', ['task', 'Title', 'more']],
-  ['an unknown option', ['task', 'Title', '--bogus']],
+  ['no title', ['instruction']],
+  ['extra positionals', ['instruction', 'Title', 'more']],
+  ['an unknown option', ['instruction', 'Title', '--bogus']],
   ['an invalid kind', ['epic', 'Title']],
-  ['an empty title', ['task', '']],
-  ['a closed task', ['task', 'Title', '--status', 'closed']],
-  ['an invalid project', ['task', 'Title', '--project', 'Bad Name']],
-  ['an invalid parent', ['task', 'Title', '--parent', 'nonsense']],
-  ['a missing body file', ['task', 'Title', '--body-file', '/missing.md']],
+  ['an empty title', ['instruction', '']],
+  ['a closed instruction', ['instruction', 'Title', '--status', 'closed']],
+  ['an invalid project', ['instruction', 'Title', '--project', 'Bad Name']],
+  ['an invalid parent', ['instruction', 'Title', '--parent', 'nonsense']],
+  ['a missing body file', ['instruction', 'Title', '--body-file', '/missing.md']],
 ];
 
 for (const [name, args] of refusals) {
@@ -131,25 +154,25 @@ for (const [name, args] of refusals) {
 }
 
 it('names the invalid project in the error', async () => {
-  const { result } = create(['task', 'Title', '--project', 'Bad Name']);
+  const { result } = create(['instruction', 'Title', '--project', 'Bad Name']);
 
   expect(failureOf(await result).message).toContain('Bad Name');
 });
 
 it('names the invalid parent in the error', async () => {
-  const { result } = create(['task', 'Title', '--parent', 'nonsense']);
+  const { result } = create(['instruction', 'Title', '--parent', 'nonsense']);
 
   expect(failureOf(await result).message).toContain('nonsense');
 });
 
 it('names the missing body file in the error', async () => {
-  const { result } = create(['task', 'Title', '--body-file', '/missing.md']);
+  const { result } = create(['instruction', 'Title', '--body-file', '/missing.md']);
 
   expect(failureOf(await result).message).toContain('/missing.md');
 });
 
 it('gives a message for a rejected front matter', async () => {
-  const { result } = create(['task', 'Title', '--status', 'closed']);
+  const { result } = create(['instruction', 'Title', '--status', 'closed']);
 
   const reason = failureOf(await result);
 
@@ -158,7 +181,7 @@ it('gives a message for a rejected front matter', async () => {
 });
 
 it('fails with the project message when the project cannot be resolved', async () => {
-  const { fakeSession, result } = create(['task', 'Title'], {
+  const { fakeSession, result } = create(['instruction', 'Title'], {
     overrides: { resolveProject: () => failed('No git remote for /work.') },
   });
 
@@ -171,6 +194,7 @@ it('fails with the project message when the project cannot be resolved', async (
 
 it('returns a storeError when the file cannot be created', async () => {
   const fakeSession = makeSession({
+    tickets: [slice('demo-3468')],
     overrides: {
       createTicketFile: () =>
         Promise.resolve({ ok: false, reason: { kind: 'failed', message: 'Disk full at /store.' } }),
@@ -181,7 +205,7 @@ it('returns a storeError when the file cannot be created', async () => {
 
   const reason = failureOf(
     await ticketNew({
-      args: ['task', 'Title'],
+      args: ['instruction', 'Title', '--parent', 'demo-3468'],
       json: false,
       effects,
       session: fakeSession.session,
@@ -193,7 +217,7 @@ it('returns a storeError when the file cannot be created', async () => {
 });
 
 it('refuses a missing title before it resolves the project', async () => {
-  const { fakeSession, fakeEffects, result } = create(['task']);
+  const { fakeSession, fakeEffects, result } = create(['instruction']);
 
   expect(failureOf(await result).code).toBe('invalidArguments');
   expect(fakeEffects.resolveCalls()).toBe(0);
@@ -201,7 +225,12 @@ it('refuses a missing title before it resolves the project', async () => {
 });
 
 it('creates the ticket file under the store lock', async () => {
-  const { fakeSession, result } = create(['task', 'My title']);
+  const { fakeSession, result } = create(
+    ['instruction', 'My title', '--parent', 'demo-3468'],
+    {},
+    {},
+    { tickets: [slice('demo-3468')] },
+  );
 
   successOf(await result);
 
@@ -211,7 +240,7 @@ it('creates the ticket file under the store lock', async () => {
 
 it('fails with locked and creates nothing when the store lock is held', async () => {
   const { fakeSession, result } = create(
-    ['task', 'My title'],
+    ['instruction', 'My title'],
     {},
     {
       lockStore: () =>
@@ -234,11 +263,12 @@ const treeRefusals: [string, string[], SessionOptions, string][] = [
     'demo-3468',
   ],
   [
-    'a task whose parent is a plan',
-    ['task', 'Title', '--parent', 'demo-3468'],
+    'an instruction whose parent is a plan',
+    ['instruction', 'Title', '--parent', 'demo-3468'],
     { tickets: [ticketOfKind('demo-3468', 'plan')] },
-    'demo-3468',
+    'must be a slice',
   ],
+  ['an instruction with no parent', ['instruction', 'Title'], {}, 'needs a slice as its parent'],
   [
     'a slice whose parent is missing',
     ['slice', 'Title', '--parent', 'demo-3469', '--criteria-file', '/criteria.yaml'],
@@ -246,18 +276,28 @@ const treeRefusals: [string, string[], SessionOptions, string][] = [
     'demo-3469',
   ],
   [
-    'a task whose parent file has an error',
-    ['task', 'Title', '--parent', 'demo-3468'],
+    'an instruction whose parent file has an error',
+    ['instruction', 'Title', '--parent', 'demo-3468'],
     { tickets: [{ ...ticketOfKind('demo-3468', 'slice'), error: 'Broken.' }] },
     'demo-3468',
   ],
   [
     'a blocked-by target whose file has an error',
-    ['task', 'Title', '--blocked-by', 'demo-3468'],
-    { tickets: [{ ...ticketOfKind('demo-3468', 'task'), error: 'Broken.' }] },
+    ['instruction', 'Title', '--parent', 'demo-3469', '--blocked-by', 'demo-3468'],
+    {
+      tickets: [
+        slice('demo-3469'),
+        { ...ticketOfKind('demo-3468', 'instruction'), error: 'Broken.' },
+      ],
+    },
     'demo-3468',
   ],
-  ['a missing blocked-by target', ['task', 'Title', '--blocked-by', 'demo-3473'], {}, 'demo-3473'],
+  [
+    'a missing blocked-by target',
+    ['instruction', 'Title', '--parent', 'demo-3469', '--blocked-by', 'demo-3473'],
+    { tickets: [slice('demo-3469')] },
+    'demo-3473',
+  ],
   [
     'a missing discovered-from target',
     ['issue', 'Title', '--discovered-from', 'demo-3474'],
@@ -288,15 +328,18 @@ for (const [name, args, sessionOptions, mention] of treeRefusals) {
 
 it('accepts a link to an archived ticket', async () => {
   const archived = makeTicket('demo-3468', {
-    frontMatter: { ...ticketOfKind('demo-3468', 'task').frontMatter, archived: '2026-10-01' },
+    frontMatter: {
+      ...ticketOfKind('demo-3468', 'instruction').frontMatter,
+      archived: '2026-10-01',
+    },
   });
 
   const { fakeSession, result } = create(
-    ['task', 'Title', '--blocked-by', 'demo-3468'],
+    ['instruction', 'Title', '--parent', 'demo-3469', '--blocked-by', 'demo-3468'],
     {},
     {},
     {
-      tickets: [archived],
+      tickets: [archived, slice('demo-3469')],
     },
   );
 
@@ -330,7 +373,7 @@ it('shows the criteria of a new open plan made with --criteria-file', async () =
 const criteriaRefusals: [string, string[]][] = [
   ['an open plan without criteria', ['plan', 'Plan']],
   ['an open slice without criteria', ['slice', 'Slice']],
-  ['criteria on a task', ['task', 'Title', '--criteria-file', '/criteria.yaml']],
+  ['criteria on an instruction', ['instruction', 'Title', '--criteria-file', '/criteria.yaml']],
   [
     'a criteria file that is not a list',
     ['plan', 'Plan', '--status', 'draft', '--criteria-file', '/notList.yaml'],
@@ -343,11 +386,14 @@ const criteriaRefusals: [string, string[]][] = [
     'a criteria file that is not YAML',
     ['plan', 'Plan', '--status', 'draft', '--criteria-file', '/broken.yaml'],
   ],
-  ['a blank rank', ['task', 'Title', '--rank', ' ']],
-  ['a blockedBy ID that is not valid', ['task', 'Title', '--blocked-by', 'Not An ID']],
-  ['a discoveredFrom ID that is not valid', ['task', 'Title', '--discovered-from', 'Not An ID']],
+  ['a blank rank', ['instruction', 'Title', '--rank', ' ']],
+  ['a blockedBy ID that is not valid', ['instruction', 'Title', '--blocked-by', 'Not An ID']],
+  [
+    'a discoveredFrom ID that is not valid',
+    ['instruction', 'Title', '--discovered-from', 'Not An ID'],
+  ],
   ['covers on a plan', ['plan', 'Plan', '--criteria-file', '/criteria.yaml', '--covers', 'works']],
-  ['a rank that is not a number', ['task', 'Title', '--rank', 'high']],
+  ['a rank that is not a number', ['instruction', 'Title', '--rank', 'high']],
 ];
 
 for (const [name, args] of criteriaRefusals) {
@@ -376,8 +422,10 @@ it('creates a draft plan without criteria', async () => {
 it('writes rank, edges, and covers into the front matter', async () => {
   const { fakeSession, result } = create(
     [
-      'task',
+      'instruction',
       'Title',
+      '--parent',
+      'demo-3476',
       '--rank',
       '2.5',
       '--blocked-by',
@@ -393,7 +441,7 @@ it('writes rank, edges, and covers into the front matter', async () => {
     ],
     {},
     {},
-    { tickets: [slice('demo-3468'), slice('demo-3469')] },
+    { tickets: [slice('demo-3468'), slice('demo-3469'), slice('demo-3476')] },
   );
 
   successOf(await result);
@@ -411,7 +459,7 @@ it('writes rank, edges, and covers into the front matter', async () => {
 
 it('returns a storeError and creates nothing when the refresh under the lock fails', async () => {
   const { fakeSession, result } = create(
-    ['task', 'Title'],
+    ['instruction', 'Title'],
     {},
     { refresh: () => failed('The cache failed.') },
   );

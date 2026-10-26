@@ -96,7 +96,7 @@ export const makeTicket = (
   hash: `hash-${id}`,
   error: null,
   frontMatter: {
-    kind: 'task',
+    kind: 'instruction',
     title: 'A title',
     project: projectNameOf('demo'),
     blockedBy: [],

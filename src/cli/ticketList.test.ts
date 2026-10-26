@@ -25,7 +25,7 @@ const other = makeTicket('other-3467', {
 
 const archived = makeTicket('demo-3468', {
   frontMatter: {
-    kind: 'task',
+    kind: 'instruction',
     title: 'Old',
     project: projectNameOf('demo'),
     blockedBy: [],
@@ -64,7 +64,7 @@ it('formats one text line per ticket', () => {
   const output = successOf(list([]).result);
 
   expect(output.text).toBe(
-    'demo-3467  task  open  A title\nother-3467  issue  draft  Other title\n',
+    'demo-3467  instruction  open  A title\nother-3467  issue  draft  Other title\n',
   );
 });
 

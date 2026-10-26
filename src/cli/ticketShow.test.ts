@@ -51,7 +51,7 @@ it('returns notFound with the ID for an unknown ticket', async () => {
   expect(reason.message).toContain('demo-3468');
 });
 
-it('shows the state of a task and its claim while the claim is active', async () => {
+it('shows the state of an instruction and its claim while the claim is active', async () => {
   const claim = makeFact({ kind: 'claim', holder: 'agent', leaseEnd: '2026-10-20T13:00:00.000Z' });
   const open = successOf(await show(['demo-3467']));
   const active = successOf(await show(['demo-3467'], [makeTicket('demo-3467')], [claim]));
@@ -88,7 +88,7 @@ it('shows no state for an issue', async () => {
   expect(output.json).not.toHaveProperty('claim');
 });
 
-it('prints the derived state of a task in text, not the front matter status', async () => {
+it('prints the derived state of an instruction in text, not the front matter status', async () => {
   const accept = makeFact({ kind: 'accept' });
   const output = successOf(await show(['demo-3467'], [makeTicket('demo-3467')], [accept]));
 
@@ -96,10 +96,10 @@ it('prints the derived state of a task in text, not the front matter status', as
   expect(output.text).not.toContain('demo-3467  open');
 });
 
-it('shows a merged open slice with its derived state, PR, and open tasks', async () => {
+it('shows a merged open slice with its derived state, PR, and open instructions', async () => {
   const slice = makeKindTicket('demo-3469', 'slice');
 
-  const task = makeTicket('demo-3478', {
+  const instruction = makeTicket('demo-3478', {
     frontMatter: { ...makeTicket('demo-3478').frontMatter, parent: ticketIdOf('demo-3469') },
   });
 
@@ -115,7 +115,7 @@ it('shows a merged open slice with its derived state, PR, and open tasks', async
     inTrunk: true,
   });
 
-  const output = successOf(await show(['demo-3469'], [slice, task], [merged]));
+  const output = successOf(await show(['demo-3469'], [slice, instruction], [merged]));
 
   expect(output.json).toMatchObject({
     id: 'demo-3469',
@@ -123,7 +123,7 @@ it('shows a merged open slice with its derived state, PR, and open tasks', async
     since: '2026-10-20T11:00:00.000Z',
     ageSeconds: 3600,
     flagged: true,
-    openTasks: ['demo-3478'],
+    openInstructions: ['demo-3478'],
     pr: {
       repository: 'sqve/tikk',
       number: 7,

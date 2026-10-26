@@ -21,7 +21,7 @@ import type {
   CommandInput,
   CommandResult,
 } from './cliEffects.ts';
-import { withStoreLock } from './taskLock.ts';
+import { withStoreLock } from './instructionLock.ts';
 import { readCriteriaFile } from './ticketCriteria.ts';
 import { checkSessionTree } from './ticketStatus.ts';
 import { showAfterRefresh, storeFailure } from './ticketView.ts';
@@ -41,7 +41,7 @@ interface Edges {
 }
 
 const usage =
-  'Usage: tikk new <plan|slice|task|issue> <title> [--project <p>] [--parent <id>] [--status <s>] [--rank <n>] [--blocked-by <id>]... [--discovered-from <id>]... [--related <id>]... [--covers <criterion>]... [--criteria-file <f>] [--body-file <f>] [--json]';
+  'Usage: tikk new <plan|slice|instruction|issue> <title> [--project <p>] [--parent <id>] [--status <s>] [--rank <n>] [--blocked-by <id>]... [--discovered-from <id>]... [--related <id>]... [--covers <criterion>]... [--criteria-file <f>] [--body-file <f>] [--json]';
 
 const chooseProject = async (
   effects: CliEffects,

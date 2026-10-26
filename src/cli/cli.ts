@@ -4,6 +4,9 @@ import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
 import { coverageCommand } from './coverageCommand.ts';
 import { findingCommand } from './findingCommand.ts';
+import { instructionClaim, instructionRelease } from './instructionClaim.ts';
+import { instructionLog } from './instructionLog.ts';
+import { instructionAccept, instructionSubmit } from './instructionSubmit.ts';
 import { needsCommand } from './needsCommand.ts';
 import { prCommand } from './prLink.ts';
 import { reconcileCommand } from './prReconcile.ts';
@@ -13,9 +16,6 @@ import { reviewCommand } from './reviewCommand.ts';
 import { refreshSession } from './sessionRefresh.ts';
 import { sliceAudit } from './sliceAudit.ts';
 import { syncCommand } from './syncCommand.ts';
-import { taskClaim, taskRelease } from './taskClaim.ts';
-import { taskLog } from './taskLog.ts';
-import { taskAccept, taskSubmit } from './taskSubmit.ts';
 import { ticketArchive, ticketUnarchive } from './ticketArchive.ts';
 import { ticketCancel } from './ticketCancel.ts';
 import { ticketClose } from './ticketClose.ts';
@@ -43,11 +43,11 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['show', ticketShow],
   ['ls', ticketList],
   ['edit', ticketEdit],
-  ['claim', taskClaim],
-  ['release', taskRelease],
-  ['log', taskLog],
-  ['submit', taskSubmit],
-  ['accept', taskAccept],
+  ['claim', instructionClaim],
+  ['release', instructionRelease],
+  ['log', instructionLog],
+  ['submit', instructionSubmit],
+  ['accept', instructionAccept],
   ['cancel', ticketCancel],
   ['close', ticketClose],
   ['ready', readyCommand],

@@ -3,7 +3,7 @@
 **Date**: 2026-10-18\
 **Status**: Accepted\
 **Related**: [ADR 0015 (Observed facts in per-machine JSONL)](./0015-facts-in-per-machine-jsonl.md),
-[ADR 0018 (Plans, slices, tasks, and issues)](./0018-work-model-and-kinds.md),
+[ADR 0018 (Plans, slices, instructions, and issues)](./0018-work-model-and-kinds.md),
 [ADR 0023 (A slice is done when its PR merged and its criteria are met)](./0023-derived-slice-done.md)
 
 ## Context
@@ -55,15 +55,15 @@ evidence; the review must still match the code state being assessed.
 ### Criteria
 
 - Criteria live in the front matter of plans and slices, each with a stable ID, a check method, an
-  expected result, and `covers` links from slices and tasks.
-- A task covers all of its slice's criteria unless it names some.
+  expected result, and `covers` links from slices and instructions.
+- An instruction covers all of its slice's criteria unless it names some.
 - Coverage is a query over criteria and `covers` links. No ticket copies criteria text.
 - A slice covers the plan criteria in its `covers`. A slice with no `covers` covers none. Only
-  slices cover plan criteria, and only tasks cover slice criteria.
-- A canceled slice or task covers nothing, and a canceled plan or slice reports no gaps. Archived
-  tickets are left out. A `covers` ID that names no criterion of the parent is ignored.
+  slices cover plan criteria, and only instructions cover slice criteria.
+- A canceled slice or instruction covers nothing, and a canceled plan or slice reports no gaps.
+  Archived tickets are left out. A `covers` ID that names no criterion of the parent is ignored.
 - `tikk coverage [<id>]` reports each plan criterion that no slice covers and each slice criterion
-  that no task covers. It takes a plan or a slice and exits 0 when it finds gaps.
+  that no instruction covers. It takes a plan or a slice and exits 0 when it finds gaps.
 - The coverage report is a warning until the `--force` rate shows agents can meet it.
 
 ## Consequences

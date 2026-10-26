@@ -7,7 +7,7 @@ import type { ReconcileProblem } from './prReconcile.ts';
 import { findTicket, ticketView } from './ticketView.ts';
 
 type Selection = ReturnType<typeof selectReady<CliTicket>>;
-type ReadyKind = 'task' | 'slice';
+type ReadyKind = 'instruction' | 'slice';
 type KindResult = Result<ReadyKind, CliFailure>;
 type Skipped = Selection['skipped'][number];
 
@@ -57,7 +57,8 @@ const skippedDetails = (item: Skipped): string => {
   return '';
 };
 
-const usage = 'Usage: tikk ready [--project <p>] [--parent <id> | --kind <task|slice>] [--json]';
+const usage =
+  'Usage: tikk ready [--project <p>] [--parent <id> | --kind <instruction|slice>] [--json]';
 
 const chooseKind = (
   session: CommandInput['session'],
@@ -69,11 +70,11 @@ const chooseKind = (
   }
 
   if (parent === undefined) {
-    if (rawKind === undefined || rawKind === 'task' || rawKind === 'slice') {
-      return { ok: true, value: rawKind ?? 'task' };
+    if (rawKind === undefined || rawKind === 'instruction' || rawKind === 'slice') {
+      return { ok: true, value: rawKind ?? 'instruction' };
     }
 
-    return invalidArguments(`Kind ${rawKind} is not task or slice.`);
+    return invalidArguments(`Kind ${rawKind} is not instruction or slice.`);
   }
 
   const found = findTicket(session, parent);
@@ -89,7 +90,7 @@ const chooseKind = (
   }
 
   if (parentKind === 'slice') {
-    return { ok: true, value: 'task' };
+    return { ok: true, value: 'instruction' };
   }
 
   return invalidArguments(`Ticket ${parent} is a ${parentKind}; --parent takes a plan or slice.`);

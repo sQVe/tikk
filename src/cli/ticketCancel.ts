@@ -1,10 +1,10 @@
-import { deriveTaskState } from '../fact/fact.ts';
+import { deriveInstructionState } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { conflict, refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { conflict, refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { writeTicketWithStatus } from './ticketStatus.ts';
-import { showAfterRefresh, showOutput, storeFailure, taskOutput } from './ticketView.ts';
+import { showAfterRefresh, showOutput, storeFailure, instructionOutput } from './ticketView.ts';
 
 const writeCanceled = async (
   input: CommandInput,
@@ -25,31 +25,34 @@ const writeCanceled = async (
   return { ok: true, value: { ...ticket, hash: written.value.hash, frontMatter } };
 };
 
-const cancelTask = async (input: CommandInput, task: CliTicket): Promise<CommandResult> => {
+const cancelInstruction = async (
+  input: CommandInput,
+  instruction: CliTicket,
+): Promise<CommandResult> => {
   const now = input.effects.now();
-  const facts = await input.session.listStateFacts([task.id]);
+  const facts = await input.session.listStateFacts([instruction.id]);
 
   if (!facts.ok) {
     return storeFailure(facts.reason.message);
   }
 
-  const { state } = deriveTaskState(task, facts.value, now);
+  const { state } = deriveInstructionState(instruction, facts.value, now);
 
   if (state === 'canceled') {
-    return taskOutput(task, state, null);
+    return instructionOutput(instruction, state, null);
   }
 
   if (state === 'done') {
-    return conflict(`Task ${task.id} is done, so it cannot be canceled.`);
+    return conflict(`Instruction ${instruction.id} is done, so it cannot be canceled.`);
   }
 
-  const canceled = await writeCanceled(input, task);
+  const canceled = await writeCanceled(input, instruction);
 
   if (!canceled.ok) {
     return canceled;
   }
 
-  return taskOutput(canceled.value, 'canceled', null);
+  return instructionOutput(canceled.value, 'canceled', null);
 };
 
 const cancelOther = async (input: CommandInput, ticket: CliTicket): Promise<CommandResult> => {
@@ -87,6 +90,8 @@ export const ticketCancel = async (input: CommandInput): Promise<CommandResult> 
   }
 
   return withLockedTicket(input, rawId, refuseFileErrors, (ticket) =>
-    ticket.frontMatter.kind === 'task' ? cancelTask(input, ticket) : cancelOther(input, ticket),
+    ticket.frontMatter.kind === 'instruction'
+      ? cancelInstruction(input, ticket)
+      : cancelOther(input, ticket),
   );
 };

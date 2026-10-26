@@ -7,7 +7,7 @@ import { invariant } from '../src/invariant.ts';
 import { createCliFixture, createCloneFixtures } from './cliFixture.ts';
 import type { CliFixture, CloneFixtures } from './cliFixture.ts';
 
-interface ShownTask {
+interface ShownInstruction {
   id: string;
   path: string;
   state: string;
@@ -67,13 +67,32 @@ const ageFile = async (path: string): Promise<void> => {
   await utimes(path, past, past);
 };
 
-// Creates a task whose file is old enough for sync to commit it.
-const createSettledTask = async (fixture: CliFixture, title: string): Promise<ShownTask> => {
-  const task = await fixture.runJson<ShownTask>(['new', 'task', title]);
+const createInstructionIn = async (
+  fixture: CliFixture,
+  title: string,
+): Promise<ShownInstruction> => {
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Parent',
+    '--status',
+    'draft',
+  ]);
 
-  await ageFile(task.path);
+  await ageFile(parent.path);
 
-  return task;
+  return fixture.runJson<ShownInstruction>(['new', 'instruction', title, '--parent', parent.id]);
+};
+
+const createSettledInstruction = async (
+  fixture: CliFixture,
+  title: string,
+): Promise<ShownInstruction> => {
+  const instruction = await createInstructionIn(fixture, title);
+
+  await ageFile(instruction.path);
+
+  return instruction;
 };
 
 const readAllFacts = async (fixture: CliFixture): Promise<string> => {
@@ -103,16 +122,25 @@ it('two clones that each add facts offline sync with no conflict, and both see a
   await first.runChecked(['init', '--remote', remotePath]);
   await second.runChecked(['init', '--remote', remotePath]);
 
-  const firstTask = await createSettledTask(first, 'First task');
-  const secondTask = await createSettledTask(second, 'Second task');
+  const firstInstruction = await createSettledInstruction(first, 'First instruction');
+  const secondInstruction = await createSettledInstruction(second, 'Second instruction');
 
-  await first.runChecked(['claim', firstTask.id, '--holder', 'first-agent']);
-  await first.runChecked(['log', firstTask.id, '--type', 'progress', '--text', 'first progress']);
-  await second.runChecked(['claim', secondTask.id, '--holder', 'second-agent']);
+  await first.runChecked(['claim', firstInstruction.id, '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    firstInstruction.id,
+    '--type',
+    'progress',
+    '--text',
+    'first progress',
+  ]);
+
+  await second.runChecked(['claim', secondInstruction.id, '--holder', 'second-agent']);
 
   await second.runChecked([
     'log',
-    secondTask.id,
+    secondInstruction.id,
     '--type',
     'progress',
     '--text',
@@ -126,8 +154,8 @@ it('two clones that each add facts offline sync with no conflict, and both see a
   }
 
   for (const fixture of [first, second]) {
-    const shownFirst = await fixture.runJson<ShownTask>(['show', firstTask.id]);
-    const shownSecond = await fixture.runJson<ShownTask>(['show', secondTask.id]);
+    const shownFirst = await fixture.runJson<ShownInstruction>(['show', firstInstruction.id]);
+    const shownSecond = await fixture.runJson<ShownInstruction>(['show', secondInstruction.id]);
     const facts = await readAllFacts(fixture);
 
     expect(shownFirst).toMatchObject({ state: 'active', claim: { holder: 'first-agent' } });
@@ -143,12 +171,12 @@ it('two clones that edit one ticket offline stop the sync and name the file', as
   await first.runChecked(['init', '--remote', remotePath]);
   await second.runChecked(['init', '--remote', remotePath]);
 
-  const task = await createSettledTask(first, 'Shared task');
+  const instruction = await createSettledInstruction(first, 'Shared instruction');
 
   await first.runChecked(['sync']);
   await second.runChecked(['sync']);
 
-  const shown = await second.runJson<ShownTask>(['show', task.id]);
+  const shown = await second.runJson<ShownInstruction>(['show', instruction.id]);
   const ticketPath = relative(second.storePath, shown.path);
 
   for (const [fixture, body] of [
@@ -184,8 +212,8 @@ it('leaves a fresh ticket file and one that does not parse out of the commit as 
 
   await fixture.runChecked(['init']);
 
-  const settled = await createSettledTask(fixture, 'Settled task');
-  const fresh = await fixture.runJson<ShownTask>(['new', 'task', 'Fresh task']);
+  const settled = await createSettledInstruction(fixture, 'Settled instruction');
+  const fresh = await createInstructionIn(fixture, 'Fresh instruction');
   const brokenCopy = join(dirname(settled.path), 'broken.md');
 
   await writeFile(brokenCopy, 'no front matter here\n');
@@ -210,14 +238,14 @@ it('a claim fetches first and sees a claim made on another clone', async () => {
   await first.runChecked(['init', '--remote', remotePath]);
   await second.runChecked(['init', '--remote', remotePath]);
 
-  const task = await createSettledTask(first, 'Contested task');
+  const instruction = await createSettledInstruction(first, 'Contested instruction');
 
   await first.runChecked(['sync']);
   await second.runChecked(['sync']);
-  await first.runChecked(['claim', task.id, '--holder', 'first-agent']);
+  await first.runChecked(['claim', instruction.id, '--holder', 'first-agent']);
   await first.runChecked(['sync']);
 
-  const result = await second.run(['claim', task.id, '--holder', 'second-agent']);
+  const result = await second.run(['claim', instruction.id, '--holder', 'second-agent']);
   const parsed = JSON.parse(result.stdout) as { error: { code: string } };
 
   expect(result.exitCode).not.toBe(0);
@@ -229,7 +257,7 @@ it('a claim still succeeds when origin points at a missing path', async () => {
 
   await fixture.runChecked(['init']);
 
-  const task = await createSettledTask(fixture, 'Offline task');
+  const instruction = await createSettledInstruction(fixture, 'Offline instruction');
 
   await gitOutput(fixture.storePath, [
     'remote',
@@ -238,7 +266,12 @@ it('a claim still succeeds when origin points at a missing path', async () => {
     join(fixture.home, 'missing.git'),
   ]);
 
-  const claimed = await fixture.runJson<ShownTask>(['claim', task.id, '--holder', 'agent']);
+  const claimed = await fixture.runJson<ShownInstruction>([
+    'claim',
+    instruction.id,
+    '--holder',
+    'agent',
+  ]);
 
   expect(claimed).toMatchObject({ state: 'active', claim: { holder: 'agent' } });
 });
@@ -273,10 +306,10 @@ it('a burst of writes on a store with a remote reaches the remote with no explic
   await first.runChecked(['init', '--remote', remotePath]);
 
   const baseline = await waitForRemoteCommits(remotePath, 1);
-  const task = await first.runJson<ShownTask>(['new', 'task', 'Burst task']);
+  const instruction = await createInstructionIn(first, 'Burst instruction');
 
   for (const text of ['one', 'two', 'three']) {
-    await first.runChecked(['log', task.id, '--type', 'progress', '--text', text]);
+    await first.runChecked(['log', instruction.id, '--type', 'progress', '--text', text]);
   }
 
   const count = await waitForRemoteCommits(remotePath, baseline + 1);
@@ -291,7 +324,9 @@ const writeHandTicket = async (
 ): Promise<void> => {
   const directory = join(fixture.storePath, 'tickets', 'demo');
   const path = join(directory, fileName);
-  const text = '---\nkind: task\ntitle: By hand\nproject: demo\nblockedBy: []\nstatus: open\n---\n';
+
+  const text =
+    '---\nkind: instruction\ntitle: By hand\nproject: demo\nblockedBy: []\nstatus: open\n---\n';
 
   await mkdir(directory, { recursive: true });
   await writeFile(path, text);
@@ -357,10 +392,10 @@ it('a ticket written just before the background sync reaches the remote with no 
   const { first, remotePath } = clonePair();
 
   await first.runChecked(['init', '--remote', remotePath]);
-  await first.runJson<ShownTask>(['new', 'task', 'Early task']);
+  await createInstructionIn(first, 'Early instruction');
   await Bun.sleep(2200);
 
-  const late = await first.runJson<ShownTask>(['new', 'task', 'Late task']);
+  const late = await createInstructionIn(first, 'Late instruction');
   const lateRelative = relative(first.storePath, late.path);
 
   expect(await waitForRemoteFile(remotePath, lateRelative)).toBe(true);
@@ -408,7 +443,7 @@ it('the next sync commits changes a failed commit left staged', async () => {
   const fixture = singleFixture();
 
   await fixture.runChecked(['init']);
-  await createSettledTask(fixture, 'Staged task');
+  await createSettledInstruction(fixture, 'Staged instruction');
 
   const hook = join(fixture.storePath, '.git', 'hooks', 'pre-commit');
 
@@ -435,22 +470,22 @@ it('a second init --remote after an offline one joins the histories and pushes',
 
   await first.runChecked(['init']);
 
-  const firstTask = await createSettledTask(first, 'First task');
+  const firstInstruction = await createSettledInstruction(first, 'First instruction');
 
   await first.runChecked(['sync']);
   await first.runChecked(['init', '--remote', lateRemote]);
   await gitOutput(first.home, ['init', '--bare', '--initial-branch=main', lateRemote]);
   await second.runChecked(['init', '--remote', lateRemote]);
 
-  const secondTask = await createSettledTask(second, 'Second task');
+  const secondInstruction = await createSettledInstruction(second, 'Second instruction');
 
   await second.runChecked(['sync']);
   await first.runChecked(['init', '--remote', lateRemote]);
 
   const tree = await remoteTree(lateRemote);
 
-  expect(tree).toContain(relative(first.storePath, firstTask.path));
-  expect(tree).toContain(relative(second.storePath, secondTask.path));
+  expect(tree).toContain(relative(first.storePath, firstInstruction.path));
+  expect(tree).toContain(relative(second.storePath, secondInstruction.path));
 
   const merged = await gitOutput(first.storePath, ['merge-base', 'HEAD', 'origin/main']);
 
@@ -462,8 +497,8 @@ it('a staged ticket that is fresh or does not parse stays out of the commit and 
 
   await fixture.runChecked(['init']);
 
-  const settled = await createSettledTask(fixture, 'Settled task');
-  const fresh = await fixture.runJson<ShownTask>(['new', 'task', 'Fresh task']);
+  const settled = await createSettledInstruction(fixture, 'Settled instruction');
+  const fresh = await createInstructionIn(fixture, 'Fresh instruction');
   const brokenCopy = join(dirname(settled.path), 'broken.md');
 
   await writeFile(brokenCopy, 'no front matter here\n');
@@ -511,9 +546,9 @@ it('a merge that fails for another reason than a conflict is aborted and not pus
 
   await first.runChecked(['init', '--remote', remotePath]);
   await second.runChecked(['init', '--remote', remotePath]);
-  await createSettledTask(first, 'First task');
+  await createSettledInstruction(first, 'First instruction');
   await first.runChecked(['sync']);
-  await createSettledTask(second, 'Second task');
+  await createSettledInstruction(second, 'Second instruction');
 
   const hook = join(second.storePath, '.git', 'hooks', 'pre-merge-commit');
 
@@ -569,11 +604,11 @@ it('the next sync commits a ticket deletion that a failed commit left staged', a
 
   await first.runChecked(['init', '--remote', remotePath]);
 
-  const task = await createSettledTask(first, 'Doomed task');
-  const relativePath = relative(first.storePath, task.path);
+  const instruction = await createSettledInstruction(first, 'Doomed instruction');
+  const relativePath = relative(first.storePath, instruction.path);
 
   await first.runChecked(['sync']);
-  await rm(task.path);
+  await rm(instruction.path);
 
   const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
 
@@ -639,7 +674,7 @@ it('tikk sync alone pushes a store on master to the remote main', async () => {
 
   await first.runChecked(['init', '--remote', remotePath]);
   await gitOutput(first.storePath, ['branch', '-m', 'master']);
-  await createSettledTask(first, 'Master task');
+  await createSettledInstruction(first, 'Master instruction');
 
   const report = await first.runJson<SyncReport>(['sync']);
   const branch = await gitOutput(first.storePath, ['branch', '--show-current']);
@@ -710,8 +745,8 @@ it('a sync after a failed commit commits an edit, a deletion, and a new ticket',
 
   await first.runChecked(['init', '--remote', remotePath]);
 
-  const edited = await createSettledTask(first, 'Edited task');
-  const deleted = await createSettledTask(first, 'Deleted task');
+  const edited = await createSettledInstruction(first, 'Edited instruction');
+  const deleted = await createSettledInstruction(first, 'Deleted instruction');
 
   await first.runChecked(['sync']);
 
@@ -721,7 +756,7 @@ it('a sync after a failed commit commits an edit, a deletion, and a new ticket',
   await ageFile(edited.path);
   await rm(deleted.path);
 
-  const created = await createSettledTask(first, 'New task');
+  const created = await createSettledInstruction(first, 'New instruction');
   const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
 
   await mkdir(dirname(hook), { recursive: true });

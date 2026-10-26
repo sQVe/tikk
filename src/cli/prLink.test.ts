@@ -20,7 +20,7 @@ const link = async (
   args: string[],
   gh: Parameters<typeof fakeGh>[0],
   options: {
-    kind?: 'slice' | 'task';
+    kind?: 'slice' | 'instruction';
     facts?: Fact[];
     appendFailure?: { kind: 'invalid' | 'failed'; message: string };
   } = {},
@@ -119,11 +119,11 @@ it('selects an earlier PR again when it is linked after a later one', async () =
   expect(successOf(result).json).toMatchObject({ pr: { number: 7 } });
 });
 
-it('refuses a task ticket and does not call gh', async () => {
+it('refuses an instruction ticket and does not call gh', async () => {
   const { result, appends, ghCalls } = await link(
     ['demo-3467', url],
     { 7: { state: 'OPEN' } },
-    { kind: 'task' },
+    { kind: 'instruction' },
   );
 
   expect(failureOf(result).code).toBe('invalidArguments');

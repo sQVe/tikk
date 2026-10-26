@@ -154,7 +154,6 @@ export class TicketCache implements Disposable {
     return listFacts(this.#database, ticketIds);
   }
 
-  // The facts that decide a task's state, in order. This skips notes, which are most of a history.
   listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
     return listStateFacts(this.#database, ticketIds);
   }

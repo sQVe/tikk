@@ -33,7 +33,7 @@ const ticketOf = (id: string, kind: Kind, status: Status, parent?: string): CliT
 
 const plan = ticketOf('demo-3467', 'plan', 'canceled');
 const slice = ticketOf('demo-4789', 'slice', 'open', 'demo-3467');
-const task = ticketOf('demo-6789', 'task', 'open', 'demo-4789');
+const instruction = ticketOf('demo-6789', 'instruction', 'open', 'demo-4789');
 
 const statusFact = (ticket: string, status: Status, at: string): Fact =>
   makeFact({ kind: 'status', ticket, status, at });
@@ -62,15 +62,15 @@ const archivedOf = (fakeSession: FakeSession, path: string): string | undefined 
   return parsed.ok ? parsed.value.frontMatter.archived : undefined;
 };
 
-it('archives a plan canceled 14 days ago with its slice and task in place', async () => {
+it('archives a plan canceled 14 days ago with its slice and instruction in place', async () => {
   const fakeSession = makeSession({
-    tickets: [plan, slice, task],
+    tickets: [plan, slice, instruction],
     facts: [statusFact('demo-3467', 'canceled', '2026-10-06T12:00:00.000Z')],
   });
 
   const listed = await runLs(fakeSession);
 
-  expect([plan, slice, task].map((ticket) => archivedOf(fakeSession, ticket.path))).toEqual([
+  expect([plan, slice, instruction].map((ticket) => archivedOf(fakeSession, ticket.path))).toEqual([
     '2026-10-20',
     '2026-10-20',
     '2026-10-20',
@@ -83,7 +83,7 @@ it('archives a plan canceled 14 days ago with its slice and task in place', asyn
 
 it('does not archive a plan canceled 13 days ago', async () => {
   const fakeSession = makeSession({
-    tickets: [plan, slice, task],
+    tickets: [plan, slice, instruction],
     facts: [statusFact('demo-3467', 'canceled', '2026-10-07T12:00:00.000Z')],
   });
 
@@ -108,8 +108,8 @@ it('archives a closed stand-alone issue 14 days after it closed', async () => {
   expect(listed.tickets).toEqual([]);
 });
 
-it('archives a stand-alone task 14 days after it was accepted', async () => {
-  const done = ticketOf('demo-3467', 'task', 'open');
+it('archives a stand-alone instruction 14 days after it was accepted', async () => {
+  const done = ticketOf('demo-3467', 'instruction', 'open');
 
   const fakeSession = makeSession({
     tickets: [done],
@@ -122,7 +122,7 @@ it('archives a stand-alone task 14 days after it was accepted', async () => {
 });
 
 it('dates a hand edit to canceled with a status fact and archives it 14 days later', async () => {
-  const fakeSession = makeSession({ tickets: [plan, slice, task] });
+  const fakeSession = makeSession({ tickets: [plan, slice, instruction] });
 
   const listed = await runLs(fakeSession);
 
@@ -153,7 +153,7 @@ it('dates a hand edit to canceled with a status fact and archives it 14 days lat
 });
 
 it('keeps a ticket whose file has an error out of the sweep', async () => {
-  const broken = { ...task, error: 'The front matter is invalid.' };
+  const broken = { ...instruction, error: 'The front matter is invalid.' };
 
   const fakeSession = makeSession({
     tickets: [plan, slice, broken],
@@ -192,7 +192,7 @@ it('runs the command and leaves the files when the store lock is held', async ()
 
 it('runs the command and writes the other tickets when one write fails', async () => {
   const fakeSession = makeSession({
-    tickets: [plan, slice, task],
+    tickets: [plan, slice, instruction],
     facts: [statusFact('demo-3467', 'canceled', '2026-10-06T12:00:00.000Z')],
   });
 
@@ -261,7 +261,7 @@ it('takes no store lock when nothing is due', async () => {
   const lockAttempts: string[] = [];
 
   const fakeSession = makeSession({
-    tickets: [plan, slice, task],
+    tickets: [plan, slice, instruction],
     facts: [statusFact('demo-3467', 'canceled', '2026-10-07T12:00:00.000Z')],
     overrides: {
       tryLockStore: () => {

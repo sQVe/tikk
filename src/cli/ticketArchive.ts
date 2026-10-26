@@ -4,7 +4,7 @@ import type { Result } from '../result.ts';
 import { collectTicketTree, groupTicketChildren, serializeTicketFile } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { fileErrorFailure, refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { fileErrorFailure, refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { showAfterRefresh } from './ticketView.ts';
 

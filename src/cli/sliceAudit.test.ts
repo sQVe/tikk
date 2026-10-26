@@ -11,7 +11,7 @@ import {
 } from './cliHarness.ts';
 import { sliceAudit } from './sliceAudit.ts';
 
-const slice = (kind: 'slice' | 'task' = 'slice') => {
+const slice = (kind: 'slice' | 'instruction' = 'slice') => {
   const base = makeTicket('demo-3467');
 
   return makeTicket('demo-3467', {
@@ -42,7 +42,7 @@ const audit = async (
   args: string[],
   options: {
     text?: string;
-    kind?: 'slice' | 'task';
+    kind?: 'slice' | 'instruction';
     withFile?: boolean;
     facts?: Fact[];
     appendFailure?: { kind: 'invalid' | 'failed'; message: string };
@@ -189,7 +189,7 @@ it('refuses a verdict that the fact schema rejects', async () => {
 });
 
 it('refuses a ticket that is not a slice', async () => {
-  const { result, appends } = await audit(fullArguments, { kind: 'task' });
+  const { result, appends } = await audit(fullArguments, { kind: 'instruction' });
   const failure = failureOf(result);
 
   expect(failure.code).toBe('invalidArguments');

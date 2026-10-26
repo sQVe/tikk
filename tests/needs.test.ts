@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 
 import { invariant } from '../src/invariant.ts';
-import { createCliFixture } from './cliFixture.ts';
+import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 
 interface NeedsListing {
@@ -9,6 +9,7 @@ interface NeedsListing {
 }
 
 let fixture: CliFixture | undefined;
+let parentSlice = '';
 
 const cli = (): CliFixture => {
   invariant(fixture !== undefined, 'The CLI fixture should be set up.');
@@ -22,8 +23,14 @@ const reasonsOf = async (id: string): Promise<string[]> => {
   return listing.items.filter((item) => item.id === id).map((item) => item.reason);
 };
 
-const createTask = async (title: string): Promise<string> => {
-  const created = await cli().runJson<{ id: string }>(['new', 'task', title]);
+const createInstruction = async (title: string): Promise<string> => {
+  const created = await cli().runJson<{ id: string }>([
+    'new',
+    'instruction',
+    title,
+    '--parent',
+    parentSlice,
+  ]);
 
   return created.id;
 };
@@ -31,6 +38,7 @@ const createTask = async (title: string): Promise<string> => {
 beforeEach(async () => {
   fixture = await createCliFixture('tikk-needs-');
   await cli().runChecked(['init']);
+  parentSlice = await createParentSlice(cli());
 });
 
 afterEach(async () => {
@@ -38,7 +46,7 @@ afterEach(async () => {
 });
 
 it('lists a question until an answer is logged', async () => {
-  const id = await createTask('Asked task');
+  const id = await createInstruction('Asked instruction');
 
   await cli().runJson(['log', id, '--type', 'question', '--text', 'Which one?']);
 
@@ -49,8 +57,8 @@ it('lists a question until an answer is logged', async () => {
   expect(await reasonsOf(id)).toEqual([]);
 });
 
-it('lists a submitted task until it is accepted', async () => {
-  const id = await createTask('Submitted task');
+it('lists a submitted instruction until it is accepted', async () => {
+  const id = await createInstruction('Submitted instruction');
 
   await cli().runJson(['claim', id, '--holder', 'agent']);
   await cli().runJson(['submit', id, '--holder', 'agent']);
