@@ -14,8 +14,13 @@ import {
 } from './cliHarness.ts';
 import { ticketShow } from './ticketShow.ts';
 
-const show = (args: string[], tickets = [makeTicket('demo-3467')], facts: Fact[] = []) => {
-  const { session } = makeSession({ tickets, facts });
+const show = (
+  args: string[],
+  tickets = [makeTicket('demo-3467')],
+  facts: Fact[] = [],
+  folderFiles: Record<string, string[]> = {},
+) => {
+  const { session } = makeSession({ tickets, facts, folderFiles });
   const { effects } = makeEffects();
 
   return ticketShow({ args, json: false, effects, session });
@@ -27,6 +32,17 @@ it('shows a ticket as json with its body and as text', async () => {
   expect(output.json).toMatchObject({ id: 'demo-3467', title: 'A title', body: 'A body\n' });
   expect(output.text).toContain('demo-3467');
   expect(output.text).toContain('A body');
+});
+
+it("lists the files in the ticket's folder", async () => {
+  const plan = makeKindTicket('demo-3467', 'plan');
+  const folderFiles = { 'demo-3467': ['design.md', 'reports/review.md'] };
+
+  const withFolder = successOf(await show(['demo-3467'], [plan], [], folderFiles));
+  const withoutFolder = successOf(await show(['demo-3469'], [makeKindTicket('demo-3469', 'plan')]));
+
+  expect(withFolder.json).toMatchObject({ files: ['design.md', 'reports/review.md'] });
+  expect(withoutFolder.json).toMatchObject({ files: [] });
 });
 
 it('refuses a missing ID with a usage message', async () => {

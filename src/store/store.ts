@@ -11,7 +11,7 @@ export {
 
 export type { TicketFileFunctions } from './ticketFiles.ts';
 
-export { resolveStoreRoot } from './storePaths.ts';
+export { resolveStoreRoot, ticketFolderPath } from './storePaths.ts';
 export type { Store } from './storePaths.ts';
 
 export { appendFact, listFactFiles, readFactFile } from './factFiles.ts';

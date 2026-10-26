@@ -109,6 +109,7 @@ const showSlice = async (
   session: CliSession,
   now: Date,
   ticket: CliTicket,
+  files: string[],
 ): Promise<CommandResult> => {
   const outlines = session.listTicketOutlines();
 
@@ -125,23 +126,24 @@ const showSlice = async (
   const derived = deriveSliceState(ticket, buildSliceIndex(outlines, facts.value), now);
   const view: SliceView = { ...ticketView(ticket, true), ...derived };
 
-  return { ok: true, value: { json: view, text: ticketText(ticket, derived.state) } };
+  return { ok: true, value: { json: { ...view, files }, text: ticketText(ticket, derived.state) } };
 };
 
-export const showOutput = async (
+const showKind = async (
   session: CliSession,
   now: Date,
   ticket: CliTicket,
+  files: string[],
 ): Promise<CommandResult> => {
   if (ticket.frontMatter.kind === 'slice' && ticket.frontMatter.status === 'open') {
-    return showSlice(session, now, ticket);
+    return showSlice(session, now, ticket, files);
   }
 
   if (ticket.frontMatter.kind !== 'instruction') {
     return {
       ok: true,
       value: {
-        json: ticketView(ticket, true),
+        json: { ...ticketView(ticket, true), files },
         text: ticketText(ticket, ticket.frontMatter.status),
       },
     };
@@ -154,11 +156,23 @@ export const showOutput = async (
   }
 
   const { state, claim } = deriveInstructionState(ticket, facts.value, now);
+  const view = { ...instructionView(ticket, state, claim), files };
 
-  return {
-    ok: true,
-    value: { json: instructionView(ticket, state, claim), text: ticketText(ticket, state) },
-  };
+  return { ok: true, value: { json: view, text: ticketText(ticket, state) } };
+};
+
+export const showOutput = async (
+  session: CliSession,
+  now: Date,
+  ticket: CliTicket,
+): Promise<CommandResult> => {
+  const folder = await session.listTicketFolderFiles(ticket.frontMatter.project, ticket.id);
+
+  if (!folder.ok) {
+    return storeFailure(folder.reason.message);
+  }
+
+  return showKind(session, now, ticket, folder.value);
 };
 
 export const showAfterRefresh = async (

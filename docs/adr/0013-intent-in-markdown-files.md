@@ -22,6 +22,10 @@ Agent writes check the file's content hash from the cache and refuse when the fi
 agent read it. A file that fails to parse keeps its last good state in the cache, shows the error,
 and is never rewritten by tikk.
 
+A human ticket may have a folder, `tickets/<project>/<id>/`, beside its file. A plan keeps its
+`design.md` and report files there. Sync commits the folder's files as they are. tikk does not
+validate them, and the cache never reads them as tickets. `tikk show --json` lists them.
+
 ## Consequences
 
 ### Positive

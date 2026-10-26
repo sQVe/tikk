@@ -42,6 +42,7 @@ import {
   readFactFile,
   readTicketFile,
   resolveStoreRoot,
+  ticketFolderPath,
   writeTicketFile,
 } from './store/store.ts';
 import type {
@@ -248,6 +249,32 @@ const listFactsRecovering = async (
   return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
 };
 
+const isFileInFolder = async (folder: string, name: string): Promise<boolean> => {
+  const stats = await stat(join(folder, name));
+
+  return stats.isFile();
+};
+
+const listTicketFolderFiles = async (
+  folder: string,
+): Promise<Result<string[], { message: string }>> => {
+  try {
+    const names = await readdir(folder, { recursive: true });
+    const fileFlags = await Promise.all(names.map((name) => isFileInFolder(folder, name)));
+    const files = names.filter((_name, index) => fileFlags[index] === true);
+
+    return { ok: true, value: files.toSorted() };
+  } catch (error) {
+    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+    if (missing) {
+      return { ok: true, value: [] };
+    }
+
+    return { ok: false, reason: { message: `Cannot list the files in ${folder}.` } };
+  }
+};
+
 const sessionFor = (store: Store, cache: TicketCache): CliSession => {
   const files: CacheFiles = {
     listTicketFiles: () => listTicketFiles(ticketFiles, store),
@@ -264,6 +291,8 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     listTicketOutlines: () => cache.listTicketOutlines(),
     mayHaveArchiveWork: (now) => cache.mayHaveArchiveWork(now),
     listErrors: () => cache.listErrors(),
+    listTicketFolderFiles: (project, id) =>
+      listTicketFolderFiles(ticketFolderPath(store, project, id)),
     listFacts: (ticketIds) =>
       listFactsRecovering(cache, files, (ids) => cache.listFacts(ids), ticketIds),
     listStateFacts: (ticketIds) =>

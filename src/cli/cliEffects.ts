@@ -67,6 +67,11 @@ export interface CliSession extends Disposable {
   // False only when the archive sweep surely has nothing to do.
   mayHaveArchiveWork: (now: Date) => boolean;
   listErrors: () => { path: string; message: string }[];
+  // Paths relative to the ticket's folder, nested files included, sorted. Empty when there is no folder.
+  listTicketFolderFiles: (
+    project: ProjectName,
+    id: TicketId,
+  ) => Promise<Result<string[], CliMessage>>;
   listFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listStateFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listArchiveFacts: () => Promise<Result<Fact[], CliMessage>>;
