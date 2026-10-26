@@ -8,7 +8,6 @@ const isCanceled = (ticket: SliceTicket): boolean => ticket.frontMatter.status =
 const isFinishedTask = (task: SliceTicket): boolean =>
   task.frontMatter.status === 'done' || isCanceled(task);
 
-// Archived slices and tasks count like any other: archive hides a ticket but does not complete it.
 export const derivePlanState = (plan: SliceTicket, index: SliceIndex, now: Date): PlanStateName => {
   const { status } = plan.frontMatter;
 

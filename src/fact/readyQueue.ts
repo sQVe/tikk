@@ -128,7 +128,6 @@ const parentOf = (
   return parent === undefined ? undefined : byId.get(parent);
 };
 
-// An instruction inherits from its slice and the slice's plan. A slice inherits from its plan.
 const inheritedLevels = (
   ticket: InstructionTicket,
   byId: Map<string, InstructionTicket>,
@@ -166,8 +165,6 @@ const stackParentOf = (
   return { id: target.id, repository: pr.repository, number: pr.number };
 };
 
-// A closer level hides a blocker ID that a level further up also names. Only a slice's blockedBy
-// stacks on an open slice PR, never an instruction's or a plan's.
 const resolveBlockers = (
   ticket: InstructionTicket,
   byId: Map<string, InstructionTicket>,
