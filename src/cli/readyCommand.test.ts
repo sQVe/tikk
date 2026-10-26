@@ -329,6 +329,18 @@ const metAudit = makeFact({
   verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],
 });
 
+const openSlicePr = makeFact({
+  kind: 'pr',
+  ticket: 'demo-3466',
+  repository: 'acme/app',
+  number: 9,
+  state: 'open',
+  base: 'main',
+  head: 'head9',
+  trunk: 'main',
+  inTrunk: false,
+});
+
 it('names a merged, audited slice with an open task as a flagged blocker', async () => {
   const merged = sliceWith('demo-3468', {});
 
@@ -409,19 +421,7 @@ it('lets a slice stack on a blocking slice whose PR is open and names that PR', 
   const parent = sliceWith('demo-3466', {});
   const child = sliceWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
 
-  const pr = makeFact({
-    kind: 'pr',
-    ticket: 'demo-3466',
-    repository: 'acme/app',
-    number: 9,
-    state: 'open',
-    base: 'main',
-    head: 'head9',
-    trunk: 'main',
-    inTrunk: false,
-  });
-
-  const output = successOf(await ready(['--kind', 'slice'], [parent, child], [pr]));
+  const output = successOf(await ready(['--kind', 'slice'], [parent, child], [openSlicePr]));
 
   expect(output.json).toMatchObject({
     candidates: [
@@ -465,19 +465,7 @@ it('keeps a slice blocked by a task even when that task has an open PR', async (
   const task = makeKindTicket('demo-3466', 'task');
   const blocked = sliceWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
 
-  const pr = makeFact({
-    kind: 'pr',
-    ticket: 'demo-3466',
-    repository: 'acme/app',
-    number: 9,
-    state: 'open',
-    base: 'main',
-    head: 'head9',
-    trunk: 'main',
-    inTrunk: false,
-  });
-
-  const output = successOf(await ready(['--kind', 'slice'], [task, blocked], [pr]));
+  const output = successOf(await ready(['--kind', 'slice'], [task, blocked], [openSlicePr]));
 
   expect(output.json).toMatchObject({
     candidates: [],
@@ -491,19 +479,7 @@ it('keeps an instruction blocked by its own slice blocker while that slice PR is
   const slice = sliceWith('demo-3466', {});
   const instruction = instructionWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
 
-  const pr = makeFact({
-    kind: 'pr',
-    ticket: 'demo-3466',
-    repository: 'acme/app',
-    number: 9,
-    state: 'open',
-    base: 'main',
-    head: 'head9',
-    trunk: 'main',
-    inTrunk: false,
-  });
-
-  const output = successOf(await ready([], [slice, instruction], [pr]));
+  const output = successOf(await ready([], [slice, instruction], [openSlicePr]));
 
   expect(output.json).toMatchObject({
     candidates: [],
