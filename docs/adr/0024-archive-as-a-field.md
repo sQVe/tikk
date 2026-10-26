@@ -11,9 +11,8 @@ breaks open Neovim buffers.
 ## Decision
 
 Archived is an `archived: <date>` field. tikk sets it automatically 14 days after a plan or
-stand-alone ticket is done, canceled, or closed. It then sets it on the plan's slices and
-instructions. Archived tickets leave `ready`, `needs`, `ls`, and the default TUI views. Files never
-move.
+stand-alone ticket is done or canceled. It then sets it on the plan's slices and instructions.
+Archived tickets leave `ready`, `needs`, `ls`, and the default TUI views. Files never move.
 
 The finish date is the newest `status` fact that names the ticket's current status, or the `accept`
 fact of a done instruction. A status set by a hand edit has no fact. tikk appends a `status` fact

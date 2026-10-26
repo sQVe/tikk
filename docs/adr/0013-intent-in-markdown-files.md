@@ -14,9 +14,9 @@ Ticket intent lives in Markdown files with front matter. The user edits them in 
 matter holds `kind`, `title`, `project`, `parent`, `rank`, `blockedBy`, `status`, and `criteria`.
 The body is prose. zod validates the file.
 
-Stored `status` is only a human decision: `draft`, `open`, or `canceled`, and for issues also
-`closed`. Derived states such as ready, active, and done come from facts and are never written to
-the file. A file that agents rewrite with state would conflict across machines.
+Stored `status` is only a human decision: `draft`, `open`, or `canceled`, and for tasks also `done`.
+Derived states such as ready, active, and done come from facts and are never written to the file. A
+file that agents rewrite with state would conflict across machines.
 
 Agent writes check the file's content hash from the cache and refuse when the file changed since the
 agent read it. A file that fails to parse keeps its last good state in the cache, shows the error,

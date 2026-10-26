@@ -3,7 +3,7 @@
 **Date**: 2026-10-18\
 **Status**: Accepted\
 **Related**: [ADR 0015 (Observed facts in per-machine JSONL)](./0015-facts-in-per-machine-jsonl.md),
-[ADR 0018 (Plans, slices, instructions, and issues)](./0018-work-model-and-kinds.md),
+[ADR 0018 (Plans, slices, instructions, and tasks)](./0018-work-model-and-kinds.md),
 [ADR 0023 (A slice is done when its PR merged and its criteria are met)](./0023-derived-slice-done.md)
 
 ## Context

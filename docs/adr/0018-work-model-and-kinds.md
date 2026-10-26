@@ -1,4 +1,4 @@
-# ADR 0018: Plans, slices, instructions, and issues
+# ADR 0018: Plans, slices, instructions, and tasks
 
 **Date**: 2026-10-18\
 **Status**: Accepted
@@ -16,12 +16,16 @@ A ticket has one of four kinds.
 - `plan`: an agreed design and its criteria.
 - `slice`: one branch and one PR, which covers criteria.
 - `instruction`: one worker assignment under a slice, with its own claim and log.
-- `issue`: an inbox item that stands alone.
+- `task`: a person's to-do. Its status is `open`, `done`, or `canceled`. It has no claim, log, or
+  submit.
 
-`parent` is fixed by kind: plan above slice above instruction. An instruction's parent must be a
-slice. An issue stands alone and becomes a slice or plan in place with the same ID. The tool rejects
+`parent` is fixed by kind: plan above slice above instruction. A task sits under a plan, a slice, or
+no parent. An instruction's parent must be a slice. A loose task, one with no parent, becomes a
+slice or plan in place with the same ID. An agent-made loose open task carries `new: true`, and the
+flag ends when the task is done or canceled, or when it becomes a slice or plan. The tool rejects
 other pairs, cycles, and missing targets. Criteria are required on plans and slices only. An
-instruction covers all of its slice's criteria unless it names some.
+instruction covers all of its slice's criteria unless it names some. `tikk review add` accepts a
+slice or an instruction only.
 
 ## Consequences
 
