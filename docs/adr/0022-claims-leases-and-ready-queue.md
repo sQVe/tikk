@@ -8,11 +8,11 @@
 
 ## Context
 
-Several agents on several machines take work at once. Two agents claiming one task at once must give
-exactly one winner. An agent that dies must not hold a task forever. An agent also needs to know why
-it was not given the first item.
+Several agents on several machines take work at once. Two agents claiming one instruction at once
+must give exactly one winner. An agent that dies must not hold an instruction forever. An agent also
+needs to know why it was not given the first item.
 
-Two offline machines can claim the same task, and reconcile must show the clash.
+Two offline machines can claim the same instruction, and reconcile must show the clash.
 
 ## Decision
 
@@ -23,15 +23,15 @@ the store lock. A failed fetch or a conflicting merge does not stop the claim.
 ### Claims
 
 - A claim runs under the store lock, so it is atomic
-  ([ADR 0012](./0012-one-git-store-with-one-lock.md)). Of two simultaneous claims on one task,
-  exactly one succeeds.
+  ([ADR 0012](./0012-one-git-store-with-one-lock.md)). Of two simultaneous claims on one
+  instruction, exactly one succeeds.
 - A claim has a lease. A claim whose lease ended is stale, and stale claims show in `tikk needs`.
 - `release` ends a claim. Both are facts ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
 - A claim records the agent session that took it, such as the Pi session ID and its log path, so
   `tikk show` points at the log of the work. The log stays outside the store, since raw session
   dumps never enter it.
-- Fetching before a claim narrows the window for two machines to claim one task. Offline, the clash
-  is possible, and reconcile shows it.
+- Fetching before a claim narrows the window for two machines to claim one instruction. Offline, the
+  clash is possible, and reconcile shows it.
 
 ### Ready queue
 
@@ -39,8 +39,8 @@ the store lock. A failed fetch or a conflicting merge does not stop the claim.
   ([ADR 0020](./0020-edges.md)).
 - For each higher-ranked item it skipped, `ready` names what blocks it.
 - `ready` takes a scope, such as a plan or a slice. Within a plan it returns the next slice to
-  start; within a slice, the next task. It weighs order, `blockedBy` edges, and merge state, so Tau
-  asks tikk what comes next instead of working out the order itself.
+  start; within a slice, the next instruction. It weighs order, `blockedBy` edges, and merge state,
+  so Tau asks tikk what comes next instead of working out the order itself.
 
 ## Consequences
 
@@ -52,14 +52,14 @@ the store lock. A failed fetch or a conflicting merge does not stop the claim.
 ### Negative
 
 - A fetch before each claim adds network time when the network is up.
-- Offline machines can still claim the same task.
+- Offline machines can still claim the same instruction.
 
 ## Alternatives considered
 
 ### Claims without a lease
 
-Hold a claim until `release`. Rejected because a dead agent would hold a task forever, and nothing
-would show it as stale.
+Hold a claim until `release`. Rejected because a dead agent would hold an instruction forever, and
+nothing would show it as stale.
 
 ### Tau works out the next item itself
 

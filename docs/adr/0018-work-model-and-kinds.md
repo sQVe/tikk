@@ -1,4 +1,4 @@
-# ADR 0018: Plans, slices, tasks, and issues
+# ADR 0018: Plans, slices, instructions, and issues
 
 **Date**: 2026-10-18\
 **Status**: Accepted
@@ -15,19 +15,19 @@ A ticket has one of four kinds.
 
 - `plan`: an agreed design and its criteria.
 - `slice`: one branch and one PR, which covers criteria.
-- `task`: one worker assignment under a slice, with its own claim and log.
+- `instruction`: one worker assignment under a slice, with its own claim and log.
 - `issue`: an inbox item that stands alone.
 
-`parent` is fixed by kind: plan above slice above task. An issue stands alone and becomes a slice or
-plan in place with the same ID. The tool rejects other pairs, cycles, and missing targets. Criteria
-are required on plans and slices only. A task covers all of its slice's criteria unless it names
-some.
+`parent` is fixed by kind: plan above slice above instruction. An instruction's parent must be a
+slice. An issue stands alone and becomes a slice or plan in place with the same ID. The tool rejects
+other pairs, cycles, and missing targets. Criteria are required on plans and slices only. An
+instruction covers all of its slice's criteria unless it names some.
 
 ## Consequences
 
 ### Positive
 
-- Each kind has one job, and workers read their task directly.
+- Each kind has one job, and workers read their instruction directly.
 - Coverage is a query over criteria, not copied text.
 
 ### Negative
