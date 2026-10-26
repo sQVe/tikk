@@ -240,11 +240,10 @@ describe('selectReady blockers that flow down and stack', () => {
     const task = makeTicket('3469', { kind: 'task' });
     const result = selectReady([plan, slice, instruction, task], [], now, noScope);
 
-    expect(result.skipped).toEqual([
+    // toStrictEqual also fails on a via key that is present but undefined.
+    expect(result.skipped).toStrictEqual([
       { ticket: instruction, reason: 'blocked', blockers: [{ id: task.id, state: 'open' }] },
     ]);
-
-    expect(result.skipped[0]?.blockers?.[0]).not.toHaveProperty('via');
   });
 
   it('lists the stack parents of a ready slice in blockedBy order and leaves the key out when there are none', () => {

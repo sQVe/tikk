@@ -47,13 +47,12 @@ interface ReadyCandidate<Ticket extends InstructionTicket> {
   stackParents?: StackParent[];
 }
 
-interface SkippedInstruction<Ticket extends InstructionTicket> {
-  ticket: Ticket;
-  reason: 'blocked' | 'active' | 'submitted';
-  blockers?: Blocker[];
-  holder?: string;
-  leaseEnd?: string;
-}
+type SkipDetail =
+  | { reason: 'blocked'; blockers: Blocker[] }
+  | { reason: 'active'; holder: string; leaseEnd: string }
+  | { reason: 'submitted' };
+
+type SkippedInstruction<Ticket extends InstructionTicket> = { ticket: Ticket } & SkipDetail;
 
 export interface ReadySelection<Ticket extends InstructionTicket> {
   candidates: ReadyCandidate<Ticket>[];

@@ -11,16 +11,13 @@ type ReadyKind = 'instruction' | 'slice';
 type KindResult = Result<ReadyKind, CliFailure>;
 type Skipped = Selection['skipped'][number];
 type Candidate = Selection['candidates'][number];
-type Blocker = NonNullable<Skipped['blockers']>[number];
+type Blocker = Extract<Skipped, { reason: 'blocked' }>['blockers'][number];
 type StackParent = NonNullable<Candidate['stackParents']>[number];
 
-const skippedView = (item: Skipped): Record<string, unknown> => ({
-  id: item.ticket.id,
-  title: item.ticket.frontMatter.title,
-  reason: item.reason,
-  ...(item.blockers === undefined ? {} : { blockers: item.blockers }),
-  ...(item.holder === undefined ? {} : { holder: item.holder }),
-  ...(item.leaseEnd === undefined ? {} : { leaseEnd: item.leaseEnd }),
+const skippedView = ({ ticket, ...detail }: Skipped): Record<string, unknown> => ({
+  id: ticket.id,
+  title: ticket.frontMatter.title,
+  ...detail,
 });
 
 const isUnreadable = (
@@ -57,12 +54,12 @@ const blockerLabel = (blocker: Blocker): string => {
 const stackLabel = (parent: StackParent): string => `  stack on ${parent.id} #${parent.number}`;
 
 const skippedDetails = (item: Skipped): string => {
-  if (item.blockers !== undefined) {
+  if (item.reason === 'blocked') {
     return item.blockers.map(blockerLabel).join(', ');
   }
 
-  if (item.holder !== undefined) {
-    return `${item.holder} until ${item.leaseEnd ?? ''}`;
+  if (item.reason === 'active') {
+    return `${item.holder} until ${item.leaseEnd}`;
   }
 
   return '';
