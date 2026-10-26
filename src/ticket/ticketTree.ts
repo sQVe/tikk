@@ -177,8 +177,6 @@ const pathTo = (end: TicketId, previous: Map<TicketId, TicketId>): TicketId[] =>
   return path;
 };
 
-// A ticket waits on its blockedBy targets and on its parent. Returns the cycle that a new wait of
-// `from` on `to` would close, from `from` back to `from`, or undefined when there is none.
 export const findWaitCycle = (
   tickets: WaitTicket[],
   from: TicketId,

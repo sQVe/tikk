@@ -14,7 +14,6 @@ import { showOutput } from './ticketView.ts';
 
 interface MoveArguments {
   rawId: string;
-  // Undefined makes the ticket loose.
   parent: TicketId | undefined;
 }
 
