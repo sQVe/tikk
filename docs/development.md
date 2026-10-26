@@ -50,6 +50,10 @@ The binary finds its store from `TIKK_HOME` or `~/.local/share/tikk`, never from
 | `bun run format`                            | Format files.                                                             |
 | `bun run knip`                              | Find unused files, exports, and dependencies.                             |
 | `bun run mutation changed origin/main`      | Mutate the lines changed since `origin/main` and print a JSON report.     |
+| `bun run bench`                             | Time `ready` and `claim` on a store of 2,000 tickets.                     |
+
+`bun run check` leaves out `bun run bench`, because its time limit fails on a busy machine. Run the
+bench on a quiet machine when a change could slow `ready` or `claim`.
 
 House style comes from the [`@sqve/seam`](https://www.npmjs.com/package/@sqve/seam) package. Its
 `seam` command turns on the house rules for its own lint run, so editors and `bun run lint` show the
