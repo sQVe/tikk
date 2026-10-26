@@ -18,6 +18,7 @@ export interface SyncCommitFunctions {
   commitArguments: (root: string) => Promise<string[]>;
   writeBlob: (root: string, text: string) => Promise<Result<string, { message: string }>>;
   stat: (path: string) => Promise<{ mtimeMs: number }>;
+  lstat: (path: string) => Promise<unknown>;
   readFile: (path: string) => Promise<string>;
   now: () => number;
 }
@@ -29,6 +30,7 @@ export interface SyncCommit {
 
 const storePathspecs = ['facts', 'logs', 'tickets', 'tikk.json', '.gitattributes'];
 const settleMilliseconds = 2000;
+const ticketPathSegments = 3;
 const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 const failedReason = (message: string): { ok: false; reason: SyncReason } => ({
@@ -58,7 +60,52 @@ const listPaths = async (
     : failedReason(listed.reason.message);
 };
 
-const isTicketPath = (path: string): boolean => path.startsWith('tickets/');
+const isTicketPath = (path: string): boolean =>
+  path.startsWith('tickets/') &&
+  path.split('/').length === ticketPathSegments &&
+  path.endsWith('.md');
+
+const isFolderPath = (path: string): boolean => path.startsWith('tickets/') && !isTicketPath(path);
+
+const listIgnoredFolderPaths = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<string[], SyncReason>> => {
+  const listed = await functions.runGit([
+    '-C',
+    root,
+    'ls-files',
+    '-z',
+    '--others',
+    '--ignored',
+    '--exclude-standard',
+    '--',
+    'tickets',
+  ]);
+
+  return listed.ok
+    ? { ok: true, value: splitPaths(listed.value).filter(isFolderPath) }
+    : failedReason(listed.reason.message);
+};
+
+const listChangedPaths = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<string[], SyncReason>> => {
+  const changed = await listPaths(functions, root, [
+    '--modified',
+    '--others',
+    '--exclude-standard',
+  ]);
+
+  if (!changed.ok) {
+    return changed;
+  }
+
+  const ignored = await listIgnoredFolderPaths(functions, root);
+
+  return ignored.ok ? { ok: true, value: [...changed.value, ...ignored.value] } : ignored;
+};
 
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
 // not changed for two seconds. The age is read after the text, so an edit in between makes it fresh.
@@ -107,6 +154,24 @@ export const resetIndex = async (
   return reset.ok ? { ok: true, value: undefined } : failedReason(reset.reason.message);
 };
 
+const stageBlob = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+  blobId: string,
+): Promise<Result<undefined, SyncReason>> => {
+  const staged = await functions.runGit([
+    '-C',
+    root,
+    'update-index',
+    '--add',
+    '--cacheinfo',
+    `100644,${blobId.trim()},${path}`,
+  ]);
+
+  return staged.ok ? { ok: true, value: undefined } : failedReason(staged.reason.message);
+};
+
 // Puts exactly this text in the index, so the commit holds the bytes that were checked.
 export const stageText = async (
   functions: SyncCommitFunctions,
@@ -116,20 +181,7 @@ export const stageText = async (
 ): Promise<Result<undefined, SyncReason>> => {
   const blob = await functions.writeBlob(root, text);
 
-  if (!blob.ok) {
-    return failedReason(blob.reason.message);
-  }
-
-  const staged = await functions.runGit([
-    '-C',
-    root,
-    'update-index',
-    '--add',
-    '--cacheinfo',
-    `100644,${blob.value.trim()},${path}`,
-  ]);
-
-  return staged.ok ? { ok: true, value: undefined } : failedReason(staged.reason.message);
+  return blob.ok ? stageBlob(functions, root, path, blob.value) : failedReason(blob.reason.message);
 };
 
 export const stageRemoval = async (
@@ -150,6 +202,8 @@ export const stageRemoval = async (
 };
 
 const isFactPath = (path: string): boolean => path.startsWith('facts/');
+
+const isTextPath = (path: string): boolean => isTicketPath(path) || isFactPath(path);
 
 // A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
 // waits for the clash commit. A line that `HEAD` already holds is never dropped, since facts are
@@ -211,7 +265,9 @@ const listHeadTicketNames = async (
 
   const paths = listed.ok ? listed.value.split('\n') : [];
 
-  return paths.map((path) => path.slice(path.lastIndexOf('/') + 1));
+  return paths
+    .filter((path) => isTicketPath(path))
+    .map((path) => path.slice(path.lastIndexOf('/') + 1));
 };
 
 // Returns the text to commit, or `undefined` when the file waits for a later sync.
@@ -271,17 +327,76 @@ const commitIndex = async (
   return committed.ok ? { ok: true, value: undefined } : failedReason(committed.reason.message);
 };
 
-// Checks the candidates together, then stages the ones that pass. Returns the ones that wait.
+const isPresent = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<boolean> => {
+  try {
+    // lstat, not stat, so a symlink whose target is missing still counts as present.
+    await functions.lstat(join(root, path));
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// The index takes the mode and bytes on disk, or the link target of a symlink. Autocrlf is off so
+// line endings stay as written. A file that is gone waits for a later sync, as a text file does.
+const stageDesignFile = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<Result<boolean, SyncReason>> => {
+  if (!(await isPresent(functions, root, path))) {
+    return { ok: true, value: false };
+  }
+
+  const staged = await functions.runGit([
+    '-c',
+    'core.autocrlf=false',
+    '-C',
+    root,
+    'update-index',
+    '--add',
+    '--',
+    path,
+  ]);
+
+  return staged.ok ? { ok: true, value: true } : failedReason(staged.reason.message);
+};
+
 const stageCandidates = async (
   functions: SyncCommitFunctions,
   root: string,
   candidates: string[],
 ): Promise<Result<string[], SyncReason>> => {
-  const texts = await Promise.all(candidates.map((path) => checkChanged(functions, root, path)));
+  const texts = await Promise.all(
+    candidates.map((path) =>
+      isTextPath(path) ? checkChanged(functions, root, path) : Promise.resolve(undefined),
+    ),
+  );
+
   const pending: string[] = [];
   const headNames = await listHeadTicketNames(functions, root);
 
   for (const [index, path] of candidates.entries()) {
+    if (!isTextPath(path)) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Runs with the one-at-a-time staging below.
+      const design = await stageDesignFile(functions, root, path);
+
+      if (!design.ok) {
+        return design;
+      }
+
+      if (!design.value) {
+        pending.push(path);
+      }
+
+      continue;
+    }
+
     const checked = texts[index];
 
     if (checked === undefined) {
@@ -327,11 +442,7 @@ export const commitStore = async (
     return deleted;
   }
 
-  const changed = await listPaths(functions, root, [
-    '--modified',
-    '--others',
-    '--exclude-standard',
-  ]);
+  const changed = await listChangedPaths(functions, root);
 
   if (!changed.ok) {
     return changed;

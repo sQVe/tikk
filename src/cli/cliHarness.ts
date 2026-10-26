@@ -24,6 +24,7 @@ export interface SessionOptions {
   tickets?: CliTicket[];
   facts?: Fact[];
   errors?: { path: string; message: string }[];
+  folderFiles?: Record<string, string[]>;
   created?: CliTicket;
   readBack?: boolean;
   overrides?: Partial<CliSession>;
@@ -226,6 +227,8 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     mayHaveArchiveWork: () => true,
     listTicketOutlines: () => [...tickets.values()].filter((ticket) => ticket.error === null),
     listErrors: () => options.errors ?? [],
+    listTicketFolderFiles: (_project, id) =>
+      Promise.resolve({ ok: true, value: options.folderFiles?.[id] ?? [] }),
     listFacts: (ticketIds) =>
       Promise.resolve({
         ok: true,

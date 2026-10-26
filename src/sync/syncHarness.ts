@@ -55,6 +55,17 @@ const defaultNow = 10_000;
 const missingFile = (): Promise<never> =>
   Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
 
+const pathsUnder = (disk: Map<string, unknown>, directory: string): string[] =>
+  [...disk.keys()].filter((path) => path.startsWith(`${directory}/`));
+
+const namesUnder = (disk: Map<string, unknown>, directory: string): string[] => [
+  ...new Set(
+    pathsUnder(disk, directory).map((path) =>
+      path.slice(directory.length + 1).replace(/\/.*$/, ''),
+    ),
+  ),
+];
+
 // The subcommand follows the `-c` identity pairs and the `-C <root>` pair.
 const subcommandOf = (args: string[]): string => {
   const index = args.indexOf('-C');
@@ -66,12 +77,26 @@ const subcommandOf = (args: string[]): string => {
 export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   const gitCalls: GitCall[] = [];
   const blobs: string[] = [];
+  let blobCount = 0;
+
+  const headBlobId = 'abc123';
+
+  const nextBlobId = (): string => {
+    blobCount += 1;
+
+    return `blob${blobCount}\n`;
+  };
+
   let indexUpdates = 0;
 
   // The index tree differs from the `HEAD` tree once an `update-index` call has run.
   const defaultReply = (args: string[]): GitReply => {
     if (args.includes('write-tree')) {
       return gitOutput(`tree${indexUpdates}\n`);
+    }
+
+    if (args.includes('ls-tree') && !args.includes('-r')) {
+      return gitOutput(`100644 blob ${headBlobId}\t${args.at(-1)}\n`);
     }
 
     return args.includes('HEAD^{tree}') ? gitOutput('tree0\n') : gitOutput('');
@@ -113,7 +138,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       blobs.push(text);
 
-      return Promise.resolve({ ok: true, value: `blob${blobs.length}\n` });
+      return Promise.resolve({ ok: true, value: nextBlobId() });
     },
     listAliases: () => Promise.resolve(options.aliases ?? []),
     lockStore: () => {
@@ -139,8 +164,14 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     stat: (path) => {
       const file = disk.get(path);
 
+      if (file === undefined && !path.includes('/tickets/')) {
+        return Promise.resolve({ mtimeMs: options.now ?? defaultNow });
+      }
+
       return file === undefined ? missingFile() : Promise.resolve({ mtimeMs: file.mtimeMs });
     },
+    lstat: (path) =>
+      disk.has(path) || !path.includes('/tickets/') ? Promise.resolve({}) : missingFile(),
     readFile: (path) => {
       const file = disk.get(path);
 
@@ -161,7 +192,13 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       const folder = options.folder ?? 'missing';
 
-      return folder === 'missing' ? missingFile() : Promise.resolve(folder);
+      if (folder !== 'missing') {
+        return Promise.resolve(folder);
+      }
+
+      const names = namesUnder(disk, directory);
+
+      return names.length === 0 ? missingFile() : Promise.resolve(names);
     },
     rename: (from, to) => {
       if (options.renameFails === true) {
@@ -175,6 +212,16 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       if (file !== undefined) {
         disk.set(to, file);
         disk.delete(from);
+      }
+
+      for (const path of pathsUnder(disk, from)) {
+        const entry = disk.get(path);
+
+        disk.delete(path);
+
+        if (entry !== undefined) {
+          disk.set(`${to}${path.slice(from.length)}`, entry);
+        }
       }
 
       return Promise.resolve();

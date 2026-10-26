@@ -1,10 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { beforeEach, afterEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
+import { invariant } from '../src/invariant.ts';
+import { ticketFolderPath } from '../src/store/storePaths.ts';
+import { parseProjectName, parseTicketId } from '../src/ticket/ticket.ts';
 import { cliEnvironment } from './cliFixture.ts';
 
 interface RunResult {
@@ -29,6 +32,18 @@ interface Listing {
 }
 
 const entryPath = join(import.meta.dir, '..', 'src', 'index.ts');
+
+const folderOf = (storePath: string, id: string): string => {
+  const project = parseProjectName('demo');
+  const ticketId = parseTicketId(id);
+
+  invariant(project.ok && ticketId.ok, 'The test project and ticket ID must be valid.');
+
+  return ticketFolderPath({ root: storePath }, project.value, ticketId.value);
+};
+
+const validTicketText =
+  '---\nkind: instruction\ntitle: By hand\nproject: demo\nblockedBy: []\nstatus: open\n---\n';
 
 let home = '';
 let work = '';
@@ -141,6 +156,37 @@ it('lists the same tickets after the cache database is deleted', async () => {
 
   expect(before.tickets).toHaveLength(3);
   expect(after).toEqual(before);
+});
+
+it('deleting index.db lists the same tickets and no folder file', async () => {
+  await run(['init', '--json']);
+
+  const plan = await runJson<ShownTicket>([
+    'new',
+    'plan',
+    'Design plan',
+    '--project',
+    'demo',
+    '--status',
+    'draft',
+  ]);
+
+  const folder = folderOf(join(home, 'store'), plan.id);
+  const nested = join(folder, 'notes', 'nested.md');
+
+  await mkdir(dirname(nested), { recursive: true });
+  await writeFile(join(folder, 'design.md'), '# Design\n\nNot ticket front matter.\n');
+  await writeFile(nested, validTicketText);
+
+  const before = await runJson<Listing>(['ls']);
+
+  await rm(join(home, '.cache', 'tikk', 'index.db'), { force: true });
+
+  const after = await runJson<Listing>(['ls']);
+
+  expect(before.tickets).toHaveLength(1);
+  expect(after).toEqual(before);
+  expect(after.tickets.some((ticket) => ticket.path.startsWith(`${folder}/`))).toBe(false);
 });
 
 it('refuses an edit with an old hash and leaves the file unchanged', async () => {

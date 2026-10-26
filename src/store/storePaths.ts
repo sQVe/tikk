@@ -24,6 +24,9 @@ export const ticketsDirectory = (store: Store): string => join(store.root, 'tick
 export const projectDirectory = (store: Store, project: ProjectName): string =>
   join(ticketsDirectory(store), project);
 
+export const ticketFolderPath = (store: Store, project: ProjectName, id: TicketId): string =>
+  join(projectDirectory(store, project), id);
+
 export const ticketFilePath = (
   store: Store,
   project: ProjectName,

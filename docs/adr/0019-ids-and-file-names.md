@@ -15,7 +15,8 @@ IDs are `<project>-<4 chars>`. The characters come from nanoid with a lowercase 
 out look-alike characters. Files are `tickets/<project>/<id>-<slug>.md`. The slug is set at create
 and never renamed automatically. The one exception is an ID clash found after a sync merge. Then
 tikk gives the newer ticket a new ID, renames its file, and writes an `alias` fact from the old ID
-to the new one.
+to the new one. The rename moves the whole folder `tickets/<project>/<id>/` with the ticket file,
+even when both clashing tickets had a folder. A new ID never matches a folder name that exists.
 
 The `project` field comes from the repository's `origin` through tikk's config, and is `personal`
 outside a repository. It replaces Linear team and project routing.

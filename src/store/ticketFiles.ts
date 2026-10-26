@@ -238,7 +238,7 @@ export const readTicketFile = async (
 };
 
 const idIsTaken = (names: string[], id: string): boolean =>
-  names.some((name) => name.startsWith(`${id}-`));
+  names.some((name) => name === id || name.startsWith(`${id}-`));
 
 const writeExclusive = async (
   files: TicketFileFunctions,

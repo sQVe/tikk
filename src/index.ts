@@ -1,8 +1,10 @@
 #!/usr/bin/env bun
 import { existsSync, watch } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import {
   appendFile,
   link,
+  lstat,
   mkdtemp,
   mkdir,
   open,
@@ -15,7 +17,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 import { z } from 'zod';
 
@@ -42,6 +44,7 @@ import {
   readFactFile,
   readTicketFile,
   resolveStoreRoot,
+  ticketFolderPath,
   writeTicketFile,
 } from './store/store.ts';
 import type {
@@ -248,6 +251,30 @@ const listFactsRecovering = async (
   return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
 };
 
+const isFolderFileEntry = (entry: Dirent): boolean => entry.isFile() || entry.isSymbolicLink();
+
+const listTicketFolderFiles = async (
+  folder: string,
+): Promise<Result<string[], { message: string }>> => {
+  try {
+    const entries = await readdir(folder, { recursive: true, withFileTypes: true });
+
+    const files = entries
+      .filter((entry) => isFolderFileEntry(entry))
+      .map((entry) => relative(folder, join(entry.parentPath, entry.name)));
+
+    return { ok: true, value: files.toSorted() };
+  } catch (error) {
+    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+    if (missing) {
+      return { ok: true, value: [] };
+    }
+
+    return { ok: false, reason: { message: `Cannot list the files in ${folder}.` } };
+  }
+};
+
 const sessionFor = (store: Store, cache: TicketCache): CliSession => {
   const files: CacheFiles = {
     listTicketFiles: () => listTicketFiles(ticketFiles, store),
@@ -264,6 +291,8 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     listTicketOutlines: () => cache.listTicketOutlines(),
     mayHaveArchiveWork: (now) => cache.mayHaveArchiveWork(now),
     listErrors: () => cache.listErrors(),
+    listTicketFolderFiles: (project, id) =>
+      listTicketFolderFiles(ticketFolderPath(store, project, id)),
     listFacts: (ticketIds) =>
       listFactsRecovering(cache, files, (ids) => cache.listFacts(ids), ticketIds),
     listStateFacts: (ticketIds) =>
@@ -595,6 +624,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
     commitArguments: (root) => commitArguments(runSyncGit, root),
     lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
     stat: (path) => stat(path),
+    lstat: (path) => lstat(path),
     readFile: (path) => readFile(path, 'utf8'),
     now: () => Date.now(),
     readdir: (directory) => readdir(directory),

@@ -12,6 +12,7 @@ interface StrictOptions {
   hasHead?: boolean;
   headFacts?: Record<string, string>;
   headTickets?: string[];
+  ignored?: string[];
   emptyIndexTree?: boolean;
 }
 
@@ -22,10 +23,14 @@ const validTicket =
   '---\nkind: instruction\ntitle: Valid\nproject: demo\nstatus: open\n---\nBody\n';
 
 const listing =
-  (deleted: string[], changed: string[]) =>
+  (deleted: string[], changed: string[], ignored: string[] = []) =>
   (args: string[]): ReturnType<typeof gitOutput> | undefined => {
     if (args.includes('--deleted')) {
       return gitOutput(deleted.map((path) => `${path}\0`).join(''));
+    }
+
+    if (args.includes('--ignored')) {
+      return gitOutput(ignored.map((path) => `${path}\0`).join(''));
     }
 
     if (args.includes('--others')) {
@@ -78,14 +83,64 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
   expect(stagedEntries(fake).toSorted()).toEqual(
     [
       '--add --cacheinfo 100644,blob1,facts/laptop/2026-10.jsonl',
-      '--add --cacheinfo 100644,blob2,logs/abc123.log',
-      '--add --cacheinfo 100644,blob4,tickets/demo/settled.md',
-      '--add --cacheinfo 100644,blob3,tikk.json',
+      '--add -- logs/abc123.log',
+      '--add --cacheinfo 100644,blob2,tickets/demo/settled.md',
+      '--add -- tikk.json',
       '--force-remove -- tickets/demo/gone.md',
     ].toSorted(),
   );
 
   expect(fake.commands()).toContain('read-tree HEAD');
+});
+
+it('stages a fresh folder file that does not parse, and keeps a fresh ticket pending', async () => {
+  const folderFile = 'tickets/demo/demo-aaaa/design.md';
+  const ticketFile = 'tickets/demo/demo-aaaa-a.md';
+
+  const fake = makeSync({
+    now,
+    git: listing([], [folderFile, ticketFile]),
+    files: {
+      [`/store/${folderFile}`]: { text: 'no front matter', mtimeMs: now },
+      [`/store/${ticketFile}`]: { text: 'no front matter', mtimeMs: now },
+    },
+  });
+
+  const result = await commitStore(fake.functions, root);
+
+  expect(result).toEqual({ ok: true, value: { committed: true, pending: [ticketFile] } });
+  expect(stagedEntries(fake)).toEqual([`--add -- ${folderFile}`]);
+});
+
+it('stages an ignored folder file, and leaves ignored files outside folders out', async () => {
+  const folderFile = 'tickets/demo/demo-aaaa/reports/run.log';
+
+  const fake = makeSync({
+    now,
+    git: listing([], [], [folderFile, 'tickets/demo/demo-aaaa-a.md', 'logs/scratch.txt']),
+    files: { [`/store/${folderFile}`]: { text: 'done\n', mtimeMs: now } },
+  });
+
+  const result = await commitStore(fake.functions, root);
+
+  expect(result).toEqual({ ok: true, value: { committed: true, pending: [] } });
+  expect(stagedEntries(fake)).toEqual([`--add -- ${folderFile}`]);
+});
+
+it('stages a folder path that is a dangling symlink, which stat cannot read', async () => {
+  const linkPath = 'tickets/demo/demo-aaaa/latest.md';
+
+  const fake = makeSync({
+    now,
+    git: listing([], [linkPath]),
+    files: { [`/store/${linkPath}`]: { text: '', mtimeMs: now } },
+  });
+
+  const functions = { ...fake.functions, stat: () => Promise.reject(new Error('ENOENT')) };
+  const result = await commitStore(functions, root);
+
+  expect(result).toEqual({ ok: true, value: { committed: true, pending: [] } });
+  expect(stagedEntries(fake)).toEqual([`--add -- ${linkPath}`]);
 });
 
 it('makes no commit when only pending tickets changed', async () => {
@@ -185,6 +240,23 @@ it('keeps committed alias lines whose ticket is gone from HEAD when a line is ap
   expect(fake.blobs).toEqual([aliasLine + newLine]);
 });
 
+it('does not count a folder file in HEAD as the ticket that an alias waits for', async () => {
+  const factPath = 'facts/laptop/2026-10.jsonl';
+  const alias = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
+
+  const fake = makeSync({
+    git: (args) =>
+      args.includes('ls-tree')
+        ? gitOutput('tickets/demo/demo-qqqq/demo-qqqq-b.md\n')
+        : listing([], [factPath])(args),
+    files: { [`/store/${factPath}`]: { text: alias, mtimeMs: 0 } },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([]);
+});
+
 it('holds back an unplaced alias that sits before the committed lines of a fact file', async () => {
   const factPath = 'facts/laptop/2026-10.jsonl';
   const aliasLine = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
@@ -243,6 +315,7 @@ const strictGit = (options: StrictOptions = {}): NonNullable<FakeSyncOptions['gi
       [`ls-files -z --modified --others --exclude-standard -- ${pathspecs}`]: nulList(
         options.changed,
       ),
+      'ls-files -z --others --ignored --exclude-standard -- tickets': nulList(options.ignored),
       'ls-tree -r --name-only HEAD -- tickets': hasHead
         ? (options.headTickets ?? []).join('\n')
         : undefined,
@@ -338,8 +411,9 @@ it('runs exactly the expected Git calls and commits with signing off', async () 
     'read-tree HEAD',
     `ls-files -z --deleted -- ${pathspecs}`,
     `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
+    'ls-files -z --others --ignored --exclude-standard -- tickets',
     'ls-tree -r --name-only HEAD -- tickets',
-    'update-index --add --cacheinfo 100644,blob1,tikk.json',
+    'update-index --add -- tikk.json',
     'update-index --force-remove -- tickets/demo/gone.md',
     'write-tree',
     'rev-parse --verify --quiet HEAD',
@@ -354,7 +428,8 @@ it.each([
   'read-tree HEAD',
   `ls-files -z --deleted -- ${pathspecs}`,
   `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
-  'update-index --add --cacheinfo 100644,blob1,tikk.json',
+  'ls-files -z --others --ignored --exclude-standard -- tickets',
+  'update-index --add -- tikk.json',
   'update-index --force-remove -- tickets/demo/gone.md',
   'write-tree',
   'rev-parse HEAD^{tree}',
@@ -378,9 +453,9 @@ it.each([
 it('fails with the blob error and commits nothing when the text cannot be stored', async () => {
   const fake = makeSync({
     now,
-    git: strictGit({ changed: ['tikk.json'] }),
+    git: strictGit({ changed: ['tickets/demo/settled.md'] }),
     blobFails: 'blob refused',
-    files: { '/store/tikk.json': { text: '{}', mtimeMs: 0 } },
+    files: { '/store/tickets/demo/settled.md': { text: validTicket, mtimeMs: 0 } },
   });
 
   const result = await commitStore(fake.functions, root);

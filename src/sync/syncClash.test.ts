@@ -20,7 +20,7 @@ const clashingStore = (
   makeSync({
     ...extra,
     files: { [factPath]: { text: 'alias line\n', mtimeMs: 0 }, ...extra.files },
-    folders: { '/store/tickets': ['demo'], '/store/tickets/demo': fileNames },
+    folders: { '/store/tickets': ['demo'], '/store/tickets/demo': fileNames, ...extra.folders },
     git: (args) => {
       const reply = extra.git?.(args);
 
@@ -99,7 +99,7 @@ it('commits a tracked rename from HEAD together with its alias fact in one commi
   expect(commits).toHaveLength(1);
 
   expect(stagedEntries(fake)).toEqual([
-    '--add --cacheinfo 100644,,tickets/demo/demo-zzzz-b.md',
+    '--add --cacheinfo 100644,abc123,tickets/demo/demo-zzzz-b.md',
     '--force-remove -- tickets/demo/demo-aaaa-b.md',
     '--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl',
   ]);
@@ -202,7 +202,7 @@ const strictCommands = {
   logNewer: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-b.md',
   head: 'rev-parse --verify --quiet HEAD',
   readTree: 'read-tree HEAD',
-  blob: 'rev-parse HEAD:tickets/demo/demo-aaaa-b.md',
+  blob: 'ls-tree HEAD -- tickets/demo/demo-aaaa-b.md',
   addMove: 'update-index --add --cacheinfo 100644,abc123,tickets/demo/demo-zzzz-b.md',
   removeMove: 'update-index --force-remove -- tickets/demo/demo-aaaa-b.md',
   addFact: 'update-index --add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl',
@@ -213,7 +213,7 @@ const strictReplies: Record<string, string> = {
   [strictCommands.logNewer]: '1000\n2000\n',
   [strictCommands.head]: '',
   [strictCommands.readTree]: '',
-  [strictCommands.blob]: 'abc123\n',
+  [strictCommands.blob]: '100644 blob abc123\ttickets/demo/demo-aaaa-b.md\n',
   [strictCommands.addMove]: '',
   [strictCommands.removeMove]: '',
   [strictCommands.addFact]: '',
@@ -265,7 +265,7 @@ const strictStore = (failOn?: string, extra: FakeSyncOptions = {}) =>
       '/store/tickets': ['demo'],
       '/store/tickets/demo': ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
     },
-    git: strictClashGit(failOn),
+    git: extra.git ?? strictClashGit(failOn),
     now: Date.parse('2026-10-05T10:00:00.000Z'),
   });
 
@@ -317,6 +317,20 @@ it.each([
     expect(fake.disk.has(newPath)).toBe(false);
   },
 );
+
+it('fails and commits nothing when HEAD has no entry for a tracked move', async () => {
+  const fake = strictStore(undefined, {
+    git: (args) =>
+      commandOf(args) === strictCommands.blob ? gitOutput('') : strictClashGit()(args),
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+  expect(fake.disk.has(oldPath)).toBe(true);
+  expect(fake.disk.has(newPath)).toBe(false);
+});
 
 it('fails, and restores the file, when the commit fails', async () => {
   const fake = strictStore('commit');
@@ -513,4 +527,156 @@ it('stages the fact file of every reused alias', async () => {
     '--add --cacheinfo 100644,blob1,facts/fake/first.jsonl',
     '--add --cacheinfo 100644,blob2,facts/fake/second.jsonl',
   ]);
+});
+
+const folderPath = '/store/tickets/demo/demo-aaaa';
+const folderDesign = `${folderPath}/design.md`;
+const newFolderDesign = '/store/tickets/demo/demo-zzzz/design.md';
+
+const commitFails = (args: string[]) =>
+  args.includes('commit') ? gitFailure('hook refused') : undefined;
+
+const folderGit = (args: string[], tracked: string[]) => {
+  const command = commandOf(args);
+
+  if (command === 'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa') {
+    return gitOutput(tracked.map((file) => `tickets/demo/demo-aaaa/${file}\0`).join(''));
+  }
+
+  const folderPrefix = 'ls-tree HEAD -- tickets/demo/demo-aaaa/';
+
+  return command.startsWith(folderPrefix)
+    ? gitOutput(`100644 blob abc999\t${command.slice('ls-tree HEAD -- '.length)}\n`)
+    : undefined;
+};
+
+const folderStore = (
+  extra: Parameters<typeof makeSync>[0] = {},
+  files: string[] = ['design.md'],
+  tracked: string[] = ['design.md'],
+) =>
+  clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+    {
+      ...extra,
+      files: {
+        [oldPath]: { text: 'ticket bytes', mtimeMs: 0 },
+        ...Object.fromEntries(
+          files.map((file) => [`${folderPath}/${file}`, { text: `${file} bytes`, mtimeMs: 0 }]),
+        ),
+        ...extra.files,
+      },
+      git: (args) => folderGit(args, tracked) ?? extra.git?.(args),
+    },
+  );
+
+it('stages the tracked folder files at the new path and removes them at the old path', async () => {
+  const fake = folderStore();
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(true);
+
+  expect(stagedEntries(fake).filter((entry) => entry.includes('design.md'))).toEqual([
+    '--add --cacheinfo 100644,abc999,tickets/demo/demo-zzzz/design.md',
+    '--force-remove -- tickets/demo/demo-aaaa/design.md',
+  ]);
+});
+
+it('moves an untracked folder file with the folder, and leaves it out of the clash commit', async () => {
+  const fake = folderStore({}, ['design.md', 'notes.md'], ['design.md']);
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(true);
+  expect(fake.disk.get('/store/tickets/demo/demo-zzzz/notes.md')?.text).toBe('notes.md bytes');
+  expect(stagedEntries(fake).filter((entry) => entry.includes('notes.md'))).toEqual([]);
+});
+
+it('puts the folder back at the old path when the clash commit fails', async () => {
+  let movedAtCommit: string | undefined;
+
+  const fake: ReturnType<typeof makeSync> = folderStore({
+    git: (args) => {
+      if (args.includes('commit')) {
+        movedAtCommit = fake.disk.get(newFolderDesign)?.text;
+      }
+
+      return commitFails(args);
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(movedAtCommit).toBe('design.md bytes');
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(folderDesign)?.text).toBe('design.md bytes');
+  expect(fake.disk.has(newFolderDesign)).toBe(false);
+});
+
+it('fails, and moves nothing, when the folder cannot be read', async () => {
+  const fake = folderStore();
+  const denied = Object.assign(new Error('denied'), { code: 'EACCES' });
+
+  const functions = {
+    ...fake.functions,
+    readdir: (directory: string) =>
+      directory === folderPath ? Promise.reject(denied) : fake.functions.readdir(directory),
+  };
+
+  const result = await resolveIdClashes(functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(folderDesign)?.text).toBe('design.md bytes');
+  expect(fake.disk.has(newFolderDesign)).toBe(false);
+  expect(fake.commands().some((command) => command.includes('commit'))).toBe(false);
+});
+
+it('keeps a file saved in the old folder, and the moved folder, when the clash commit fails', async () => {
+  const fake: ReturnType<typeof makeSync> = folderStore({
+    git: (args) => {
+      if (!args.includes('commit')) {
+        return undefined;
+      }
+
+      fake.disk.set(`${folderPath}/notes.md`, { text: 'saved', mtimeMs: 0 });
+
+      return gitFailure('hook refused');
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(`${folderPath}/notes.md`)?.text).toBe('saved');
+  expect(fake.disk.get(newFolderDesign)?.text).toBe('design.md bytes');
+  expect(fake.disk.has(folderDesign)).toBe(false);
+});
+
+it('does not give a clashing ticket an ID that a folder already uses', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-zzzz'],
+    { suffixes: ['zzzz', 'qqqq'] },
+  );
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-qqqq']);
+});
+
+it('does not reuse an alias whose new ID a folder already uses', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-qqqq'],
+    {
+      aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/2026-10.jsonl' }],
+    },
+  );
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-zzzz']);
+  expect(fake.aliasWrites()).toBe(1);
 });
