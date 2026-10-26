@@ -10,6 +10,9 @@ type Selection = ReturnType<typeof selectReady<CliTicket>>;
 type ReadyKind = 'instruction' | 'slice';
 type KindResult = Result<ReadyKind, CliFailure>;
 type Skipped = Selection['skipped'][number];
+type Candidate = Selection['candidates'][number];
+type Blocker = NonNullable<Skipped['blockers']>[number];
+type StackParent = NonNullable<Candidate['stackParents']>[number];
 
 const skippedView = (item: Skipped): Record<string, unknown> => ({
   id: item.ticket.id,
@@ -45,9 +48,17 @@ const parseErrorView = (ticket: CliTicket): Record<string, unknown> => ({
   path: ticket.path,
 });
 
+const blockerLabel = (blocker: Blocker): string => {
+  const viaLabel = blocker.via === undefined ? '' : ` via ${blocker.via}`;
+
+  return `${blocker.id} (${blocker.state})${viaLabel}`;
+};
+
+const stackLabel = (parent: StackParent): string => `  stack on ${parent.id} #${parent.number}`;
+
 const skippedDetails = (item: Skipped): string => {
   if (item.blockers !== undefined) {
-    return item.blockers.map((blocker) => `${blocker.id} (${blocker.state})`).join(', ');
+    return item.blockers.map(blockerLabel).join(', ');
   }
 
   if (item.holder !== undefined) {
@@ -101,9 +112,11 @@ const readyText = (
   unreadable: CliTicket[],
   problems: ReconcileProblem[],
 ): string => {
-  const candidateLines = selection.candidates.map(
-    ({ ticket, state }) => `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
-  );
+  const candidateLines = selection.candidates.map(({ ticket, state, stackParents = [] }) => {
+    const stackLines = stackParents.map(stackLabel).join('');
+
+    return `${ticket.id}  ${state}  ${ticket.frontMatter.title}${stackLines}\n`;
+  });
 
   const skippedLines = selection.skipped.map((item) => {
     const line = `skipped: ${item.ticket.id}  ${item.reason}  ${skippedDetails(item)}`;
@@ -170,9 +183,9 @@ export const readyCommand = async ({
     ...(parent === undefined ? {} : { parent }),
   });
 
-  const candidates = selection.candidates.map(({ ticket, state }) => ({
+  const candidates = selection.candidates.map(({ ticket, ...rest }) => ({
     ...ticketView(ticket, false),
-    state,
+    ...rest,
   }));
 
   return {

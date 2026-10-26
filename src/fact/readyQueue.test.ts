@@ -208,7 +208,8 @@ describe('selectReady for slices', () => {
   it('keeps a slice blocked by a slice in review and names its state', () => {
     const review = makeTicket('3469', { kind: 'slice' });
     const blocked = makeTicket('3478', { kind: 'slice', blockedBy: ['3469'] });
-    const result = selectReady([review, blocked], [prFor('3469', {})], now, sliceScope);
+    const facts = [prFor('3469', { state: 'merged', mergeCommit: 'aaa' })];
+    const result = selectReady([review, blocked], facts, now, sliceScope);
 
     expect(result.candidates).toEqual([]);
 
@@ -216,4 +217,87 @@ describe('selectReady for slices', () => {
       { ticket: blocked, reason: 'blocked', blockers: [{ id: review.id, state: 'inReview' }] },
     ]);
   });
+});
+
+describe('selectReady blockers that flow down and stack', () => {
+  const sliceScope = { kind: 'slice' } as const;
+
+  it('clears a slice blocker with an open PR for the instructions of the slice', () => {
+    const blockingSlice = makeTicket('3469', { kind: 'slice' });
+    const slice = makeTicket('3478', { kind: 'slice', blockedBy: ['3469'] });
+    const instruction = makeTicket('3479', { parent: '3478' });
+    const facts = [prFor('3469', {})];
+    const result = selectReady([blockingSlice, slice, instruction], facts, now, noScope);
+
+    expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([instruction.id]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('names a blocker once, from the closest level that names it, without a via for its own level', () => {
+    const plan = makeTicket('3466', { kind: 'plan', blockedBy: ['3469'] });
+    const slice = makeTicket('3478', { kind: 'slice', parent: '3466', blockedBy: ['3469'] });
+    const instruction = makeTicket('3479', { parent: '3478', blockedBy: ['3469'] });
+    const task = makeTicket('3469', { kind: 'task' });
+    const result = selectReady([plan, slice, instruction, task], [], now, noScope);
+
+    expect(result.skipped).toEqual([
+      { ticket: instruction, reason: 'blocked', blockers: [{ id: task.id, state: 'open' }] },
+    ]);
+
+    expect(result.skipped[0]?.blockers?.[0]).not.toHaveProperty('via');
+  });
+
+  it('lists the stack parents of a ready slice in blockedBy order and leaves the key out when there are none', () => {
+    const first = makeTicket('3469', { kind: 'slice' });
+    const second = makeTicket('3478', { kind: 'slice' });
+    const stacked = makeTicket('3489', { kind: 'slice', blockedBy: ['3478', '3469'] });
+    const free = makeTicket('3499', { kind: 'slice' });
+
+    const facts = [prFor('3469', { number: 7 }), prFor('3478', { number: 8 })];
+    const result = selectReady([first, second, stacked, free], facts, now, sliceScope);
+    const byId = new Map(result.candidates.map((entry) => [entry.ticket.id, entry]));
+
+    expect(byId.get(stacked.id)).toMatchObject({
+      stackParents: [
+        { id: second.id, repository: 'sqve/tikk', number: 8 },
+        { id: first.id, repository: 'sqve/tikk', number: 7 },
+      ],
+    });
+
+    expect(byId.get(free.id)).not.toHaveProperty('stackParents');
+  });
+
+  it('keeps a plan blocker on a slice even when that blocking slice has an open PR', () => {
+    const plan = makeTicket('3466', { kind: 'plan', blockedBy: ['3469'] });
+    const blockingSlice = makeTicket('3469', { kind: 'slice' });
+    const slice = makeTicket('3478', { kind: 'slice', parent: '3466' });
+    const result = selectReady([plan, blockingSlice, slice], [prFor('3469', {})], now, sliceScope);
+
+    expect(result.candidates).toEqual([]);
+
+    expect(result.skipped).toEqual([
+      {
+        ticket: slice,
+        reason: 'blocked',
+        blockers: [{ id: blockingSlice.id, state: 'inReview', via: plan.id }],
+      },
+    ]);
+  });
+});
+
+it('blocks the instructions of a slice whose slice blocker has no PR and names the slice as the source', () => {
+  const blockingSlice = makeTicket('3469', { kind: 'slice' });
+  const slice = makeTicket('3478', { kind: 'slice', blockedBy: ['3469'] });
+  const instruction = makeTicket('3479', { parent: '3478' });
+  const result = selectReady([blockingSlice, slice, instruction], [], now, noScope);
+
+  expect(result.candidates).toEqual([]);
+
+  expect(result.skipped).toEqual([
+    {
+      ticket: instruction,
+      reason: 'blocked',
+      blockers: [{ id: blockingSlice.id, state: 'planned', via: slice.id }],
+    },
+  ]);
 });

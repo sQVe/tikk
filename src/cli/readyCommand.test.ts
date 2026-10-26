@@ -378,3 +378,141 @@ it('clears a plan blocker once its slices are done and blocks while a direct tas
     ],
   });
 });
+
+it('skips the instructions of a blocked slice and names the slice that holds the blocker', async () => {
+  const slice = sliceWith('demo-3466', { blockedBy: [ticketIdOf('demo-3469')] });
+  const task = makeKindTicket('demo-3469', 'task');
+  const first = instructionWith('demo-3467', { parent: ticketIdOf('demo-3466'), rank: 1 });
+  const second = instructionWith('demo-3468', { parent: ticketIdOf('demo-3466'), rank: 2 });
+  const output = successOf(await ready([], [slice, task, first, second]));
+
+  expect(output.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      {
+        id: 'demo-3467',
+        reason: 'blocked',
+        blockers: [{ id: 'demo-3469', state: 'open', via: 'demo-3466' }],
+      },
+      {
+        id: 'demo-3468',
+        reason: 'blocked',
+        blockers: [{ id: 'demo-3469', state: 'open', via: 'demo-3466' }],
+      },
+    ],
+  });
+
+  expect(output.text).toContain('skipped: demo-3467  blocked  demo-3469 (open) via demo-3466');
+});
+
+it('lets a slice stack on a blocking slice whose PR is open and names that PR', async () => {
+  const parent = sliceWith('demo-3466', {});
+  const child = sliceWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
+
+  const pr = makeFact({
+    kind: 'pr',
+    ticket: 'demo-3466',
+    repository: 'acme/app',
+    number: 9,
+    state: 'open',
+    base: 'main',
+    head: 'head9',
+    trunk: 'main',
+    inTrunk: false,
+  });
+
+  const output = successOf(await ready(['--kind', 'slice'], [parent, child], [pr]));
+
+  expect(output.json).toMatchObject({
+    candidates: [
+      {
+        id: 'demo-3467',
+        stackParents: [{ id: 'demo-3466', repository: 'acme/app', number: 9 }],
+      },
+    ],
+    skipped: [],
+  });
+
+  expect(output.text).toContain('stack on demo-3466 #9');
+});
+
+it('skips an instruction whose plan is blocked by an open task and names the plan as the source', async () => {
+  const plan = makeTicket('demo-3466', {
+    frontMatter: {
+      ...makeKindTicket('demo-3466', 'plan').frontMatter,
+      blockedBy: [ticketIdOf('demo-3469')],
+    },
+  });
+
+  const slice = sliceWith('demo-3467', { parent: ticketIdOf('demo-3466') });
+  const task = makeKindTicket('demo-3469', 'task');
+  const instruction = instructionWith('demo-3468', { parent: ticketIdOf('demo-3467') });
+  const output = successOf(await ready([], [plan, slice, task, instruction]));
+
+  expect(output.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      {
+        id: 'demo-3468',
+        reason: 'blocked',
+        blockers: [{ id: 'demo-3469', state: 'open', via: 'demo-3466' }],
+      },
+    ],
+  });
+});
+
+it('keeps a slice blocked by a task even when that task has an open PR', async () => {
+  const task = makeKindTicket('demo-3466', 'task');
+  const blocked = sliceWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
+
+  const pr = makeFact({
+    kind: 'pr',
+    ticket: 'demo-3466',
+    repository: 'acme/app',
+    number: 9,
+    state: 'open',
+    base: 'main',
+    head: 'head9',
+    trunk: 'main',
+    inTrunk: false,
+  });
+
+  const output = successOf(await ready(['--kind', 'slice'], [task, blocked], [pr]));
+
+  expect(output.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      { id: 'demo-3467', reason: 'blocked', blockers: [{ id: 'demo-3466', state: 'open' }] },
+    ],
+  });
+});
+
+it('keeps an instruction blocked by its own slice blocker while that slice PR is open', async () => {
+  const slice = sliceWith('demo-3466', {});
+  const instruction = instructionWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
+
+  const pr = makeFact({
+    kind: 'pr',
+    ticket: 'demo-3466',
+    repository: 'acme/app',
+    number: 9,
+    state: 'open',
+    base: 'main',
+    head: 'head9',
+    trunk: 'main',
+    inTrunk: false,
+  });
+
+  const output = successOf(await ready([], [slice, instruction], [pr]));
+
+  expect(output.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      {
+        id: 'demo-3467',
+        reason: 'blocked',
+        blockers: [{ id: 'demo-3466', state: 'inReview' }],
+      },
+    ],
+  });
+});
