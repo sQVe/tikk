@@ -367,6 +367,21 @@ it('picks another ID when a file with the generated ID and another slug exists',
   ]);
 });
 
+it('skips an ID whose name a folder in the project folder already uses', async () => {
+  const folder = join(root, 'tickets', 'tikk');
+
+  await mkdir(join(folder, 'tikk-3a4b'), { recursive: true });
+
+  const files: TicketFileFunctions = {
+    ...nodeTicketFiles,
+    randomIdSuffix: sequence('3a4b', '3a4c'),
+  };
+
+  const created = await createTicketFile(files, { root }, projectOf('tikk'), 'Folder clash', 'x');
+
+  expect(created).toMatchObject({ ok: true, value: { id: 'tikk-3a4c' } });
+});
+
 it('gives up with the project in the message after 100 colliding attempts', async () => {
   const attempts: string[] = [];
 
