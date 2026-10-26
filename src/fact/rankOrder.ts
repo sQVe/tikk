@@ -1,6 +1,6 @@
-import type { TaskTicket } from './taskState.ts';
+import type { InstructionTicket } from './instructionState.ts';
 
-export const compareRank = (left: TaskTicket, right: TaskTicket): number => {
+export const compareRank = (left: InstructionTicket, right: InstructionTicket): number => {
   const leftRank = left.frontMatter.rank;
   const rightRank = right.frontMatter.rank;
 

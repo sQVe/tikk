@@ -1,7 +1,7 @@
 import { expect, it } from 'bun:test';
 
 import { failureOf, makeTicket, successOf } from './cliHarness.ts';
-import { taskClaim, taskRelease } from './taskClaim.ts';
+import { instructionClaim, instructionRelease } from './instructionClaim.ts';
 import {
   claimBy,
   submittedBy,
@@ -10,14 +10,15 @@ import {
   sideEffectsOf,
   orphan,
   parentOnly,
+  parentSlice,
   blockedOnly,
-} from './taskHarness.ts';
-import type { Command } from './taskHarness.ts';
-import { taskAccept, taskSubmit } from './taskSubmit.ts';
+} from './instructionHarness.ts';
+import type { Command } from './instructionHarness.ts';
+import { instructionAccept, instructionSubmit } from './instructionSubmit.ts';
 
-it('submits a task held by the same holder', async () => {
+it('submits an instruction held by the same holder', async () => {
   const { fakeSession, result } = await run(
-    taskSubmit,
+    instructionSubmit,
     ['demo-3467', '--holder', 'agent', '--text', 'Ready for review'],
     { facts: [claimBy('agent')] },
   );
@@ -30,7 +31,7 @@ it('submits a task held by the same holder', async () => {
 });
 
 it('refuses a submit by another holder and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
+  const { fakeSession, result } = await run(instructionSubmit, ['demo-3467', '--holder', 'agent'], {
     facts: [claimBy('other')],
   });
 
@@ -38,8 +39,8 @@ it('refuses a submit by another holder and writes nothing', async () => {
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('accepts a submitted task', async () => {
-  const { fakeSession, result } = await run(taskAccept, ['demo-3467'], {
+it('accepts a submitted instruction', async () => {
+  const { fakeSession, result } = await run(instructionAccept, ['demo-3467'], {
     facts: [claimBy('agent'), submittedBy('agent')],
   });
 
@@ -47,23 +48,23 @@ it('accepts a submitted task', async () => {
   expect(fakeSession.appends.map(({ fact }) => fact.kind)).toEqual(['accept']);
 });
 
-it('refuses to accept a task that is not submitted and writes nothing', async () => {
+it('refuses to accept an instruction that is not submitted and writes nothing', async () => {
   for (const facts of [[], [claimBy('agent')]]) {
-    const { fakeSession, result } = await run(taskAccept, ['demo-3467'], { facts });
+    const { fakeSession, result } = await run(instructionAccept, ['demo-3467'], { facts });
 
     expect(failureOf(result).code).toBe('conflict');
     expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
   }
 });
 
-it('refuses claim, release, submit, and accept on a task whose file has an error', async () => {
+it('refuses claim, release, submit, and accept on an instruction whose file has an error', async () => {
   const broken = makeTicket('demo-3467', { error: 'Bad YAML.' });
 
   const commands: [Command, string[]][] = [
-    [taskClaim, ['demo-3467', '--holder', 'agent']],
-    [taskRelease, ['demo-3467', '--holder', 'agent']],
-    [taskSubmit, ['demo-3467', '--holder', 'agent']],
-    [taskAccept, ['demo-3467']],
+    [instructionClaim, ['demo-3467', '--holder', 'agent']],
+    [instructionRelease, ['demo-3467', '--holder', 'agent']],
+    [instructionSubmit, ['demo-3467', '--holder', 'agent']],
+    [instructionAccept, ['demo-3467']],
   ];
 
   for (const [command, args] of commands) {
@@ -77,8 +78,8 @@ it('refuses claim, release, submit, and accept on a task whose file has an error
   }
 });
 
-it('refuses to submit a task whose parent does not exist and appends nothing', async () => {
-  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
+it('refuses to submit an instruction whose parent does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(instructionSubmit, ['demo-3467', '--holder', 'agent'], {
     tickets: [parentOnly()],
     facts: [claimBy('agent')],
   });
@@ -90,9 +91,9 @@ it('refuses to submit a task whose parent does not exist and appends nothing', a
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses to submit a task blocked by a ticket that does not exist and appends nothing', async () => {
-  const { fakeSession, result } = await run(taskSubmit, ['demo-3467', '--holder', 'agent'], {
-    tickets: [blockedOnly()],
+it('refuses to submit an instruction blocked by a ticket that does not exist and appends nothing', async () => {
+  const { fakeSession, result } = await run(instructionSubmit, ['demo-3467', '--holder', 'agent'], {
+    tickets: [parentSlice, blockedOnly()],
     facts: [claimBy('agent')],
   });
 
@@ -105,7 +106,7 @@ it('refuses to submit a task blocked by a ticket that does not exist and appends
 
 it('submits past a failed tree check with --force --reason and records the reason', async () => {
   const { fakeSession, result } = await run(
-    taskSubmit,
+    instructionSubmit,
     ['demo-3467', '--holder', 'agent', '--force', '--reason', 'Blocker was deleted'],
     { tickets: [orphan()], facts: [claimBy('agent')] },
   );
@@ -122,7 +123,7 @@ it('submits past a failed tree check with --force --reason and records the reaso
 
 it('refuses --force without --reason on a sound tree and changes nothing', async () => {
   const { fakeSession, result } = await run(
-    taskSubmit,
+    instructionSubmit,
     ['demo-3467', '--holder', 'agent', '--force'],
     { facts: [claimBy('agent')] },
   );
@@ -133,7 +134,7 @@ it('refuses --force without --reason on a sound tree and changes nothing', async
 
 it('refuses --force with an empty --reason and changes nothing', async () => {
   const { fakeSession, result } = await run(
-    taskSubmit,
+    instructionSubmit,
     ['demo-3467', '--holder', 'agent', '--force', '--reason', ''],
     { tickets: [orphan()], facts: [claimBy('agent')] },
   );

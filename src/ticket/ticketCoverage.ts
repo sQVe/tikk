@@ -13,7 +13,7 @@ export interface CoverageGap {
   criterion: string;
 }
 
-const coveringKind = { plan: 'slice', slice: 'task' } as const;
+const coveringKind = { plan: 'slice', slice: 'instruction' } as const;
 
 const isActive = (ticket: CoverageTicket): boolean => ticket.frontMatter.status !== 'canceled';
 
@@ -24,7 +24,7 @@ const coveredBy = (child: CoverageTicket, parentCriteria: string[]): string[] =>
   const { covers } = child.frontMatter;
 
   if (covers === undefined) {
-    return child.frontMatter.kind === 'task' ? parentCriteria : [];
+    return child.frontMatter.kind === 'instruction' ? parentCriteria : [];
   }
 
   return covers.filter((criterion) => parentCriteria.includes(criterion));

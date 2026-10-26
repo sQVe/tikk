@@ -19,10 +19,10 @@ export const treeRowsOf = (groups: readonly TreeGroup[]): ListRow[] =>
           id: slice.id,
           text: `  ${slice.id}  ${singleLine(slice.title)}  ${slice.state}${pr}`,
         },
-        ...slice.tasks.map((task) => ({
-          key: task.id,
-          id: task.id,
-          text: `    ${task.id}  ${singleLine(task.title)}  ${task.state}`,
+        ...slice.instructions.map((instruction) => ({
+          key: instruction.id,
+          id: instruction.id,
+          text: `    ${instruction.id}  ${singleLine(instruction.title)}  ${instruction.state}`,
         })),
       ];
     }),

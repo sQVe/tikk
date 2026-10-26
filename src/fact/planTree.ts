@@ -1,15 +1,15 @@
 import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
+import { deriveInstructionState } from './instructionState.ts';
+import type { InstructionStateName, InstructionTicket } from './instructionState.ts';
 import { compareRank } from './rankOrder.ts';
 import { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
 import type { SliceStateName } from './sliceState.ts';
-import { deriveTaskState } from './taskState.ts';
-import type { TaskStateName, TaskTicket } from './taskState.ts';
 
-interface TreeTask {
+interface TreeInstruction {
   id: TicketId;
   title: string;
-  state: TaskStateName;
+  state: InstructionStateName;
 }
 
 interface TreeSlice {
@@ -17,13 +17,13 @@ interface TreeSlice {
   title: string;
   state: SliceStateName;
   pr: number | null;
-  tasks: TreeTask[];
+  instructions: TreeInstruction[];
 }
 
 interface TreePlanHeader {
   id: TicketId;
   title: string;
-  status: TaskTicket['frontMatter']['status'];
+  status: InstructionTicket['frontMatter']['status'];
 }
 
 export interface TreeGroup {
@@ -31,31 +31,38 @@ export interface TreeGroup {
   slices: TreeSlice[];
 }
 
-const isShown = (ticket: TaskTicket): boolean =>
+const isShown = (ticket: InstructionTicket): boolean =>
   ticket.frontMatter.archived === undefined && ticket.frontMatter.status !== 'canceled';
 
-const ofKind = (tickets: TaskTicket[], kind: TaskTicket['frontMatter']['kind']): TaskTicket[] =>
+const ofKind = (
+  tickets: InstructionTicket[],
+  kind: InstructionTicket['frontMatter']['kind'],
+): InstructionTicket[] =>
   tickets.filter((ticket) => ticket.frontMatter.kind === kind && isShown(ticket));
 
-const byRank = (tickets: TaskTicket[]): TaskTicket[] => tickets.toSorted(compareRank);
+const byRank = (tickets: InstructionTicket[]): InstructionTicket[] => tickets.toSorted(compareRank);
 
-export const buildPlanTree = (tickets: TaskTicket[], facts: Fact[], now: Date): TreeGroup[] => {
+export const buildPlanTree = (
+  tickets: InstructionTicket[],
+  facts: Fact[],
+  now: Date,
+): TreeGroup[] => {
   const index = buildSliceIndex(tickets, facts);
 
-  const tasksByParent = Map.groupBy(
-    byRank(ofKind(tickets, 'task')),
-    (task) => task.frontMatter.parent,
+  const instructionsByParent = Map.groupBy(
+    byRank(ofKind(tickets, 'instruction')),
+    (instruction) => instruction.frontMatter.parent,
   );
 
-  const treeSlice = (slice: TaskTicket): TreeSlice => {
+  const treeSlice = (slice: InstructionTicket): TreeSlice => {
     const derived = deriveSliceState(slice, index, now);
 
-    const tasks =
+    const instructions =
       derived.state === 'active'
-        ? (tasksByParent.get(slice.id) ?? []).map((task) => ({
-            id: task.id,
-            title: task.frontMatter.title,
-            state: deriveTaskState(task, facts, now).state,
+        ? (instructionsByParent.get(slice.id) ?? []).map((instruction) => ({
+            id: instruction.id,
+            title: instruction.frontMatter.title,
+            state: deriveInstructionState(instruction, facts, now).state,
           }))
         : [];
 
@@ -64,7 +71,7 @@ export const buildPlanTree = (tickets: TaskTicket[], facts: Fact[], now: Date): 
       title: slice.frontMatter.title,
       state: derived.state,
       pr: selectSlicePr(slice.id, index)?.number ?? null,
-      tasks,
+      instructions,
     };
   };
 

@@ -3,8 +3,8 @@ import type { PullRequestObservation, PullRequestRef } from '../github.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
+import { withLockedTicket } from './instructionLock.ts';
 import { differsFromObservation, makePrFact } from './prGithub.ts';
-import { withLockedTicket } from './taskLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
@@ -105,8 +105,12 @@ const prLink = async (input: CommandInput): Promise<CommandResult> => {
     return machine;
   }
 
-  return withLockedTicket(input, rawId, { fileErrors: 'refuse', requireTask: false }, (locked) =>
-    appendLink(input, { ticket: locked.id, ref, seen: seen.value, machine: machine.value }),
+  return withLockedTicket(
+    input,
+    rawId,
+    { fileErrors: 'refuse', requireInstruction: false },
+    (locked) =>
+      appendLink(input, { ticket: locked.id, ref, seen: seen.value, machine: machine.value }),
   );
 };
 

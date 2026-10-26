@@ -3,7 +3,7 @@ import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { withLockedTicket } from './taskLock.ts';
+import { withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
 
@@ -259,7 +259,10 @@ export const sliceAudit = async (input: CommandInput): Promise<CommandResult> =>
 
   invariant(fact.kind === 'audit', 'The validated fact should be an audit.');
 
-  return withLockedTicket(input, rawId, { fileErrors: 'refuse', requireTask: false }, (locked) =>
-    appendAudit(input, locked, fact, machine.value),
+  return withLockedTicket(
+    input,
+    rawId,
+    { fileErrors: 'refuse', requireInstruction: false },
+    (locked) => appendAudit(input, locked, fact, machine.value),
   );
 };

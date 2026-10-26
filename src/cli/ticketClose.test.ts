@@ -79,9 +79,9 @@ it('refuses to close a slice and changes nothing', async () => {
   expect(fakeSession.appends).toEqual([]);
 });
 
-it('refuses to close a task and changes nothing', async () => {
-  const task = makeKindTicket('demo-3467', 'task');
-  const { fakeSession, result } = await close(['demo-3467'], { tickets: [task] });
+it('refuses to close an instruction and changes nothing', async () => {
+  const instruction = makeKindTicket('demo-3467', 'instruction');
+  const { fakeSession, result } = await close(['demo-3467'], { tickets: [instruction] });
 
   expect(failureOf(result).code).toBe('invalidArguments');
   expect(fakeSession.writes).toEqual([]);

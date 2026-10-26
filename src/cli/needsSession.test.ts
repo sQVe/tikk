@@ -118,21 +118,21 @@ it('loads the plan tree from the session tickets and facts', async () => {
   }
 });
 
-it('keeps a slice active when an archived accepted task is its only started task', async () => {
+it('keeps a slice active when an archived accepted instruction is its only started instruction', async () => {
   const base = makeKindTicket('demo-3467', 'slice');
 
   const slice = makeTicket('demo-3467', {
     frontMatter: { ...base.frontMatter, title: 'The slice' },
   });
 
-  const taskBase = makeKindTicket('demo-3468', 'task');
+  const instructionBase = makeKindTicket('demo-3468', 'instruction');
   const parent = slice.id;
 
   const archived = makeTicket('demo-3468', {
-    frontMatter: { ...taskBase.frontMatter, parent, archived: '2026-10-01' },
+    frontMatter: { ...instructionBase.frontMatter, parent, archived: '2026-10-01' },
   });
 
-  const open = makeTicket('demo-3469', { frontMatter: { ...taskBase.frontMatter, parent } });
+  const open = makeTicket('demo-3469', { frontMatter: { ...instructionBase.frontMatter, parent } });
 
   const fakeSession = makeSession({
     tickets: [slice, archived, open],
@@ -157,7 +157,10 @@ it('keeps a slice active when an archived accepted task is its only started task
     const [group] = tree.value;
 
     expect(group?.slices.map((entry) => entry.state)).toEqual(['active']);
-    expect(group?.slices[0]?.tasks.map((task) => String(task.id))).toEqual(['demo-3469']);
+
+    expect(group?.slices[0]?.instructions.map((instruction) => String(instruction.id))).toEqual([
+      'demo-3469',
+    ]);
   }
 });
 

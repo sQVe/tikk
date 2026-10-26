@@ -1,12 +1,12 @@
 import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 import { selectFindings } from './findingStatus.ts';
+import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
+import type { InstructionTicket } from './instructionState.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
-import { deriveTaskStateFromOwnFacts } from './taskState.ts';
-import type { TaskTicket } from './taskState.ts';
 
-interface NeedBase<Ticket extends TaskTicket> {
+interface NeedBase<Ticket extends InstructionTicket> {
   ticket: Ticket;
   since: string;
   ageSeconds: number;
@@ -14,11 +14,11 @@ interface NeedBase<Ticket extends TaskTicket> {
 
 type NeedDetail =
   | { reason: 'question' | 'submitted' | 'mergedUnverified' }
-  | { reason: 'flagged'; openTasks: TicketId[] }
+  | { reason: 'flagged'; openInstructions: TicketId[] }
   | { reason: 'staleClaim'; holder: string }
   | { reason: 'blockedFinding'; fingerprint: string; claim: string };
 
-export type NeedItem<Ticket extends TaskTicket> = NeedBase<Ticket> & NeedDetail;
+export type NeedItem<Ticket extends InstructionTicket> = NeedBase<Ticket> & NeedDetail;
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
 
@@ -60,12 +60,12 @@ const staleClaimOf = (own: Fact[], now: Date): { holder: string; since: string }
   return { holder: holderFact.holder, since: holderFact.leaseEnd };
 };
 
-const needsOf = <Ticket extends TaskTicket>(
+const needsOf = <Ticket extends InstructionTicket>(
   ticket: Ticket,
   own: Fact[],
   now: Date,
 ): NeedItem<Ticket>[] => {
-  const { state } = deriveTaskStateFromOwnFacts(ticket, own, now);
+  const { state } = deriveInstructionStateFromOwnFacts(ticket, own, now);
 
   if (notWaiting.has(state)) {
     return [];
@@ -109,7 +109,7 @@ const needsOf = <Ticket extends TaskTicket>(
   return items;
 };
 
-const blockedFindingsOf = <Ticket extends TaskTicket>(
+const blockedFindingsOf = <Ticket extends InstructionTicket>(
   ticket: Ticket,
   own: Fact[],
   now: Date,
@@ -137,13 +137,13 @@ const blockedFindingsOf = <Ticket extends TaskTicket>(
       ];
     });
 
-const isConsidered = (ticket: TaskTicket): boolean => {
+const isConsidered = (ticket: InstructionTicket): boolean => {
   const { frontMatter } = ticket;
 
-  return frontMatter.kind === 'task' && frontMatter.archived === undefined;
+  return frontMatter.kind === 'instruction' && frontMatter.archived === undefined;
 };
 
-const isOpenSlice = (ticket: TaskTicket): boolean => {
+const isOpenSlice = (ticket: InstructionTicket): boolean => {
   const { frontMatter } = ticket;
 
   return (
@@ -153,7 +153,7 @@ const isOpenSlice = (ticket: TaskTicket): boolean => {
   );
 };
 
-const sliceNeedsOf = <Ticket extends TaskTicket>(
+const sliceNeedsOf = <Ticket extends InstructionTicket>(
   slice: Ticket,
   index: SliceIndex,
   now: Date,
@@ -178,14 +178,17 @@ const sliceNeedsOf = <Ticket extends TaskTicket>(
       reason: 'flagged',
       since,
       ageSeconds,
-      openTasks: derived.openTasks,
+      openInstructions: derived.openInstructions,
     });
   }
 
   return items;
 };
 
-const byOldest = <Ticket extends TaskTicket>(a: NeedItem<Ticket>, b: NeedItem<Ticket>): number => {
+const byOldest = <Ticket extends InstructionTicket>(
+  a: NeedItem<Ticket>,
+  b: NeedItem<Ticket>,
+): number => {
   const bySince = new Date(a.since).getTime() - new Date(b.since).getTime();
 
   if (bySince !== 0) {
@@ -195,7 +198,7 @@ const byOldest = <Ticket extends TaskTicket>(a: NeedItem<Ticket>, b: NeedItem<Ti
   return a.ticket.id.localeCompare(b.ticket.id);
 };
 
-export const selectNeeds = <Ticket extends TaskTicket>(
+export const selectNeeds = <Ticket extends InstructionTicket>(
   tickets: Ticket[],
   facts: Fact[],
   now: Date,
@@ -203,7 +206,7 @@ export const selectNeeds = <Ticket extends TaskTicket>(
   const index = buildSliceIndex(tickets, facts);
   const { factsByTicket } = index;
 
-  const taskItems = tickets
+  const instructionItems = tickets
     .filter(isConsidered)
     .flatMap((ticket) => needsOf(ticket, factsByTicket.get(ticket.id) ?? [], now));
 
@@ -215,5 +218,5 @@ export const selectNeeds = <Ticket extends TaskTicket>(
     .filter((ticket) => ticket.frontMatter.archived === undefined)
     .flatMap((ticket) => blockedFindingsOf(ticket, factsByTicket.get(ticket.id) ?? [], now));
 
-  return [...taskItems, ...sliceItems, ...findingItems].toSorted(byOldest);
+  return [...instructionItems, ...sliceItems, ...findingItems].toSorted(byOldest);
 };

@@ -17,7 +17,7 @@ const hasUniqueIds = (criteria: { id: string }[]): boolean =>
 
 export const ticketFrontMatterSchema = z
   .strictObject({
-    kind: z.enum(['plan', 'slice', 'task', 'issue']),
+    kind: z.enum(['plan', 'slice', 'instruction', 'issue']),
     title: z.string().min(1),
     project: projectNameSchema,
     parent: ticketIdSchema.optional(),
@@ -61,8 +61,8 @@ export const ticketFrontMatterSchema = z
     (frontMatter) =>
       frontMatter.covers === undefined ||
       frontMatter.kind === 'slice' ||
-      frontMatter.kind === 'task',
-    { message: 'Covers is only valid for a slice or a task.', path: ['covers'] },
+      frontMatter.kind === 'instruction',
+    { message: 'Covers is only valid for a slice or an instruction.', path: ['covers'] },
   );
 
 export type TicketFrontMatter = z.output<typeof ticketFrontMatterSchema>;

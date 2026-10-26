@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { deriveTaskState } from './fact.ts';
+import { deriveInstructionState } from './fact.ts';
 import { makeFact, makeTicket, now } from './factHarness.ts';
 
 const ticket = makeTicket('3469');
@@ -13,13 +13,13 @@ const liveClaim = {
   sessionLog: '/tmp/log',
 };
 
-describe('deriveTaskState', () => {
+describe('deriveInstructionState', () => {
   it('is open with no facts', () => {
-    expect(deriveTaskState(ticket, [], now)).toEqual({ state: 'open', claim: null });
+    expect(deriveInstructionState(ticket, [], now)).toEqual({ state: 'open', claim: null });
   });
 
   it('is active with the claim while the lease runs', () => {
-    const result = deriveTaskState(ticket, [makeFact('3469', liveClaim)], now);
+    const result = deriveInstructionState(ticket, [makeFact('3469', liveClaim)], now);
 
     expect(result).toEqual({
       state: 'active',
@@ -35,7 +35,7 @@ describe('deriveTaskState', () => {
   it('stays open when the lease ended before now', () => {
     const stale = makeFact('3469', { ...liveClaim, leaseEnd: '2026-10-20T11:59:59.000Z' });
 
-    expect(deriveTaskState(ticket, [stale], now)).toEqual({ state: 'open', claim: null });
+    expect(deriveInstructionState(ticket, [stale], now)).toEqual({ state: 'open', claim: null });
   });
 
   it('is open after a release', () => {
@@ -44,7 +44,7 @@ describe('deriveTaskState', () => {
       makeFact('3469', { kind: 'release', holder: 'agent' }),
     ];
 
-    expect(deriveTaskState(ticket, facts, now).state).toBe('open');
+    expect(deriveInstructionState(ticket, facts, now).state).toBe('open');
   });
 
   it('is active again when a claim follows a release', () => {
@@ -53,7 +53,7 @@ describe('deriveTaskState', () => {
       makeFact('3469', liveClaim),
     ];
 
-    expect(deriveTaskState(ticket, facts, now).state).toBe('active');
+    expect(deriveInstructionState(ticket, facts, now).state).toBe('active');
   });
 
   it('is submitted when a submitted log is newer than the claim', () => {
@@ -62,7 +62,7 @@ describe('deriveTaskState', () => {
       makeFact('3469', { kind: 'log', type: 'submitted', text: 'ready' }),
     ];
 
-    expect(deriveTaskState(ticket, facts, now)).toEqual({ state: 'submitted', claim: null });
+    expect(deriveInstructionState(ticket, facts, now)).toEqual({ state: 'submitted', claim: null });
   });
 
   it('is active when a claim is newer than the submitted log', () => {
@@ -71,13 +71,13 @@ describe('deriveTaskState', () => {
       makeFact('3469', liveClaim),
     ];
 
-    expect(deriveTaskState(ticket, facts, now).state).toBe('active');
+    expect(deriveInstructionState(ticket, facts, now).state).toBe('active');
   });
 
   it('is submitted when a submitted log has no claim', () => {
     const facts = [makeFact('3469', { kind: 'log', type: 'submitted', text: 'ready' })];
 
-    expect(deriveTaskState(ticket, facts, now).state).toBe('submitted');
+    expect(deriveInstructionState(ticket, facts, now).state).toBe('submitted');
   });
 
   it('is done after an accept', () => {
@@ -86,21 +86,23 @@ describe('deriveTaskState', () => {
       makeFact('3469', { kind: 'accept' }),
     ];
 
-    expect(deriveTaskState(ticket, facts, now).state).toBe('done');
+    expect(deriveInstructionState(ticket, facts, now).state).toBe('done');
   });
 
   it('ignores facts of other tickets', () => {
-    expect(deriveTaskState(ticket, [makeFact('3478', { kind: 'accept' })], now).state).toBe('open');
+    expect(deriveInstructionState(ticket, [makeFact('3478', { kind: 'accept' })], now).state).toBe(
+      'open',
+    );
   });
 
-  it('follows the front matter for canceled and draft tasks, even with an accept', () => {
+  it('follows the front matter for canceled and draft instructions, even with an accept', () => {
     const accept = [makeFact('3469', { kind: 'accept' })];
 
-    expect(deriveTaskState(makeTicket('3469', { status: 'canceled' }), accept, now).state).toBe(
-      'canceled',
-    );
+    expect(
+      deriveInstructionState(makeTicket('3469', { status: 'canceled' }), accept, now).state,
+    ).toBe('canceled');
 
-    expect(deriveTaskState(makeTicket('3469', { status: 'draft' }), accept, now).state).toBe(
+    expect(deriveInstructionState(makeTicket('3469', { status: 'draft' }), accept, now).state).toBe(
       'draft',
     );
   });

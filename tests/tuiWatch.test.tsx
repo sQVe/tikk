@@ -12,7 +12,7 @@ import { createEffects, watchStore } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
 import { startTerminal } from '../src/terminal.tsx';
 import type { TerminalEffects } from '../src/terminal.tsx';
-import { createCliFixture, waitForBackgroundSync } from './cliFixture.ts';
+import { createCliFixture, waitForBackgroundSync, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 import { createFakeGh } from './fakeGh.ts';
 import type { FakeGh } from './fakeGh.ts';
@@ -31,6 +31,7 @@ Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 const prUrl = 'https://github.com/acme/app/pull/7';
 
 let fixture: CliFixture | undefined;
+let parentSlice = '';
 let started: Started | undefined;
 let gh: FakeGh | undefined;
 
@@ -182,6 +183,7 @@ beforeEach(async () => {
   gh = await createFakeGh({ state: 'OPEN', base: 'main', head: 'head1', mergeCommit: null });
   fixture = await createCliFixture('tikk-tui-watch-', { pathPrefix: gh.directory });
   await cli().runChecked(['init']);
+  parentSlice = await createParentSlice(cli());
 });
 
 afterEach(async () => {
@@ -192,7 +194,14 @@ afterEach(async () => {
 });
 
 it('shows a fact that another process writes without a restart', async () => {
-  const created = await cli().runJson<{ id: string }>(['new', 'task', 'Asked task']);
+  const created = await cli().runJson<{ id: string }>([
+    'new',
+    'instruction',
+    'Asked instruction',
+    '--parent',
+    parentSlice,
+  ]);
+
   const effects = createEffects(cli().storePath, join(cli().home, 'index.db'));
 
   started = await start(effects);

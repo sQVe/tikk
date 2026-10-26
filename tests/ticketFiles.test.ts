@@ -61,10 +61,25 @@ const runJson = async <Shape>(args: string[]): Promise<Shape> => {
   return JSON.parse(result.stdout) as Shape;
 };
 
-const createTask = async (title: string): Promise<ShownTicket> => {
+const createSliceIn = async (project?: string): Promise<string> => {
+  const created = await runJson<{ id: string }>([
+    'new',
+    'slice',
+    'Parent',
+    '--status',
+    'draft',
+    ...(project === undefined ? [] : ['--project', project]),
+  ]);
+
+  return created.id;
+};
+
+const createInstruction = async (title: string): Promise<ShownTicket> => {
   await run(['init', '--json']);
 
-  return runJson<ShownTicket>(['new', 'task', title]);
+  const parent = await createSliceIn();
+
+  return runJson<ShownTicket>(['new', 'instruction', title, '--parent', parent]);
 };
 
 const errorCodeOf = (result: RunResult): unknown => {
@@ -84,7 +99,7 @@ afterEach(async () => {
 });
 
 it('shows the new title after a file is edited on disk', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const text = await readFile(created.path, 'utf8');
 
   await writeFile(created.path, text.replace('title: First', 'title: Renamed'));
@@ -95,7 +110,7 @@ it('shows the new title after a file is edited on disk', async () => {
 });
 
 it('lists the same tickets after the cache database is deleted', async () => {
-  await createTask('First');
+  await createInstruction('First');
   await runJson<ShownTicket>(['new', 'issue', 'Second']);
 
   const before = await runJson<Listing>(['ls']);
@@ -104,12 +119,12 @@ it('lists the same tickets after the cache database is deleted', async () => {
 
   const after = await runJson<Listing>(['ls']);
 
-  expect(before.tickets).toHaveLength(2);
+  expect(before.tickets).toHaveLength(3);
   expect(after).toEqual(before);
 });
 
 it('refuses an edit with an old hash and leaves the file unchanged', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const text = await readFile(created.path, 'utf8');
 
   await writeFile(created.path, text.replace('title: First', 'title: Changed'));
@@ -124,7 +139,7 @@ it('refuses an edit with an old hash and leaves the file unchanged', async () =>
 });
 
 it('edits the title and status when the hash matches', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
 
   const edited = await runJson<ShownTicket>([
     'edit',
@@ -145,7 +160,7 @@ it('edits the title and status when the hash matches', async () => {
 });
 
 it('keeps the last good state for a file with broken front matter', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
 
   await writeFile(created.path, '---\nkind: [\n---\nBroken\n');
 
@@ -160,7 +175,7 @@ it('keeps the last good state for a file with broken front matter', async () => 
 });
 
 it('shows the parse error of a broken file in plain show and after a human edit', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const editor = join(home, 'break.sh');
 
   await writeFile(editor, '#!/bin/sh\nprintf "garbage\\n" > "$1"\n');
@@ -176,7 +191,7 @@ it('shows the parse error of a broken file in plain show and after a human edit'
 });
 
 it('refuses a JSON edit of a file with a parse error', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
 
   await writeFile(created.path, '---\nkind: [\n---\nBroken\n');
 
@@ -199,7 +214,7 @@ it('exits 1 with a JSON error for each command before init', async () => {
   const commands = [
     ['show', 'tikk-3333'],
     ['ls'],
-    ['new', 'task', 'First'],
+    ['new', 'instruction', 'First'],
     ['edit', 'tikk-3333', '--hash', 'x', '--title', 'X'],
   ];
 
@@ -212,7 +227,7 @@ it('exits 1 with a JSON error for each command before init', async () => {
 });
 
 it('exits 1 for a JSON edit with no field flag without opening an editor', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const marker = join(home, 'editor-ran');
   const editor = join(home, 'editor.sh');
 
@@ -228,7 +243,7 @@ it('exits 1 for a JSON edit with no field flag without opening an editor', async
 });
 
 it('opens $EDITOR on the file for a human edit and shows the change', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const editor = join(home, 'editor.sh');
 
   await writeFile(editor, `#!/bin/sh\nsed -i 's/title: First/title: Edited/' "$1"\n`, {
@@ -284,7 +299,7 @@ it('creates a ticket with a body from a file and hides archived tickets in ls', 
 });
 
 it('exits 1 with a storeError when the cache folder cannot be created', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const before = await readFile(created.path);
 
   await rm(join(home, '.cache'), { recursive: true, force: true });
@@ -315,7 +330,9 @@ it('repairs a ticket that never parsed through $EDITOR and refuses a JSON edit',
 
   const path = join(home, 'store', 'tickets', 'tikk', 'tikk-3a4b-broken.md');
   const editor = join(home, 'editor.sh');
-  const repaired = '---\\nkind: task\\ntitle: Repaired\\nproject: tikk\\nstatus: open\\n---\\n';
+
+  const repaired =
+    '---\\nkind: instruction\\ntitle: Repaired\\nproject: tikk\\nstatus: open\\n---\\n';
 
   await Bun.write(path, '---\nkind: [\n---\nBroken\n');
   await writeFile(editor, `#!/bin/sh\nprintf '%b' '${repaired}' > "$1"\n`, { mode: 0o755 });
@@ -333,12 +350,16 @@ it('repairs a ticket that never parsed through $EDITOR and refuses a JSON edit',
 it('creates a ticket in the project named by --project', async () => {
   await run(['init', '--json']);
 
+  const parent = await createSliceIn('other');
+
   const created = await runJson<ShownTicket & { project: string }>([
     'new',
-    'task',
+    'instruction',
     'Elsewhere',
     '--project',
     'other',
+    '--parent',
+    parent,
   ]);
 
   expect(created.project).toBe('other');
@@ -348,12 +369,36 @@ it('creates a ticket in the project named by --project', async () => {
 
 it('lists only the tickets of the project named by --project', async () => {
   await run(['init', '--json']);
-  await runJson<ShownTicket>(['new', 'task', 'Here', '--project', 'tikk']);
 
-  const other = await runJson<ShownTicket>(['new', 'task', 'There', '--project', 'other']);
+  const tikkSlice = await createSliceIn('tikk');
+  const otherSlice = await createSliceIn('other');
+
+  const here = await runJson<ShownTicket>([
+    'new',
+    'instruction',
+    'Here',
+    '--project',
+    'tikk',
+    '--parent',
+    tikkSlice,
+  ]);
+
+  const other = await runJson<ShownTicket>([
+    'new',
+    'instruction',
+    'There',
+    '--project',
+    'other',
+    '--parent',
+    otherSlice,
+  ]);
+
   const listing = await runJson<Listing>(['ls', '--project', 'other']);
+  const listedIds = listing.tickets.map((ticket) => ticket.id);
 
-  expect(listing.tickets.map((ticket) => ticket.id)).toEqual([other.id]);
+  expect(listedIds).toContain(otherSlice);
+  expect(listedIds).toContain(other.id);
+  expect(listedIds).not.toContain(here.id);
 });
 
 it('refuses init and keeps tikk.json when it cannot be read', async () => {
@@ -375,7 +420,7 @@ it('refuses init and keeps tikk.json when it cannot be read', async () => {
 });
 
 it('rebuilds a cache database with a damaged page and lists the same tickets', async () => {
-  await createTask('Keep me');
+  await createInstruction('Keep me');
 
   const before = await runJson<Listing>(['ls']);
   const databasePath = join(home, '.cache', 'tikk', 'index.db');
@@ -398,21 +443,22 @@ it('rebuilds a cache database with a damaged page and lists the same tickets', a
 });
 
 it('ignores stray files in tickets and in a project folder', async () => {
-  const created = await createTask('Keep me');
+  const created = await createInstruction('Keep me');
 
   await writeFile(join(home, 'store', 'tickets', '.DS_Store'), 'metadata');
   await writeFile(join(dirname(created.path), '.DS_Store'), 'metadata');
 
   const listing = await runJson<Listing>(['ls']);
 
-  expect(listing.tickets.map((ticket) => ticket.id)).toEqual([created.id]);
+  expect(listing.tickets.map((ticket) => ticket.id)).toContain(created.id);
+  expect(listing.tickets).toHaveLength(2);
   expect(listing.errors).toEqual([]);
 });
 
 it.each(["blocked_by = '[x'", "mtime_ms = 'not a number'", 'title = NULL'])(
   'rebuilds a cache row that passes the integrity check but has %s',
   async (damage) => {
-    await createTask('Keep me');
+    await createInstruction('Keep me');
 
     const before = await runJson<Listing>(['ls']);
     const database = new Database(join(home, '.cache', 'tikk', 'index.db'));
@@ -428,7 +474,7 @@ it.each(["blocked_by = '[x'", "mtime_ms = 'not a number'", 'title = NULL'])(
 );
 
 it('reads a ticket hand edited with CRLF line endings', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const text = await readFile(created.path, 'utf8');
 
   await writeFile(
@@ -453,7 +499,7 @@ it('refuses new when the project config cannot be read, and creates no ticket', 
   await Bun.write(config, '{"projects": {"sQVe/tikk": "mapped"}}\n');
   await chmod(config, 0o000);
 
-  const created = await run(['new', 'task', 'Somewhere', '--json']);
+  const created = await run(['new', 'instruction', 'Somewhere', '--json']);
   const listing = await runJson<Listing>(['ls']);
 
   expect(created.exitCode).toBe(1);
@@ -461,7 +507,7 @@ it('refuses new when the project config cannot be read, and creates no ticket', 
 });
 
 it('rebuilds a cache that lost its tickets table', async () => {
-  await createTask('Keep me');
+  await createInstruction('Keep me');
 
   const before = await runJson<Listing>(['ls']);
   const database = new Database(join(home, '.cache', 'tikk', 'index.db'));
@@ -476,10 +522,10 @@ it('rebuilds a cache that lost its tickets table', async () => {
 });
 
 it('repairs a former duplicate whose surviving file breaks', async () => {
-  const created = await createTask('First');
+  const created = await createInstruction('First');
   const copy = join(dirname(created.path), `${created.id}-zcopy.md`);
   const editor = join(home, 'editor.sh');
-  const repaired = '---\\nkind: task\\ntitle: Fixed\\nproject: tikk\\nstatus: open\\n---\\n';
+  const repaired = '---\\nkind: instruction\\ntitle: Fixed\\nproject: tikk\\nstatus: open\\n---\\n';
 
   await writeFile(copy, await readFile(created.path));
   await run(['ls', '--json']);
@@ -526,8 +572,10 @@ it('leaves no ticket file when the write fails after the file was created', asyn
       'run',
       entryPath,
       'new',
-      'task',
+      'slice',
       'Large',
+      '--status',
+      'draft',
       '--body-file',
       bodyPath,
       '--json',
@@ -542,9 +590,12 @@ it('leaves no ticket file when the write fails after the file was created', asyn
   );
 
   const exitCode = await limited.exited;
+  const output = await new Response(limited.stdout).text();
+  const error = (JSON.parse(output) as { error: { code: string } }).error;
   const listing = await runJson<Listing>(['ls']);
 
   expect(exitCode).toBe(1);
+  expect(error.code).toBe('storeError');
   expect(listing.tickets).toEqual([]);
   expect(listing.errors).toEqual([]);
 });

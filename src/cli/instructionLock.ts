@@ -4,8 +4,8 @@ import { invalidArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { findTicket } from './ticketView.ts';
 
-export interface LockedTask {
-  task: CliTicket;
+export interface LockedInstruction {
+  instruction: CliTicket;
   facts: Fact[];
   now: Date;
 }
@@ -14,7 +14,7 @@ type FileErrors = 'refuse' | 'allow';
 
 interface LockPolicy {
   fileErrors: FileErrors;
-  requireTask: boolean;
+  requireInstruction: boolean;
 }
 
 export const conflict = (message: string): { ok: false; reason: CliFailure } => ({
@@ -27,7 +27,7 @@ export const fileErrorFailure = (ticket: CliTicket): { ok: false; reason: CliFai
   reason: { code: 'parseError', message: `${ticket.path} has an error: ${ticket.error}` },
 });
 
-export const refuseFileErrors: LockPolicy = { fileErrors: 'refuse', requireTask: false };
+export const refuseFileErrors: LockPolicy = { fileErrors: 'refuse', requireInstruction: false };
 
 const loadTicket = async (
   input: CommandInput,
@@ -48,9 +48,9 @@ const loadTicket = async (
 
   const ticket = found.value;
 
-  if (policy.requireTask && ticket.frontMatter.kind !== 'task') {
+  if (policy.requireInstruction && ticket.frontMatter.kind !== 'instruction') {
     return invalidArguments(
-      `Ticket ${ticket.id} is not a task: its kind is ${ticket.frontMatter.kind}.`,
+      `Ticket ${ticket.id} is not an instruction: its kind is ${ticket.frontMatter.kind}.`,
     );
   }
 
@@ -113,12 +113,12 @@ export const withLockedTicket = (
     return work(loaded.value);
   });
 
-const loadTask = async (
+const loadInstruction = async (
   input: CommandInput,
   rawId: string,
   fileErrors: FileErrors,
-): Promise<Result<LockedTask, CliFailure>> => {
-  const loaded = await loadTicket(input, rawId, { fileErrors, requireTask: true });
+): Promise<Result<LockedInstruction, CliFailure>> => {
+  const loaded = await loadTicket(input, rawId, { fileErrors, requireInstruction: true });
 
   if (!loaded.ok) {
     return loaded;
@@ -130,17 +130,20 @@ const loadTask = async (
     return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
-  return { ok: true, value: { task: loaded.value, facts: facts.value, now: input.effects.now() } };
+  return {
+    ok: true,
+    value: { instruction: loaded.value, facts: facts.value, now: input.effects.now() },
+  };
 };
 
-export const withLockedTask = (
+export const withLockedInstruction = (
   input: CommandInput,
   rawId: string,
   fileErrors: FileErrors,
-  work: (locked: LockedTask) => Promise<CommandResult>,
+  work: (locked: LockedInstruction) => Promise<CommandResult>,
 ): Promise<CommandResult> =>
   withStoreLock(input, async () => {
-    const loaded = await loadTask(input, rawId, fileErrors);
+    const loaded = await loadInstruction(input, rawId, fileErrors);
 
     if (!loaded.ok) {
       return loaded;
@@ -151,18 +154,18 @@ export const withLockedTask = (
 
 // The fetch runs before the lock because writers wait for the lock only five seconds. The merge runs
 // under the lock, so the checks of the work see claims made on other machines.
-export const withFetchedTask = async (
+export const withFetchedInstruction = async (
   input: CommandInput,
   rawId: string,
   fileErrors: FileErrors,
-  work: (locked: LockedTask) => Promise<CommandResult>,
+  work: (locked: LockedInstruction) => Promise<CommandResult>,
 ): Promise<CommandResult> => {
   await input.effects.fetchRemote();
 
   return withStoreLock(input, async () => {
     await input.effects.mergeFetched();
 
-    const loaded = await loadTask(input, rawId, fileErrors);
+    const loaded = await loadInstruction(input, rawId, fileErrors);
 
     if (!loaded.ok) {
       return loaded;

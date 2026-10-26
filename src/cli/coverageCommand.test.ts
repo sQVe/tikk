@@ -16,7 +16,7 @@ const withCriteria = (id: string, kind: 'plan' | 'slice', parent?: string) => {
   });
 };
 
-it('names the missing slice for a plan gap and the missing task for a slice gap in text', () => {
+it('names the missing slice for a plan gap and the missing instruction for a slice gap in text', () => {
   const fakeSession = makeSession({
     tickets: [withCriteria('demo-3467', 'plan'), withCriteria('demo-4678', 'slice', 'demo-3467')],
   });
@@ -31,6 +31,6 @@ it('names the missing slice for a plan gap and the missing task for a slice gap 
   });
 
   expect(successOf(result).text).toBe(
-    'demo-3467  a  no slice covers it\ndemo-4678  a  no task covers it\n',
+    'demo-3467  a  no slice covers it\ndemo-4678  a  no instruction covers it\n',
   );
 });

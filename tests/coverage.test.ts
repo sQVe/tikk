@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
-import { createCliFixture } from './cliFixture.ts';
+import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 
 interface CoverageReport {
@@ -66,12 +66,27 @@ it('reports a plan criterion that no slice covers and exits 0', async () => {
   expect(report.gaps).not.toContainEqual({ ticket: plan, kind: 'plan', criterion: 'a' });
 });
 
+it('lists a slice criterion that no instruction covers in the --json report', async () => {
+  const plan = await createWithCriteria('plan', 'Plan', []);
+  const slice = await createWithCriteria('slice', 'Slice', ['--parent', plan]);
+
+  await cli().runJson(['new', 'instruction', 'Instruction', '--parent', slice, '--covers', 'a']);
+
+  const result = await cli().run(['coverage', plan, '--json']);
+
+  expect(result.exitCode).toBe(0);
+
+  const report = JSON.parse(result.stdout) as CoverageReport;
+
+  expect(report.gaps).toContainEqual({ ticket: slice, kind: 'slice', criterion: 'b' });
+});
+
 it('reports the gaps of a plan and its own slices, not of other slices', async () => {
   const plan = await createWithCriteria('plan', 'Plan', []);
   const slice = await createWithCriteria('slice', 'Slice', ['--parent', plan, '--covers', 'a']);
   const other = await createWithCriteria('slice', 'Other', []);
 
-  await cli().runJson(['new', 'task', 'Task', '--parent', slice, '--covers', 'a']);
+  await cli().runJson(['new', 'instruction', 'Instruction', '--parent', slice, '--covers', 'a']);
 
   const report = await cli().runJson<CoverageReport>(['coverage', plan]);
 
@@ -80,8 +95,17 @@ it('reports the gaps of a plan and its own slices, not of other slices', async (
   expect(report.gaps.map((gap) => gap.ticket)).not.toContain(other);
 });
 
-it('refuses a task ID with invalidArguments', async () => {
-  const created = await cli().runJson<{ id: string }>(['new', 'task', 'Task']);
+it('refuses an instruction ID with invalidArguments', async () => {
+  const slice = await createParentSlice(cli());
+
+  const created = await cli().runJson<{ id: string }>([
+    'new',
+    'instruction',
+    'Instruction',
+    '--parent',
+    slice,
+  ]);
+
   const result = await cli().run(['coverage', created.id]);
 
   expect(result.exitCode).not.toBe(0);

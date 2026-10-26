@@ -18,7 +18,7 @@ interface NeedViewBase {
 export type NeedView = NeedViewBase &
   (
     | { reason: 'question' | 'submitted' | 'mergedUnverified' }
-    | { reason: 'flagged'; openTasks: TicketId[] }
+    | { reason: 'flagged'; openInstructions: TicketId[] }
     | { reason: 'staleClaim'; holder: string }
     | { reason: 'blockedFinding'; fingerprint: string; claim: string }
   );
@@ -67,9 +67,9 @@ const itemView = (item: NeedItem<CliTicket>): NeedView => {
   }
 
   if (item.reason === 'flagged') {
-    const { openTasks } = item;
+    const { openInstructions } = item;
 
-    return { id, title, reason: item.reason, since, ageSeconds, openTasks, ...parseError };
+    return { id, title, reason: item.reason, since, ageSeconds, openInstructions, ...parseError };
   }
 
   if (item.reason === 'blockedFinding') {
@@ -86,10 +86,10 @@ export const itemSubject = (view: NeedView): string =>
 
 const itemLine = (view: NeedView): string => {
   const line = `${view.id}  ${view.reason}  ${shortAge(view.ageSeconds)}  ${itemSubject(view)}`;
-  const tasks = view.reason === 'flagged' ? `  ${view.openTasks.join(' ')}` : '';
+  const instructions = view.reason === 'flagged' ? `  ${view.openInstructions.join(' ')}` : '';
   const suffix = view.parseError === undefined ? '' : `  parseError ${view.parseError}`;
 
-  return `${line}${tasks}${suffix}\n`;
+  return `${line}${instructions}${suffix}\n`;
 };
 
 export const readNeeds = async (

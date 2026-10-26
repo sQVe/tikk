@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
-import { createCliFixture } from './cliFixture.ts';
+import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 
 interface CheckListing {
@@ -18,6 +18,7 @@ interface NeedsListing {
 }
 
 let fixture: CliFixture | undefined;
+let parentSlice = '';
 
 const cli = (): CliFixture => {
   invariant(fixture !== undefined, 'The CLI fixture should be set up.');
@@ -25,8 +26,14 @@ const cli = (): CliFixture => {
   return fixture;
 };
 
-const createTask = async (): Promise<string> => {
-  const created = await cli().runJson<{ id: string }>(['new', 'task', 'Evidence task']);
+const createInstruction = async (): Promise<string> => {
+  const created = await cli().runJson<{ id: string }>([
+    'new',
+    'instruction',
+    'Evidence instruction',
+    '--parent',
+    parentSlice,
+  ]);
 
   return created.id;
 };
@@ -84,6 +91,7 @@ const factFileCount = async (): Promise<number> => {
 beforeEach(async () => {
   fixture = await createCliFixture('tikk-evidence-');
   await cli().runChecked(['init']);
+  parentSlice = await createParentSlice(cli());
 });
 
 afterEach(async () => {
@@ -91,7 +99,7 @@ afterEach(async () => {
 });
 
 it('marks a check current for its head and stale for another', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
 
   await cli().runJson([
     'check',
@@ -112,7 +120,7 @@ it('marks a check current for its head and stale for another', async () => {
 });
 
 it('marks a check stale for its head when the given change hash differs', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
 
   await cli().runJson([
     'check',
@@ -136,7 +144,7 @@ it('marks a check stale for its head when the given change hash differs', async 
 });
 
 it('stores a check without the credentials of its repository URL', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
   const flags = targetFlags('aaa').with(1, 'https://user:abc123secret@github.com/o/r.git');
 
   const added = await cli().runJson<{ check: { target: { repository: string } } }>([
@@ -161,7 +169,7 @@ it('stores a check without the credentials of its repository URL', async () => {
 });
 
 it('stores a redacted check log by hash', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
   const logFile = join(cli().home, 'check.log');
 
   await Bun.write(logFile, 'all passed\n');
@@ -183,7 +191,7 @@ it('stores a redacted check log by hash', async () => {
 });
 
 it('lists a blocked finding in needs with its fingerprint', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
 
   await addReview(id, await writeFindings('findings.json', ['fp-1']));
 
@@ -208,7 +216,7 @@ it('lists a blocked finding in needs with its fingerprint', async () => {
 });
 
 it('stores a finding reason with its token redacted', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
   const token = `ghp_${'a1B2'.repeat(9)}`;
 
   await addReview(id, await writeFindings('findings.json', ['fp-1']));
@@ -237,7 +245,7 @@ it('stores a finding reason with its token redacted', async () => {
 });
 
 it('marks a finding unchanged when a later review holds its fingerprint', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
   const file = await writeFindings('findings.json', ['fp-1']);
   const first = await addReview(id, file);
   const second = await addReview(id, file);
@@ -250,7 +258,7 @@ it('marks a finding unchanged when a later review holds its fingerprint', async 
 });
 
 it('refuses a status for an unknown fingerprint and appends no fact', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
 
   await addReview(id, await writeFindings('findings.json', ['fp-1']));
 
@@ -275,7 +283,7 @@ it('refuses a status for an unknown fingerprint and appends no fact', async () =
 });
 
 it('lists findings filtered by status', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
 
   await addReview(id, await writeFindings('findings.json', ['fp-1', 'fp-2']));
 
@@ -298,7 +306,7 @@ it('lists findings filtered by status', async () => {
 });
 
 it('lists reviews newest first with a finding count', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
 
   await addReview(id, await writeFindings('one.json', ['fp-1']));
   await addReview(id, await writeFindings('two.json', ['fp-1', 'fp-2']));
@@ -313,7 +321,7 @@ it('lists reviews newest first with a finding count', async () => {
 });
 
 it('refuses a review whose findings share a fingerprint and appends no fact', async () => {
-  const id = await createTask();
+  const id = await createInstruction();
   const file = await writeFindings('duplicates.json', ['fp-1', 'fp-1']);
   const before = await factFileCount();
 

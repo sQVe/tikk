@@ -13,7 +13,7 @@ import {
   ticketText,
 } from '../src/cache/cacheHarness.ts';
 import { makeEffects, makeSession, ticketIdOf } from '../src/cli/cliHarness.ts';
-import { taskClaim } from '../src/cli/taskClaim.ts';
+import { instructionClaim } from '../src/cli/instructionClaim.ts';
 
 let databasePath = '';
 let cleanup = async () => {};
@@ -39,7 +39,7 @@ const claimAgainst = async (claimant: TicketCache, files: CacheFiles) => {
 
   const { effects } = makeEffects({ session: fakeSession });
 
-  const result = await taskClaim({
+  const result = await instructionClaim({
     args: ['tikk-3a4b', '--holder', 'agent'],
     json: true,
     effects,
@@ -49,12 +49,12 @@ const claimAgainst = async (claimant: TicketCache, files: CacheFiles) => {
   return { result, appends: fakeSession.appends };
 };
 
-it('refuses a claim on a task canceled while an older refresh was reading it', async () => {
+it('refuses a claim on an instruction canceled while an older refresh was reading it', async () => {
   using reader = openTestCache(databasePath);
   using claimant = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = ticketPath('tikk-3a4b');
-  const openText = ticketText({ title: 'Task' });
+  const openText = ticketText({ title: 'Instruction' });
   const gate = makeGate();
 
   fake.set(path, openText);
@@ -99,7 +99,7 @@ it('refuses a claim on a task canceled while an older refresh was reading it', a
 
   const { effects } = makeEffects({ session: fakeSession });
 
-  const result = await taskClaim({
+  const result = await instructionClaim({
     args: ['tikk-3a4b', '--holder', 'agent'],
     json: true,
     effects,
@@ -113,12 +113,12 @@ it('refuses a claim on a task canceled while an older refresh was reading it', a
   expect(fakeSession.appends).toEqual([]);
 });
 
-it('refuses a claim on a canceled task when an older refresh writes before the claimant', async () => {
+it('refuses a claim on a canceled instruction when an older refresh writes before the claimant', async () => {
   using reader = openTestCache(databasePath);
   using claimant = openTestCache(databasePath);
   const fake = createFakeFiles();
   const path = ticketPath('tikk-3a4b');
-  const openText = ticketText({ title: 'Task' });
+  const openText = ticketText({ title: 'Instruction' });
   const gate = makeGate();
 
   fake.set(path, openText);
@@ -164,7 +164,7 @@ it('refuses a claim on a canceled task when an older refresh writes before the c
   expect(appends).toEqual([]);
 });
 
-it('refuses a claim on a task another holder claimed when an older fact refresh writes first', async () => {
+it('refuses a claim on an instruction another holder claimed when an older fact refresh writes first', async () => {
   using reader = openTestCache(databasePath);
   using claimant = openTestCache(databasePath);
   const fake = createFakeFiles();
@@ -173,7 +173,7 @@ it('refuses a claim on a task another holder claimed when an older fact refresh 
   const claim = { kind: 'claim', holder: 'other', leaseEnd: '2026-10-21T10:00:00.000Z' };
   const gate = makeGate();
 
-  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'Task' }));
+  fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'Instruction' }));
   fake.setFactFile(path, factText('tikk-3a4b', note));
   await claimant.refresh(fake.files);
   fake.setFactFile(path, factText('tikk-3a4b', note).repeat(2));

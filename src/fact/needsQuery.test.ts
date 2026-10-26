@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { selectNeeds } from './fact.ts';
-import { makeFact, makeTicket, now, taskId } from './factHarness.ts';
+import { makeFact, makeTicket, now, instructionId } from './factHarness.ts';
 
 const reasonsOf = (items: ReturnType<typeof selectNeeds>) =>
   items.map((item) => [item.ticket.id, item.reason]);
@@ -36,7 +36,7 @@ describe('selectNeeds', () => {
     });
 
     expect(reasonsOf(selectNeeds([ticket], [question], now))).toEqual([
-      [taskId('3467'), 'question'],
+      [instructionId('3467'), 'question'],
     ]);
 
     expect(selectNeeds([ticket], [question, answer], now)).toEqual([]);
@@ -73,7 +73,7 @@ describe('selectNeeds', () => {
     expect(item?.ageSeconds).toBe(7200);
   });
 
-  it('lists a submitted task from its submit time until it is accepted', () => {
+  it('lists a submitted instruction from its submit time until it is accepted', () => {
     const ticket = makeTicket('3467');
 
     const submitted = makeFact('3467', {
@@ -132,10 +132,12 @@ describe('selectNeeds', () => {
       makeFact('3469', { kind: 'log', type: 'submitted', text: '' }),
     ];
 
-    expect(reasonsOf(selectNeeds(tickets, facts, now))).toEqual([[taskId('3469'), 'submitted']]);
+    expect(reasonsOf(selectNeeds(tickets, facts, now))).toEqual([
+      [instructionId('3469'), 'submitted'],
+    ]);
   });
 
-  it('orders items oldest first, then by ticket ID, and allows several items per task', () => {
+  it('orders items oldest first, then by ticket ID, and allows several items per instruction', () => {
     const tickets = [makeTicket('3478'), makeTicket('3468'), makeTicket('3469')];
     const at = '2026-10-20T10:00:00.000Z';
 
@@ -152,10 +154,10 @@ describe('selectNeeds', () => {
     ];
 
     expect(reasonsOf(selectNeeds(tickets, facts, now))).toEqual([
-      [taskId('3478'), 'submitted'],
-      [taskId('3469'), 'question'],
-      [taskId('3478'), 'question'],
-      [taskId('3468'), 'question'],
+      [instructionId('3478'), 'submitted'],
+      [instructionId('3469'), 'question'],
+      [instructionId('3478'), 'question'],
+      [instructionId('3468'), 'question'],
     ]);
   });
 
@@ -295,26 +297,30 @@ describe('selectNeeds for slices', () => {
     });
   });
 
-  it('lists a merged slice with an open task as flagged with that task', () => {
-    const task = makeTicket('3478', { parent: '3469' });
-    const items = selectNeeds([slice, task], [merged, audit], now);
+  it('lists a merged slice with an open instruction as flagged with that instruction', () => {
+    const instruction = makeTicket('3478', { parent: '3469' });
+    const items = selectNeeds([slice, instruction], [merged, audit], now);
 
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ reason: 'flagged', openTasks: [task.id] });
+    expect(items[0]).toMatchObject({ reason: 'flagged', openInstructions: [instruction.id] });
   });
 
-  it('still flags a merged slice whose open task is archived', () => {
-    const task = makeTicket('3478', { parent: '3469', archived: '2026-10-01' });
-    const items = selectNeeds([slice, task], [merged, audit], now);
+  it('still flags a merged slice whose open instruction is archived', () => {
+    const instruction = makeTicket('3478', { parent: '3469', archived: '2026-10-01' });
+    const items = selectNeeds([slice, instruction], [merged, audit], now);
 
     expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({ reason: 'flagged', openTasks: [task.id] });
+    expect(items[0]).toMatchObject({ reason: 'flagged', openInstructions: [instruction.id] });
   });
 
-  it('does not flag a merged slice because of an archived canceled task', () => {
-    const task = makeTicket('3478', { parent: '3469', archived: '2026-10-01', status: 'canceled' });
+  it('does not flag a merged slice because of an archived canceled instruction', () => {
+    const instruction = makeTicket('3478', {
+      parent: '3469',
+      archived: '2026-10-01',
+      status: 'canceled',
+    });
 
-    expect(selectNeeds([slice, task], [merged, audit], now)).toEqual([]);
+    expect(selectNeeds([slice, instruction], [merged, audit], now)).toEqual([]);
   });
 
   it('leaves out a done slice', () => {

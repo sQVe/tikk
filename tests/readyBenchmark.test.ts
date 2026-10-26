@@ -7,7 +7,7 @@ import type { CliFixture } from './cliFixture.ts';
 
 const idAlphabet = '346789abcdefghijkmnpqrtwxyz';
 const ticketCount = 2000;
-const factsPerTask = 10;
+const factsPerInstruction = 10;
 const runsPerCommand = 3;
 const limitMilliseconds = 200;
 
@@ -45,24 +45,32 @@ const ticketIdAt = (index: number): string => {
   return `bench-${suffix}`;
 };
 
-// Every tenth task is blocked by the task before it, so the ready rule has blockers to resolve.
+// Every instruction needs a slice parent. The slice has the ID after the last instruction.
+const parentSliceId = ticketIdAt(ticketCount);
+
+const sliceText = `---\nkind: slice\ntitle: Parent\nproject: bench\nstatus: draft\n---\n`;
+
+// Every tenth instruction is blocked by the instruction before it, so the ready rule has blockers to resolve.
 const ticketText = (index: number): string => {
   const blockedBy = index % 10 === 9 ? `\n  - ${ticketIdAt(index - 1)}` : ' []';
 
-  return `---\nkind: task\ntitle: Task ${index}\nproject: bench\nblockedBy:${blockedBy}\nstatus: open\n---\nBody ${index}\n`;
+  return `---\nkind: instruction\ntitle: Instruction ${index}\nproject: bench\nparent: ${parentSliceId}\nblockedBy:${blockedBy}\nstatus: open\n---\nBody ${index}\n`;
 };
 
 const writeTickets = async (): Promise<void> => {
   const folder = join(cli().storePath, 'tickets', 'bench');
 
-  const writes = Array.from({ length: ticketCount }, (_, index) =>
-    Bun.write(join(folder, `${ticketIdAt(index)}-task-${index}.md`), ticketText(index)),
-  );
+  const writes = [
+    Bun.write(join(folder, `${parentSliceId}-parent.md`), sliceText),
+    ...Array.from({ length: ticketCount }, (_, index) =>
+      Bun.write(join(folder, `${ticketIdAt(index)}-instruction-${index}.md`), ticketText(index)),
+    ),
+  ];
 
   await Promise.all(writes);
 };
 
-// Each task has an old claim and its release, then progress notes. Every task stays open, so the
+// Each instruction has an old claim and its release, then progress notes. Every instruction stays open, so the
 // ready rule reads the whole history.
 const factFields = (index: number, step: number): Record<string, unknown> => {
   if (step === 0) {
@@ -73,15 +81,17 @@ const factFields = (index: number, step: number): Record<string, unknown> => {
     return { kind: 'release', holder: 'old' };
   }
 
-  return { kind: 'log', type: 'progress', text: `Note ${step} of task ${index}` };
+  return { kind: 'log', type: 'progress', text: `Note ${step} of instruction ${index}` };
 };
 
 const writeFacts = async (): Promise<void> => {
   const lines: string[] = [];
 
   for (let index = 0; index < ticketCount; index += 1) {
-    for (let step = 0; step < factsPerTask; step += 1) {
-      const at = new Date(Date.UTC(2026, 9, 1, 0, 0, 0, index * factsPerTask + step)).toISOString();
+    for (let step = 0; step < factsPerInstruction; step += 1) {
+      const at = new Date(
+        Date.UTC(2026, 9, 1, 0, 0, 0, index * factsPerInstruction + step),
+      ).toISOString();
 
       lines.push(
         JSON.stringify({

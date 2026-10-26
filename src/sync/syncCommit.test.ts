@@ -17,7 +17,9 @@ interface StrictOptions {
 
 const root = '/store';
 const now = 100_000;
-const validTicket = '---\nkind: task\ntitle: Valid\nproject: demo\nstatus: open\n---\nBody\n';
+
+const validTicket =
+  '---\nkind: instruction\ntitle: Valid\nproject: demo\nstatus: open\n---\nBody\n';
 
 const listing =
   (deleted: string[], changed: string[]) =>

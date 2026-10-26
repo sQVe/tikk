@@ -5,7 +5,7 @@ import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, stringValue } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput } from './cliEffects.ts';
-import { readTarget, requireValue } from './taskCommand.ts';
+import { readTarget, requireValue } from './instructionCommand.ts';
 import { findTicket } from './ticketView.ts';
 
 export interface EvidenceTarget {

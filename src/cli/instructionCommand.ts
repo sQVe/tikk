@@ -1,15 +1,15 @@
 import type { ParseArgsOptionsConfig } from 'node:util';
 
-import { deriveTaskState } from '../fact/fact.ts';
+import { deriveInstructionState } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
-import { conflict } from './taskLock.ts';
-import type { LockedTask } from './taskLock.ts';
+import { conflict } from './instructionLock.ts';
+import type { LockedInstruction } from './instructionLock.ts';
 import { checkSessionTree } from './ticketStatus.ts';
-import { storeFailure, taskOutput } from './ticketView.ts';
+import { storeFailure, instructionOutput } from './ticketView.ts';
 
 interface Target {
   rawId: string;
@@ -52,7 +52,7 @@ export const requireValue = (
 
 export const appendAndShow = async (
   input: CommandInput,
-  locked: LockedTask,
+  locked: LockedInstruction,
   fact: Fact,
 ): Promise<CommandResult> => {
   const appended = await input.session.appendFact(fact.machine, fact);
@@ -63,23 +63,29 @@ export const appendAndShow = async (
     return kind === 'invalid' ? invalidArguments(message) : storeFailure(message);
   }
 
-  const { state, claim } = deriveTaskState(locked.task, [...locked.facts, fact], locked.now);
+  const { state, claim } = deriveInstructionState(
+    locked.instruction,
+    [...locked.facts, fact],
+    locked.now,
+  );
 
-  return taskOutput(locked.task, state, claim);
+  return instructionOutput(locked.instruction, state, claim);
 };
 
 export const requireHolder = (
-  locked: LockedTask,
+  locked: LockedInstruction,
   holder: string,
 ): Result<undefined, CliFailure> => {
-  const { state, claim } = deriveTaskState(locked.task, locked.facts, locked.now);
+  const { state, claim } = deriveInstructionState(locked.instruction, locked.facts, locked.now);
 
   if (claim === null) {
-    return conflict(`Task ${locked.task.id} is ${state}, not active.`);
+    return conflict(`Instruction ${locked.instruction.id} is ${state}, not active.`);
   }
 
   if (claim.holder !== holder) {
-    return conflict(`Task ${locked.task.id} is held by ${claim.holder} until ${claim.leaseEnd}.`);
+    return conflict(
+      `Instruction ${locked.instruction.id} is held by ${claim.holder} until ${claim.leaseEnd}.`,
+    );
   }
 
   return { ok: true, value: undefined };
@@ -87,12 +93,12 @@ export const requireHolder = (
 
 export const checkTree = (
   input: CommandInput,
-  locked: LockedTask,
+  locked: LockedInstruction,
   forced: string | undefined,
 ): Result<undefined, CliFailure> => {
   if (forced !== undefined) {
     return { ok: true, value: undefined };
   }
 
-  return checkSessionTree(input.session, locked.task.frontMatter);
+  return checkSessionTree(input.session, locked.instruction.frontMatter);
 };

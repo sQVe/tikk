@@ -1,6 +1,13 @@
 import type { Fact } from '../fact/fact.ts';
 import type { CliEffects, CliSession, CommandInput, CommandResult } from './cliEffects.ts';
-import { makeEffects, makeFact, makeSession, makeTicket, ticketIdOf } from './cliHarness.ts';
+import {
+  makeEffects,
+  makeFact,
+  makeKindTicket,
+  makeSession,
+  makeTicket,
+  ticketIdOf,
+} from './cliHarness.ts';
 import type { FakeSession } from './cliHarness.ts';
 
 export type Command = (input: CommandInput) => Promise<CommandResult>;
@@ -19,7 +26,12 @@ interface SideEffects {
   lockHeld: boolean;
 }
 
-export const task = makeTicket('demo-3467');
+export const parentSlice = makeKindTicket('demo-4789', 'slice');
+
+export const instruction = makeTicket('demo-3467', {
+  frontMatter: { ...makeTicket('demo-3467').frontMatter, parent: ticketIdOf('demo-4789') },
+});
+
 const activeLease = '2026-10-20T13:00:00.000Z';
 
 export const claimBy = (holder: string): Fact =>
@@ -45,7 +57,7 @@ export const run = async (
   options: RunOptions = {},
 ): Promise<{ fakeSession: FakeSession; result: CommandResult }> => {
   const fakeSession = makeSession({
-    tickets: options.tickets ?? [task],
+    tickets: options.tickets ?? [parentSlice, instruction],
     facts: options.facts ?? [],
     ...options.session,
   });
@@ -71,20 +83,20 @@ export const sideEffectsOf = (fakeSession: FakeSession): SideEffects => ({
 });
 
 export const orphan = (): ReturnType<typeof makeTicket> => ({
-  ...task,
+  ...instruction,
   frontMatter: {
-    ...task.frontMatter,
+    ...instruction.frontMatter,
     parent: ticketIdOf('demo-4789'),
     blockedBy: [ticketIdOf('demo-6789')],
   },
 });
 
 export const parentOnly = (): ReturnType<typeof makeTicket> => ({
-  ...task,
-  frontMatter: { ...task.frontMatter, parent: ticketIdOf('demo-4789') },
+  ...instruction,
+  frontMatter: { ...instruction.frontMatter, parent: ticketIdOf('demo-4789') },
 });
 
 export const blockedOnly = (): ReturnType<typeof makeTicket> => ({
-  ...task,
-  frontMatter: { ...task.frontMatter, blockedBy: [ticketIdOf('demo-6789')] },
+  ...instruction,
+  frontMatter: { ...instruction.frontMatter, blockedBy: [ticketIdOf('demo-6789')] },
 });

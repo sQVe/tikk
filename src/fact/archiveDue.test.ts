@@ -101,10 +101,10 @@ it('asks for a status fact when the only status fact names another status', () =
   });
 });
 
-it('never archives an open plan or a stand-alone task that was not accepted', () => {
+it('never archives an open plan or a stand-alone instruction that was not accepted', () => {
   const tickets = [
     ticketOf('demo-3467', { status: 'open' }),
-    ticketOf('demo-4789', { kind: 'task', status: 'open' }),
+    ticketOf('demo-4789', { kind: 'instruction', status: 'open' }),
   ];
 
   const facts = [
@@ -138,9 +138,9 @@ it('leaves a canceled slice of an open plan to its plan', () => {
   expect(dueOf(tickets, facts)).toEqual({ date: '2026-10-20', archive: [], statusFacts: [] });
 });
 
-it('treats an accept fact as a finish only for an open task', () => {
+it('treats an accept fact as a finish only for an open instruction', () => {
   const tickets = [
-    ticketOf('demo-3467', { kind: 'task', status: 'draft' }),
+    ticketOf('demo-3467', { kind: 'instruction', status: 'draft' }),
     ticketOf('demo-4789', { kind: 'issue', status: 'open' }),
   ];
 

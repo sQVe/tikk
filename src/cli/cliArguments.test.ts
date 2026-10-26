@@ -11,13 +11,13 @@ import {
 import { makeEffects } from './cliHarness.ts';
 
 it('parses options, positionals, and the json flag', () => {
-  const parsed = parseCommandArguments(['task', 'Title', '--json', '--name', 'value'], {
+  const parsed = parseCommandArguments(['instruction', 'Title', '--json', '--name', 'value'], {
     name: { type: 'string' },
   });
 
   expect(parsed).toEqual({
     ok: true,
-    value: { values: { json: true, name: 'value' }, positionals: ['task', 'Title'] },
+    value: { values: { json: true, name: 'value' }, positionals: ['instruction', 'Title'] },
   });
 });
 

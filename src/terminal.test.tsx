@@ -25,7 +25,7 @@ const openSetups: Setup[] = [];
 
 const needView: NeedView = {
   id: 'demo-3467' as NeedView['id'],
-  title: 'Asked task',
+  title: 'Asked instruction',
   reason: 'question',
   since: '2026-10-20T11:00:00.000Z',
   ageSeconds: 60,
@@ -178,7 +178,7 @@ it('shows the home view on the open renderer', async () => {
     await setup.renderOnce();
   });
 
-  expect(setup.captureCharFrame()).toContain('Asked task');
+  expect(setup.captureCharFrame()).toContain('Asked instruction');
 });
 
 it('runs one shutdown when q is pressed', async () => {

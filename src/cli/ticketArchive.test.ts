@@ -123,12 +123,12 @@ it('archives a ticket and its descendants with today and skips archived ones', a
   const plan = ticketOf('demo-3467', 'plan', 'open');
   const slice = ticketOf('demo-4789', 'slice', 'open', { parent: ticketIdOf('demo-3467') });
 
-  const archivedTask = ticketOf('demo-6789', 'task', 'open', {
+  const archivedInstruction = ticketOf('demo-6789', 'instruction', 'open', {
     parent: ticketIdOf('demo-4789'),
     archived: '2026-10-01',
   });
 
-  const fakeSession = makeSession({ tickets: [plan, slice, archivedTask] });
+  const fakeSession = makeSession({ tickets: [plan, slice, archivedInstruction] });
   const result = await run(fakeSession, ['archive', 'demo-3467']);
 
   expect(result.exitCode).toBe(0);

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 
 import { invariant } from '../src/invariant.ts';
-import { createCloneFixtures, waitForBackgroundSync } from './cliFixture.ts';
+import { createCloneFixtures, createParentSlice, waitForBackgroundSync } from './cliFixture.ts';
 import type { CliFixture, CloneFixtures } from './cliFixture.ts';
 
 const processCount = 10;
@@ -34,7 +34,7 @@ const gitText = async (args: string[]): Promise<string> => {
 
 const writeLogs = async (
   fixture: CliFixture,
-  taskId: string,
+  instructionId: string,
   worker: number,
   deadline: number,
 ): Promise<string[]> => {
@@ -42,7 +42,7 @@ const writeLogs = async (
 
   for (let index = 0; Date.now() < deadline; index += 1) {
     const text = `stress-${worker}-${index}`;
-    const result = await fixture.run(['log', taskId, '--type', 'progress', '--text', text]);
+    const result = await fixture.run(['log', instructionId, '--type', 'progress', '--text', text]);
 
     if (result.exitCode === 0) {
       recorded.push(text);
@@ -66,11 +66,20 @@ it('ten processes writing logs for 60 seconds while sync runs leave no index.loc
 
   await first.runChecked(['init', '--remote', remotePath]);
 
-  const task = await first.runJson<{ id: string }>(['new', 'task', 'Stress task']);
+  const parentSlice = await createParentSlice(first);
+
+  const instruction = await first.runJson<{ id: string }>([
+    'new',
+    'instruction',
+    'Stress instruction',
+    '--parent',
+    parentSlice,
+  ]);
+
   const deadline = Date.now() + durationMilliseconds;
 
   const writers = Array.from({ length: processCount }, (_, worker) =>
-    writeLogs(first, task.id, worker, deadline),
+    writeLogs(first, instruction.id, worker, deadline),
   );
 
   const [recorded] = await Promise.all([Promise.all(writers), syncRepeatedly(first, deadline)]);

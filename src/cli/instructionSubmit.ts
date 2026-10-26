@@ -1,4 +1,4 @@
-import { deriveTaskState } from '../fact/fact.ts';
+import { deriveInstructionState } from '../fact/fact.ts';
 import { forceOptions, readForce, stringValue } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
 import {
@@ -7,8 +7,8 @@ import {
   readTarget,
   requireHolder,
   requireValue,
-} from './taskCommand.ts';
-import { conflict, withLockedTask } from './taskLock.ts';
+} from './instructionCommand.ts';
+import { conflict, withLockedInstruction } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 
 const submitUsage =
@@ -16,7 +16,7 @@ const submitUsage =
 
 const acceptUsage = 'Usage: tikk accept <id> [--json]';
 
-export const taskSubmit = async (input: CommandInput): Promise<CommandResult> => {
+export const instructionSubmit = async (input: CommandInput): Promise<CommandResult> => {
   const target = readTarget(
     input.args,
     { holder: { type: 'string' }, text: { type: 'string' }, ...forceOptions },
@@ -46,7 +46,7 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
     return machine;
   }
 
-  return withLockedTask(input, rawId, 'refuse', async (locked) => {
+  return withLockedInstruction(input, rawId, 'refuse', async (locked) => {
     const allowed = requireHolder(locked, holder.value);
 
     if (!allowed.ok) {
@@ -62,7 +62,7 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
     return appendAndShow(input, locked, {
       version: 1,
       kind: 'log',
-      ticket: locked.task.id,
+      ticket: locked.instruction.id,
       at: locked.now.toISOString(),
       machine: machine.value,
       type: 'submitted',
@@ -73,7 +73,7 @@ export const taskSubmit = async (input: CommandInput): Promise<CommandResult> =>
   });
 };
 
-export const taskAccept = async (input: CommandInput): Promise<CommandResult> => {
+export const instructionAccept = async (input: CommandInput): Promise<CommandResult> => {
   const target = readTarget(input.args, {}, acceptUsage);
 
   if (!target.ok) {
@@ -86,17 +86,17 @@ export const taskAccept = async (input: CommandInput): Promise<CommandResult> =>
     return machine;
   }
 
-  return withLockedTask(input, target.value.rawId, 'refuse', async (locked) => {
-    const { state } = deriveTaskState(locked.task, locked.facts, locked.now);
+  return withLockedInstruction(input, target.value.rawId, 'refuse', async (locked) => {
+    const { state } = deriveInstructionState(locked.instruction, locked.facts, locked.now);
 
     if (state !== 'submitted') {
-      return conflict(`Task ${locked.task.id} is ${state}, not submitted.`);
+      return conflict(`Instruction ${locked.instruction.id} is ${state}, not submitted.`);
     }
 
     return appendAndShow(input, locked, {
       version: 1,
       kind: 'accept',
-      ticket: locked.task.id,
+      ticket: locked.instruction.id,
       at: locked.now.toISOString(),
       machine: machine.value,
     });

@@ -14,10 +14,10 @@ import {
 import type { SessionOptions } from './cliHarness.ts';
 import { ticketCancel } from './ticketCancel.ts';
 
-const task = makeTicket('demo-3467');
+const instruction = makeTicket('demo-3467');
 
 const cancel = async (args: string[], options: SessionOptions = {}) => {
-  const fakeSession = makeSession({ tickets: [task], ...options });
+  const fakeSession = makeSession({ tickets: [instruction], ...options });
   const { effects } = makeEffects({ session: fakeSession });
   const result = await ticketCancel({ args, json: true, effects, session: fakeSession.session });
 
@@ -36,16 +36,16 @@ it('writes status canceled with the expected hash under the lock', async () => {
     state: 'canceled',
   });
 
-  expect(write?.path).toBe(task.path);
-  expect(write?.expectedHash).toBe(task.hash);
+  expect(write?.path).toBe(instruction.path);
+  expect(write?.expectedHash).toBe(instruction.hash);
   expect(written.ok && written.value.frontMatter.status).toBe('canceled');
-  expect(written.ok && written.value.body).toBe(task.body);
+  expect(written.ok && written.value.body).toBe(instruction.body);
   expect(write?.underLock).toBe(true);
   expect(fakeSession.lockHeld()).toBe(false);
 });
 
 it('cancels the ticket as it is on disk after the lock is taken', async () => {
-  const fakeSession = makeSession({ tickets: [task] });
+  const fakeSession = makeSession({ tickets: [instruction] });
   const { effects } = makeEffects({ session: fakeSession });
   const lockStore = fakeSession.session.lockStore;
 
@@ -67,9 +67,9 @@ it('cancels the ticket as it is on disk after the lock is taken', async () => {
   expect(fakeSession.lockHeld()).toBe(false);
 });
 
-it('succeeds without a write when the task is already canceled', async () => {
+it('succeeds without a write when the instruction is already canceled', async () => {
   const canceled = makeTicket('demo-3467', {
-    frontMatter: { ...task.frontMatter, status: 'canceled' },
+    frontMatter: { ...instruction.frontMatter, status: 'canceled' },
   });
 
   const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [canceled] });
@@ -78,7 +78,7 @@ it('succeeds without a write when the task is already canceled', async () => {
   expect(fakeSession.writes).toEqual([]);
 });
 
-it('refuses to cancel a done task and writes nothing', async () => {
+it('refuses to cancel a done instruction and writes nothing', async () => {
   const facts = [
     makeFact({ kind: 'log', type: 'submitted', text: '' }),
     makeFact({ kind: 'accept', at: '2026-10-20T11:30:00.000Z' }),
@@ -109,7 +109,7 @@ it('cancels a plan in its file and appends a status fact', async () => {
   });
 });
 
-it('appends a status fact when it cancels a task', async () => {
+it('appends a status fact when it cancels an instruction', async () => {
   const { fakeSession, result } = await cancel(['demo-3467']);
 
   successOf(result);
@@ -161,7 +161,7 @@ it('reports that the file was written when the fact cannot be appended', async (
   expect(fakeSession.writes).toHaveLength(1);
 });
 
-it('refuses to cancel a task whose file has an error and writes nothing', async () => {
+it('refuses to cancel an instruction whose file has an error and writes nothing', async () => {
   const broken = makeTicket('demo-3467', { error: 'Duplicate ID.' });
   const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [broken] });
 
@@ -194,7 +194,7 @@ it('refuses a missing ID before it takes the lock', async () => {
   expect(failureOf(result).code).toBe('invalidArguments');
 });
 
-it('reports a storeError when the facts of a task cannot be read', async () => {
+it('reports a storeError when the facts of an instruction cannot be read', async () => {
   const { fakeSession, result } = await cancel(['demo-3467'], {
     overrides: { listStateFacts: () => failed('The facts are damaged.') },
   });

@@ -54,7 +54,7 @@ const finishOf = (root: ArchiveTicket, own: Fact[]): Finish | undefined => {
     return at === undefined ? { kind: 'undated', status } : { kind: 'dated', at };
   }
 
-  if (kind !== 'task' || status !== 'open') {
+  if (kind !== 'instruction' || status !== 'open') {
     return undefined;
   }
 

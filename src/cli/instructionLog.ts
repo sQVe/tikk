@@ -1,7 +1,7 @@
 import { invalidArguments, stringValue } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { appendAndShow, readTarget, requireValue } from './taskCommand.ts';
-import { withLockedTask } from './taskLock.ts';
+import { appendAndShow, readTarget, requireValue } from './instructionCommand.ts';
+import { withLockedInstruction } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 
 type LogType = 'progress' | 'question' | 'answer' | 'discovered';
@@ -13,7 +13,7 @@ const isLogType = (value: string): value is LogType => logTypes.has(value);
 const logUsage =
   'Usage: tikk log <id> --type <progress|question|answer|discovered> --text <t> [--holder <h>] [--json]';
 
-export const taskLog = async (input: CommandInput): Promise<CommandResult> => {
+export const instructionLog = async (input: CommandInput): Promise<CommandResult> => {
   const target = readTarget(
     input.args,
     { type: { type: 'string' }, text: { type: 'string' }, holder: { type: 'string' } },
@@ -50,11 +50,11 @@ export const taskLog = async (input: CommandInput): Promise<CommandResult> => {
 
   const holder = stringValue(values, 'holder');
 
-  return withLockedTask(input, rawId, 'allow', (locked) =>
+  return withLockedInstruction(input, rawId, 'allow', (locked) =>
     appendAndShow(input, locked, {
       version: 1,
       kind: 'log',
-      ticket: locked.task.id,
+      ticket: locked.instruction.id,
       at: locked.now.toISOString(),
       machine: machine.value,
       type: logType,

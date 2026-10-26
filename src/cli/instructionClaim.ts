@@ -1,4 +1,4 @@
-import { deriveTaskState } from '../fact/fact.ts';
+import { deriveInstructionState } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { forceOptions, invalidArguments, readForce, stringValue } from './cliArguments.ts';
 import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
@@ -8,9 +8,9 @@ import {
   readTarget,
   requireHolder,
   requireValue,
-} from './taskCommand.ts';
-import { conflict, withFetchedTask, withLockedTask } from './taskLock.ts';
-import type { LockedTask } from './taskLock.ts';
+} from './instructionCommand.ts';
+import { conflict, withFetchedInstruction, withLockedInstruction } from './instructionLock.ts';
+import type { LockedInstruction } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 
 const claimUsage =
@@ -49,21 +49,24 @@ const parseLease = (text: string): Result<number, CliFailure> => {
   return { ok: true, value: milliseconds };
 };
 
-const requireClaimable = (locked: LockedTask, holder: string): Result<undefined, CliFailure> => {
-  const { state } = deriveTaskState(locked.task, locked.facts, locked.now);
+const requireClaimable = (
+  locked: LockedInstruction,
+  holder: string,
+): Result<undefined, CliFailure> => {
+  const { state } = deriveInstructionState(locked.instruction, locked.facts, locked.now);
 
   if (state === 'active') {
     return requireHolder(locked, holder);
   }
 
   if (state !== 'open') {
-    return conflict(`Task ${locked.task.id} is ${state}, so it cannot be claimed.`);
+    return conflict(`Instruction ${locked.instruction.id} is ${state}, so it cannot be claimed.`);
   }
 
   return { ok: true, value: undefined };
 };
 
-export const taskClaim = async (input: CommandInput): Promise<CommandResult> => {
+export const instructionClaim = async (input: CommandInput): Promise<CommandResult> => {
   const target = readTarget(
     input.args,
     {
@@ -108,7 +111,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
   const session = stringValue(values, 'session');
   const sessionLog = stringValue(values, 'session-log');
 
-  return withFetchedTask(input, rawId, 'refuse', async (locked) => {
+  return withFetchedInstruction(input, rawId, 'refuse', async (locked) => {
     const allowed = requireClaimable(locked, holder.value);
 
     if (!allowed.ok) {
@@ -126,7 +129,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
     return appendAndShow(input, locked, {
       version: 1,
       kind: 'claim',
-      ticket: locked.task.id,
+      ticket: locked.instruction.id,
       at: locked.now.toISOString(),
       machine: machine.value,
       holder: holder.value,
@@ -138,7 +141,7 @@ export const taskClaim = async (input: CommandInput): Promise<CommandResult> => 
   });
 };
 
-export const taskRelease = async (input: CommandInput): Promise<CommandResult> => {
+export const instructionRelease = async (input: CommandInput): Promise<CommandResult> => {
   const target = readTarget(input.args, { holder: { type: 'string' } }, releaseUsage);
 
   if (!target.ok) {
@@ -157,7 +160,7 @@ export const taskRelease = async (input: CommandInput): Promise<CommandResult> =
     return machine;
   }
 
-  return withLockedTask(input, target.value.rawId, 'refuse', async (locked) => {
+  return withLockedInstruction(input, target.value.rawId, 'refuse', async (locked) => {
     const allowed = requireHolder(locked, holder.value);
 
     if (!allowed.ok) {
@@ -167,7 +170,7 @@ export const taskRelease = async (input: CommandInput): Promise<CommandResult> =
     return appendAndShow(input, locked, {
       version: 1,
       kind: 'release',
-      ticket: locked.task.id,
+      ticket: locked.instruction.id,
       at: locked.now.toISOString(),
       machine: machine.value,
       holder: holder.value,

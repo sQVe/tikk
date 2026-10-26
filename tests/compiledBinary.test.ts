@@ -76,7 +76,11 @@ it('syncs a write by the compiled binary to the remote in the background', async
 
   const before = Number(runGit(['-C', remotePath, 'rev-list', '--count', 'main']).trim());
 
-  tikk(['new', 'task', 'Compiled task']);
+  const parent = JSON.parse(tikk(['new', 'slice', 'Parent', '--status', 'draft'])) as {
+    id: string;
+  };
+
+  tikk(['new', 'instruction', 'Compiled instruction', '--parent', parent.id]);
 
   const deadline = Date.now() + 10_000;
   let after = before;

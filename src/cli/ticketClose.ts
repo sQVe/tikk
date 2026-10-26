@@ -5,7 +5,7 @@ import {
   readForce,
 } from './cliArguments.ts';
 import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { conflict, refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { conflict, refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
 import { showAfterRefresh, showOutput } from './ticketView.ts';
 

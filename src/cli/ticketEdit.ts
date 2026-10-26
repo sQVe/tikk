@@ -9,7 +9,7 @@ import {
 } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
-import { refuseFileErrors, withLockedTicket } from './taskLock.ts';
+import { refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { readCriteriaFile } from './ticketCriteria.ts';
 import { ticketEditor } from './ticketEditor.ts';
 import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';

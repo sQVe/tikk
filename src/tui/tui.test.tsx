@@ -229,7 +229,7 @@ it('moves the selected row with j, k, down, and up', async () => {
 const treeGroups = (): TreeGroup[] => {
   const planId = 'demo-3401' as NeedView['id'];
   const activeId = 'demo-3402' as NeedView['id'];
-  const taskId = 'demo-3403' as NeedView['id'];
+  const instructionId = 'demo-3403' as NeedView['id'];
 
   return [
     {
@@ -240,7 +240,7 @@ const treeGroups = (): TreeGroup[] => {
           title: 'Slice title',
           state: 'active',
           pr: 12,
-          tasks: [{ id: taskId, title: 'Task title', state: 'open' }],
+          instructions: [{ id: instructionId, title: 'Instruction title', state: 'open' }],
         },
       ],
     },
@@ -263,7 +263,7 @@ it('shows the tree rows on tab and the home items on a second tab', async () => 
 
   expect(tree).toContain('demo-3401  Plan title  open');
   expect(tree).toContain('demo-3402  Slice title  active  #12');
-  expect(tree).toContain('demo-3403  Task title  open');
+  expect(tree).toContain('demo-3403  Instruction title  open');
   expect(tree).not.toContain('First');
   expect(tree).not.toContain('STATUS problem');
   expect(selectedLine(setup)).toContain('Plan title');
@@ -334,7 +334,7 @@ it('shows a failed tree read and recovers on a successful store refresh', async 
 
   expect(setup.captureCharFrame()).not.toContain('Tree read failed.');
   expect(selectedLine(setup)).toContain('Plan title');
-  expect(setup.captureCharFrame()).toContain('Task title');
+  expect(setup.captureCharFrame()).toContain('Instruction title');
 
   await press(setup, 'e');
   expect(edited).toEqual(['demo-3401']);
@@ -346,7 +346,7 @@ it('keeps the selected tree row in the frame when the tree is taller than the te
     title: `Slice ${index}`,
     state: 'planned' as const,
     pr: null,
-    tasks: [],
+    instructions: [],
   }));
 
   const groups: TreeGroup[] = [{ plan: null, slices }];
@@ -452,7 +452,7 @@ it('ignores e when the list is empty', async () => {
 it('handles a cancelled terminal loan without editing or replacing the current notice', async () => {
   let attempts = 0;
 
-  const setup = await mount([needView(1, 'Asked task')], { width: 60, height: 10 }, [], [], {
+  const setup = await mount([needView(1, 'Asked instruction')], { width: 60, height: 10 }, [], [], {
     lend: () => {
       attempts += 1;
 
@@ -601,7 +601,7 @@ it('opens the tree row on screen when e arrives in the commit of a reload that r
     title: 'Other slice',
     state: 'planned',
     pr: null,
-    tasks: [],
+    instructions: [],
   });
 
   const setup = await mount([], { width: 60, height: 8 }, [], groups);

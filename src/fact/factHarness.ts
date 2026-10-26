@@ -1,12 +1,12 @@
 import { invariant } from '../invariant.ts';
 import { parseProjectName, parseTicketId } from '../ticket/ticket.ts';
 import type { TicketFrontMatter } from '../ticket/ticket.ts';
-import type { Fact, TaskTicket } from './fact.ts';
+import type { Fact, InstructionTicket } from './fact.ts';
 import { parseFactLine } from './fact.ts';
 
 export const now = new Date('2026-10-20T12:00:00.000Z');
 
-export const taskId = (suffix: string): TaskTicket['id'] => {
+export const instructionId = (suffix: string): InstructionTicket['id'] => {
   const parsed = parseTicketId(`me-${suffix}`);
 
   invariant(parsed.ok, `Test ID me-${suffix} is invalid.`);
@@ -20,24 +20,24 @@ export const makeTicket = (
     blockedBy?: string[];
     parent?: string;
   } = {},
-): TaskTicket => {
+): InstructionTicket => {
   const { blockedBy = [], parent, ...rest } = overrides;
   const project = parseProjectName('me');
 
   invariant(project.ok, 'The test project should be valid.');
 
   return {
-    id: taskId(suffix),
+    id: instructionId(suffix),
     frontMatter: {
-      kind: 'task',
-      title: `Task ${suffix}`,
+      kind: 'instruction',
+      title: `Instruction ${suffix}`,
       project: project.value,
       status: 'open',
       ...rest,
-      blockedBy: blockedBy.map(taskId),
+      blockedBy: blockedBy.map(instructionId),
       discoveredFrom: [],
       related: [],
-      ...(parent === undefined ? {} : { parent: taskId(parent) }),
+      ...(parent === undefined ? {} : { parent: instructionId(parent) }),
     },
   };
 };

@@ -9,12 +9,12 @@ import {
   noSideEffects,
   sideEffectsOf,
   orphan,
-} from './taskHarness.ts';
-import { taskLog } from './taskLog.ts';
+} from './instructionHarness.ts';
+import { instructionLog } from './instructionLog.ts';
 
-it('logs to a done task without changing its state', async () => {
+it('logs to a done instruction without changing its state', async () => {
   const { fakeSession, result } = await run(
-    taskLog,
+    instructionLog,
     ['demo-3467', '--type', 'discovered', '--text', 'A finding', '--holder', 'agent'],
     { facts: [claimBy('agent'), submittedBy('agent'), accepted] },
   );
@@ -28,7 +28,7 @@ it('logs to a done task without changing its state', async () => {
 
 it('refuses a log with a type it does not accept and writes nothing', async () => {
   for (const type of ['submitted', 'note']) {
-    const { fakeSession, result } = await run(taskLog, [
+    const { fakeSession, result } = await run(instructionLog, [
       'demo-3467',
       '--type',
       type,
@@ -42,17 +42,17 @@ it('refuses a log with a type it does not accept and writes nothing', async () =
 });
 
 it('refuses a log without text and writes nothing', async () => {
-  const { fakeSession, result } = await run(taskLog, ['demo-3467', '--type', 'progress']);
+  const { fakeSession, result } = await run(instructionLog, ['demo-3467', '--type', 'progress']);
 
   expect(failureOf(result).code).toBe('invalidArguments');
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('logs to a task whose file has an error', async () => {
+it('logs to an instruction whose file has an error', async () => {
   const broken = makeTicket('demo-3467', { error: 'Bad YAML.' });
 
   const { fakeSession, result } = await run(
-    taskLog,
+    instructionLog,
     ['demo-3467', '--type', 'progress', '--text', 'A note'],
     {
       tickets: [broken],
@@ -64,24 +64,28 @@ it('logs to a task whose file has an error', async () => {
 });
 
 it('reports a fact the store refuses as invalid arguments', async () => {
-  const { result } = await run(taskLog, ['demo-3467', '--type', 'progress', '--text', 'A note'], {
-    session: {
-      overrides: {
-        appendFact: () =>
-          Promise.resolve({
-            ok: false,
-            reason: { kind: 'invalid', message: 'holder: Too small.' },
-          }),
+  const { result } = await run(
+    instructionLog,
+    ['demo-3467', '--type', 'progress', '--text', 'A note'],
+    {
+      session: {
+        overrides: {
+          appendFact: () =>
+            Promise.resolve({
+              ok: false,
+              reason: { kind: 'invalid', message: 'holder: Too small.' },
+            }),
+        },
       },
     },
-  });
+  );
 
   expect(failureOf(result)).toEqual({ code: 'invalidArguments', message: 'holder: Too small.' });
 });
 
-it('still appends a log to a task whose parent does not exist', async () => {
+it('still appends a log to an instruction whose parent does not exist', async () => {
   const { fakeSession, result } = await run(
-    taskLog,
+    instructionLog,
     ['demo-3467', '--type', 'progress', '--text', 'Working on it'],
     { tickets: [orphan()] },
   );

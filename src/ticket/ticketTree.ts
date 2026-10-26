@@ -20,7 +20,7 @@ interface TreeTicket {
 const parentKinds: Record<TicketKind, TicketKind | undefined> = {
   plan: undefined,
   slice: 'plan',
-  task: 'slice',
+  instruction: 'slice',
   issue: undefined,
 };
 
@@ -29,6 +29,8 @@ const fail = (message: string): { ok: false; reason: TreeFailure } => ({
   reason: { message },
 });
 
+const withArticle = (word: string): string => (/^[aeiou]/u.test(word) ? `an ${word}` : `a ${word}`);
+
 const checkParent = (
   planned: TicketFrontMatter,
   lookup: TicketLookup,
@@ -36,6 +38,10 @@ const checkParent = (
   const { parent, kind } = planned;
 
   if (parent === undefined) {
+    if (kind === 'instruction') {
+      return fail('An instruction needs a slice as its parent.');
+    }
+
     return { ok: true, value: undefined };
   }
 
@@ -57,7 +63,7 @@ const checkParent = (
 
   if (found.kind !== allowedKind) {
     return fail(
-      `The parent ${parent} is a ${found.kind}, but the parent of a ${kind} must be a ${allowedKind}.`,
+      `The parent ${parent} is ${withArticle(found.kind)}, but the parent of ${withArticle(kind)} must be ${withArticle(allowedKind)}.`,
     );
   }
 

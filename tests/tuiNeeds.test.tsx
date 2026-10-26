@@ -13,7 +13,7 @@ import { createEffects } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
 import { App } from '../src/tui/tui.tsx';
 import type { AppProps } from '../src/tui/tui.tsx';
-import { createCliFixture } from './cliFixture.ts';
+import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 
 interface NeedsListing {
@@ -25,6 +25,7 @@ Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
 const loadTimeoutMilliseconds = 10_000;
 
 let fixture: CliFixture | undefined;
+let parentSlice = '';
 let needs: NeedsSession | undefined;
 let mounted: Awaited<ReturnType<typeof testRender>> | undefined;
 
@@ -47,8 +48,14 @@ const tuiEffects = (session: NeedsSession): AppProps['effects'] => ({
   onChange: () => () => undefined,
 });
 
-const createTask = async (title: string): Promise<string> => {
-  const created = await cli().runJson<{ id: string }>(['new', 'task', title]);
+const createInstruction = async (title: string): Promise<string> => {
+  const created = await cli().runJson<{ id: string }>([
+    'new',
+    'instruction',
+    title,
+    '--parent',
+    parentSlice,
+  ]);
 
   return created.id;
 };
@@ -88,6 +95,7 @@ const openHome = async () => {
 beforeEach(async () => {
   fixture = await createCliFixture('tikk-tui-');
   await cli().runChecked(['init']);
+  parentSlice = await createParentSlice(cli());
 });
 
 afterEach(async () => {
@@ -102,8 +110,8 @@ afterEach(async () => {
 });
 
 it('lists the items of tikk needs in the same order', async () => {
-  const asked = await createTask('Asked task');
-  const submitted = await createTask('Submitted task');
+  const asked = await createInstruction('Asked instruction');
+  const submitted = await createInstruction('Submitted instruction');
 
   await cli().runJson(['log', asked, '--type', 'question', '--text', 'Which one?']);
   await cli().runJson(['claim', submitted, '--holder', 'agent']);
@@ -129,7 +137,7 @@ it('lists the items of tikk needs in the same order', async () => {
 });
 
 it('says that nothing needs the user when the list is empty', async () => {
-  await createTask('Plain task');
+  await createInstruction('Plain instruction');
 
   const setup = await openHome();
 
