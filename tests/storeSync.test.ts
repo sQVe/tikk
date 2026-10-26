@@ -1,6 +1,18 @@
 import { afterEach, beforeEach, expect, it, setDefaultTimeout } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  readlink,
+  rename,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
@@ -307,6 +319,45 @@ it("a binary file in a plan's folder syncs to a second clone byte for byte", asy
   expect((await readFile(syncedPath)).equals(Buffer.from(imageBytes))).toBe(true);
 });
 
+it("an executable script and a symlink in a plan's folder sync to a second clone as they are", async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const plan = await first.runJson<ShownInstruction>([
+    'new',
+    'plan',
+    'Script plan',
+    '--project',
+    'demo',
+    '--status',
+    'draft',
+  ]);
+
+  const folder = folderOf(first.storePath, plan.id);
+  const scriptPath = join(folder, 'run.sh');
+  const linkPath = join(folder, 'latest.md');
+
+  await ageFile(plan.path);
+  await mkdir(folder, { recursive: true });
+  await writeFile(scriptPath, '#!/bin/sh\necho done\n');
+  await chmod(scriptPath, 0o755);
+  await writeFile(join(folder, 'design.md'), '# Design\n');
+  await symlink('design.md', linkPath);
+
+  const firstReport = await first.runJson<SyncReport>(['sync']);
+  await second.runChecked(['sync']);
+
+  const syncedScript = join(second.storePath, relative(first.storePath, scriptPath));
+  const syncedLink = join(second.storePath, relative(first.storePath, linkPath));
+
+  expect(firstReport.pending).toEqual([]);
+  expect((await lstat(syncedScript)).mode & 0o111).not.toBe(0);
+  expect((await lstat(syncedLink)).isSymbolicLink()).toBe(true);
+  expect(await readlink(syncedLink)).toBe('design.md');
+});
+
 it('a claim fetches first and sees a claim made on another clone', async () => {
   const { first, second, remotePath } = clonePair();
 
@@ -474,6 +525,39 @@ it('an ID clash after a sync merge moves the folder to the new ID', async () => 
   expect(facts).toContain('"kind":"alias"');
   expect(facts).toContain('"from":"demo-aaaa"');
   expect(await gitOutput(second.storePath, ['status', '--porcelain'])).toBe('');
+});
+
+it('an ID clash keeps an executable folder file executable at the new path', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  await writeHandTicket(first, 'demo-aaaa-first.md');
+  await first.runChecked(['sync']);
+
+  await writeHandTicket(second, 'demo-aaaa-second.md');
+
+  const oldFolder = folderOf(second.storePath, 'demo-aaaa');
+  const scriptPath = join(oldFolder, 'run.sh');
+
+  await mkdir(oldFolder, { recursive: true });
+  await writeFile(scriptPath, '#!/bin/sh\necho done\n');
+  await chmod(scriptPath, 0o755);
+
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The sync should report one alias.');
+
+  const movedScript = join(folderOf(second.storePath, alias.to), 'run.sh');
+  const movedPath = relative(second.storePath, movedScript);
+
+  expect((await lstat(movedScript)).mode & 0o111).not.toBe(0);
+
+  expect(await gitOutput(second.storePath, ['ls-tree', 'HEAD', '--', movedPath])).toMatch(
+    /^100755 blob /,
+  );
 });
 
 const remoteTree = (remotePath: string): Promise<string> =>

@@ -99,7 +99,7 @@ it('commits a tracked rename from HEAD together with its alias fact in one commi
   expect(commits).toHaveLength(1);
 
   expect(stagedEntries(fake)).toEqual([
-    '--add --cacheinfo 100644,,tickets/demo/demo-zzzz-b.md',
+    '--add --cacheinfo 100644,abc123,tickets/demo/demo-zzzz-b.md',
     '--force-remove -- tickets/demo/demo-aaaa-b.md',
     '--add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl',
   ]);
@@ -202,7 +202,7 @@ const strictCommands = {
   logNewer: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-b.md',
   head: 'rev-parse --verify --quiet HEAD',
   readTree: 'read-tree HEAD',
-  blob: 'rev-parse HEAD:tickets/demo/demo-aaaa-b.md',
+  blob: 'ls-tree HEAD -- tickets/demo/demo-aaaa-b.md',
   addMove: 'update-index --add --cacheinfo 100644,abc123,tickets/demo/demo-zzzz-b.md',
   removeMove: 'update-index --force-remove -- tickets/demo/demo-aaaa-b.md',
   addFact: 'update-index --add --cacheinfo 100644,blob1,facts/fake/2026-10.jsonl',
@@ -213,7 +213,7 @@ const strictReplies: Record<string, string> = {
   [strictCommands.logNewer]: '1000\n2000\n',
   [strictCommands.head]: '',
   [strictCommands.readTree]: '',
-  [strictCommands.blob]: 'abc123\n',
+  [strictCommands.blob]: '100644 blob abc123\ttickets/demo/demo-aaaa-b.md\n',
   [strictCommands.addMove]: '',
   [strictCommands.removeMove]: '',
   [strictCommands.addFact]: '',
@@ -265,7 +265,7 @@ const strictStore = (failOn?: string, extra: FakeSyncOptions = {}) =>
       '/store/tickets': ['demo'],
       '/store/tickets/demo': ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
     },
-    git: strictClashGit(failOn),
+    git: extra.git ?? strictClashGit(failOn),
     now: Date.parse('2026-10-05T10:00:00.000Z'),
   });
 
@@ -317,6 +317,20 @@ it.each([
     expect(fake.disk.has(newPath)).toBe(false);
   },
 );
+
+it('fails and commits nothing when HEAD has no entry for a tracked move', async () => {
+  const fake = strictStore(undefined, {
+    git: (args) =>
+      commandOf(args) === strictCommands.blob ? gitOutput('') : strictClashGit()(args),
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.commands().some((entry) => entry.startsWith('commit'))).toBe(false);
+  expect(fake.disk.has(oldPath)).toBe(true);
+  expect(fake.disk.has(newPath)).toBe(false);
+});
 
 it('fails, and restores the file, when the commit fails', async () => {
   const fake = strictStore('commit');
@@ -530,8 +544,10 @@ const folderGit = (args: string[], tracked: string[]) => {
     return gitOutput(tracked.map((file) => `tickets/demo/demo-aaaa/${file}\0`).join(''));
   }
 
-  return command.startsWith('rev-parse HEAD:tickets/demo/demo-aaaa/')
-    ? gitOutput('abc999\n')
+  const folderPrefix = 'ls-tree HEAD -- tickets/demo/demo-aaaa/';
+
+  return command.startsWith(folderPrefix)
+    ? gitOutput(`100644 blob abc999\t${command.slice('ls-tree HEAD -- '.length)}\n`)
     : undefined;
 };
 

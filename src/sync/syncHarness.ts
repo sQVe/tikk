@@ -80,7 +80,9 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   const blobs: string[] = [];
   let blobCount = 0;
 
-  // `hash-object` and `writeBlob` share one count, so blob names follow the order of staging.
+  const headBlobId = 'abc123';
+
+  // Blob names follow the order of staging.
   const nextBlobId = (): string => {
     blobCount += 1;
 
@@ -95,8 +97,9 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       return gitOutput(`tree${indexUpdates}\n`);
     }
 
-    if (args.includes('hash-object')) {
-      return gitOutput(nextBlobId());
+    // A single-path `ls-tree` reports a regular file, so a tracked move keeps the 100644 mode.
+    if (args.includes('ls-tree') && !args.includes('-r')) {
+      return gitOutput(`100644 blob ${headBlobId}\t${args.at(-1)}\n`);
     }
 
     return args.includes('HEAD^{tree}') ? gitOutput('tree0\n') : gitOutput('');

@@ -78,9 +78,9 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
   expect(stagedEntries(fake).toSorted()).toEqual(
     [
       '--add --cacheinfo 100644,blob1,facts/laptop/2026-10.jsonl',
-      '--add --cacheinfo 100644,blob2,logs/abc123.log',
-      '--add --cacheinfo 100644,blob4,tickets/demo/settled.md',
-      '--add --cacheinfo 100644,blob3,tikk.json',
+      '--add -- logs/abc123.log',
+      '--add --cacheinfo 100644,blob2,tickets/demo/settled.md',
+      '--add -- tikk.json',
       '--force-remove -- tickets/demo/gone.md',
     ].toSorted(),
   );
@@ -104,7 +104,7 @@ it('stages a fresh folder file that does not parse, and keeps a fresh ticket pen
   const result = await commitStore(fake.functions, root);
 
   expect(result).toEqual({ ok: true, value: { committed: true, pending: [ticketFile] } });
-  expect(stagedEntries(fake)).toEqual([`--add --cacheinfo 100644,blob1,${folderFile}`]);
+  expect(stagedEntries(fake)).toEqual([`--add -- ${folderFile}`]);
 });
 
 it('makes no commit when only pending tickets changed', async () => {
@@ -260,10 +260,6 @@ const strictGit = (options: StrictOptions = {}): NonNullable<FakeSyncOptions['gi
       return gitFailure('injected failure');
     }
 
-    if (command.startsWith('hash-object')) {
-      return gitOutput('blob1\n');
-    }
-
     if (command.startsWith('update-index')) {
       updates += 1;
 
@@ -379,8 +375,7 @@ it('runs exactly the expected Git calls and commits with signing off', async () 
     `ls-files -z --deleted -- ${pathspecs}`,
     `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
     'ls-tree -r --name-only HEAD -- tickets',
-    'hash-object -w --no-filters -- tikk.json',
-    'update-index --add --cacheinfo 100644,blob1,tikk.json',
+    'update-index --add -- tikk.json',
     'update-index --force-remove -- tickets/demo/gone.md',
     'write-tree',
     'rev-parse --verify --quiet HEAD',
@@ -395,8 +390,7 @@ it.each([
   'read-tree HEAD',
   `ls-files -z --deleted -- ${pathspecs}`,
   `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
-  'hash-object -w --no-filters -- tikk.json',
-  'update-index --add --cacheinfo 100644,blob1,tikk.json',
+  'update-index --add -- tikk.json',
   'update-index --force-remove -- tickets/demo/gone.md',
   'write-tree',
   'rev-parse HEAD^{tree}',

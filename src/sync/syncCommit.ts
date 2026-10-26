@@ -301,8 +301,8 @@ const isPresent = async (
   }
 };
 
-// The index takes the bytes on disk, since `--no-filters` skips the attribute filters that would
-// rewrite them. A file that is gone waits for a later sync, as a text file does.
+// The index takes the mode and bytes on disk, or the link target of a symlink. Autocrlf is off so
+// line endings stay as written. A file that is gone waits for a later sync, as a text file does.
 const stageDesignFile = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -312,23 +312,18 @@ const stageDesignFile = async (
     return { ok: true, value: false };
   }
 
-  const hashed = await functions.runGit([
+  const staged = await functions.runGit([
+    '-c',
+    'core.autocrlf=false',
     '-C',
     root,
-    'hash-object',
-    '-w',
-    '--no-filters',
+    'update-index',
+    '--add',
     '--',
     path,
   ]);
 
-  if (!hashed.ok) {
-    return failedReason(hashed.reason.message);
-  }
-
-  const staged = await stageBlob(functions, root, path, hashed.value);
-
-  return staged.ok ? { ok: true, value: true } : staged;
+  return staged.ok ? { ok: true, value: true } : failedReason(staged.reason.message);
 };
 
 // Checks the text candidates together, then stages the ones that pass. Returns the ones that wait.

@@ -397,10 +397,17 @@ const stageMove = async (
   root: string,
   move: MovedPath,
 ): Promise<Result<undefined, SyncReason>> => {
-  const blob = await functions.runGit(['-C', root, 'rev-parse', `HEAD:${move.from}`]);
+  const listed = await functions.runGit(['-C', root, 'ls-tree', 'HEAD', '--', move.from]);
 
-  if (!blob.ok) {
-    return failed(blob.reason.message);
+  if (!listed.ok) {
+    return failed(listed.reason.message);
+  }
+
+  // The output is `<mode> <type> <blob>` and the path. Empty output means `HEAD` has no entry.
+  const [mode, , blobId] = listed.value.trim().split(/\s+/);
+
+  if (blobId === undefined) {
+    return failed(`${move.from} is not in HEAD.`);
   }
 
   const added = await functions.runGit([
@@ -409,7 +416,7 @@ const stageMove = async (
     'update-index',
     '--add',
     '--cacheinfo',
-    `100644,${blob.value.trim()},${move.to}`,
+    `${mode},${blobId},${move.to}`,
   ]);
 
   if (!added.ok) {
