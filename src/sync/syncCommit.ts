@@ -18,6 +18,7 @@ export interface SyncCommitFunctions {
   commitArguments: (root: string) => Promise<string[]>;
   writeBlob: (root: string, text: string) => Promise<Result<string, { message: string }>>;
   stat: (path: string) => Promise<{ mtimeMs: number }>;
+  lstat: (path: string) => Promise<unknown>;
   readFile: (path: string) => Promise<string>;
   now: () => number;
 }
@@ -63,6 +64,48 @@ const isTicketPath = (path: string): boolean =>
   path.startsWith('tickets/') &&
   path.split('/').length === ticketPathSegments &&
   path.endsWith('.md');
+
+const isFolderPath = (path: string): boolean => path.startsWith('tickets/') && !isTicketPath(path);
+
+const listIgnoredFolderPaths = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<string[], SyncReason>> => {
+  const listed = await functions.runGit([
+    '-C',
+    root,
+    'ls-files',
+    '-z',
+    '--others',
+    '--ignored',
+    '--exclude-standard',
+    '--',
+    'tickets',
+  ]);
+
+  return listed.ok
+    ? { ok: true, value: splitPaths(listed.value).filter(isFolderPath) }
+    : failedReason(listed.reason.message);
+};
+
+const listChangedPaths = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<string[], SyncReason>> => {
+  const changed = await listPaths(functions, root, [
+    '--modified',
+    '--others',
+    '--exclude-standard',
+  ]);
+
+  if (!changed.ok) {
+    return changed;
+  }
+
+  const ignored = await listIgnoredFolderPaths(functions, root);
+
+  return ignored.ok ? { ok: true, value: [...changed.value, ...ignored.value] } : ignored;
+};
 
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
 // not changed for two seconds. The age is read after the text, so an edit in between makes it fresh.
@@ -290,7 +333,8 @@ const isPresent = async (
   path: string,
 ): Promise<boolean> => {
   try {
-    await functions.stat(join(root, path));
+    // lstat, not stat, so a symlink whose target is missing still counts as present.
+    await functions.lstat(join(root, path));
 
     return true;
   } catch {
@@ -398,11 +442,7 @@ export const commitStore = async (
     return deleted;
   }
 
-  const changed = await listPaths(functions, root, [
-    '--modified',
-    '--others',
-    '--exclude-standard',
-  ]);
+  const changed = await listChangedPaths(functions, root);
 
   if (!changed.ok) {
     return changed;

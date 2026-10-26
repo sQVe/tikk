@@ -358,6 +358,78 @@ it("an executable script and a symlink in a plan's folder sync to a second clone
   expect(await readlink(syncedLink)).toBe('design.md');
 });
 
+it('a folder file that .git/info/exclude matches syncs, and an ignored file outside ticket folders does not', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const plan = await first.runJson<ShownInstruction>([
+    'new',
+    'plan',
+    'Ignored plan',
+    '--project',
+    'demo',
+    '--status',
+    'draft',
+  ]);
+
+  const reportPath = join(folderOf(first.storePath, plan.id), 'reports', 'run.log');
+  const outsidePath = join(first.storePath, 'logs', 'scratch.txt');
+  const excludePath = join(first.storePath, '.git', 'info', 'exclude');
+
+  await ageFile(plan.path);
+  await mkdir(dirname(reportPath), { recursive: true });
+  await mkdir(dirname(excludePath), { recursive: true });
+  await writeFile(excludePath, 'run.log\nscratch.txt\n');
+  await writeFile(reportPath, 'done\n');
+  await mkdir(dirname(outsidePath), { recursive: true });
+  await writeFile(outsidePath, 'scratch\n');
+
+  const firstReport = await first.runJson<SyncReport>(['sync']);
+  await second.runChecked(['sync']);
+
+  const syncedReport = join(second.storePath, relative(first.storePath, reportPath));
+  const syncedOutside = join(second.storePath, relative(first.storePath, outsidePath));
+
+  expect(firstReport.pending).toEqual([]);
+  expect(await readFile(syncedReport, 'utf8')).toBe('done\n');
+  expect(existsSync(syncedOutside)).toBe(false);
+});
+
+it("a dangling symlink in a plan's folder syncs to a second clone as a symlink", async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const plan = await first.runJson<ShownInstruction>([
+    'new',
+    'plan',
+    'Dangling plan',
+    '--project',
+    'demo',
+    '--status',
+    'draft',
+  ]);
+
+  const folder = folderOf(first.storePath, plan.id);
+  const linkPath = join(folder, 'latest.md');
+
+  await ageFile(plan.path);
+  await mkdir(folder, { recursive: true });
+  await symlink('missing.md', linkPath);
+
+  const firstReport = await first.runJson<SyncReport>(['sync']);
+  await second.runChecked(['sync']);
+
+  const syncedLink = join(second.storePath, relative(first.storePath, linkPath));
+
+  expect(firstReport.pending).toEqual([]);
+  expect((await lstat(syncedLink)).isSymbolicLink()).toBe(true);
+  expect(await readlink(syncedLink)).toBe('missing.md');
+});
+
 it('a claim fetches first and sees a claim made on another clone', async () => {
   const { first, second, remotePath } = clonePair();
 

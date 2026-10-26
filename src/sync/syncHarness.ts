@@ -170,6 +170,8 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       return file === undefined ? missingFile() : Promise.resolve({ mtimeMs: file.mtimeMs });
     },
+    lstat: (path) =>
+      disk.has(path) || !path.includes('/tickets/') ? Promise.resolve({}) : missingFile(),
     readFile: (path) => {
       const file = disk.get(path);
 

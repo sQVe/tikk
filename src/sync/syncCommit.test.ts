@@ -12,6 +12,7 @@ interface StrictOptions {
   hasHead?: boolean;
   headFacts?: Record<string, string>;
   headTickets?: string[];
+  ignored?: string[];
   emptyIndexTree?: boolean;
 }
 
@@ -22,10 +23,14 @@ const validTicket =
   '---\nkind: instruction\ntitle: Valid\nproject: demo\nstatus: open\n---\nBody\n';
 
 const listing =
-  (deleted: string[], changed: string[]) =>
+  (deleted: string[], changed: string[], ignored: string[] = []) =>
   (args: string[]): ReturnType<typeof gitOutput> | undefined => {
     if (args.includes('--deleted')) {
       return gitOutput(deleted.map((path) => `${path}\0`).join(''));
+    }
+
+    if (args.includes('--ignored')) {
+      return gitOutput(ignored.map((path) => `${path}\0`).join(''));
     }
 
     if (args.includes('--others')) {
@@ -105,6 +110,37 @@ it('stages a fresh folder file that does not parse, and keeps a fresh ticket pen
 
   expect(result).toEqual({ ok: true, value: { committed: true, pending: [ticketFile] } });
   expect(stagedEntries(fake)).toEqual([`--add -- ${folderFile}`]);
+});
+
+it('stages an ignored folder file, and leaves ignored files outside folders out', async () => {
+  const folderFile = 'tickets/demo/demo-aaaa/reports/run.log';
+
+  const fake = makeSync({
+    now,
+    git: listing([], [], [folderFile, 'tickets/demo/demo-aaaa-a.md', 'logs/scratch.txt']),
+    files: { [`/store/${folderFile}`]: { text: 'done\n', mtimeMs: now } },
+  });
+
+  const result = await commitStore(fake.functions, root);
+
+  expect(result).toEqual({ ok: true, value: { committed: true, pending: [] } });
+  expect(stagedEntries(fake)).toEqual([`--add -- ${folderFile}`]);
+});
+
+it('stages a folder path that is a dangling symlink, which stat cannot read', async () => {
+  const linkPath = 'tickets/demo/demo-aaaa/latest.md';
+
+  const fake = makeSync({
+    now,
+    git: listing([], [linkPath]),
+    files: { [`/store/${linkPath}`]: { text: '', mtimeMs: now } },
+  });
+
+  const functions = { ...fake.functions, stat: () => Promise.reject(new Error('ENOENT')) };
+  const result = await commitStore(functions, root);
+
+  expect(result).toEqual({ ok: true, value: { committed: true, pending: [] } });
+  expect(stagedEntries(fake)).toEqual([`--add -- ${linkPath}`]);
 });
 
 it('makes no commit when only pending tickets changed', async () => {
@@ -279,6 +315,7 @@ const strictGit = (options: StrictOptions = {}): NonNullable<FakeSyncOptions['gi
       [`ls-files -z --modified --others --exclude-standard -- ${pathspecs}`]: nulList(
         options.changed,
       ),
+      'ls-files -z --others --ignored --exclude-standard -- tickets': nulList(options.ignored),
       'ls-tree -r --name-only HEAD -- tickets': hasHead
         ? (options.headTickets ?? []).join('\n')
         : undefined,
@@ -374,6 +411,7 @@ it('runs exactly the expected Git calls and commits with signing off', async () 
     'read-tree HEAD',
     `ls-files -z --deleted -- ${pathspecs}`,
     `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
+    'ls-files -z --others --ignored --exclude-standard -- tickets',
     'ls-tree -r --name-only HEAD -- tickets',
     'update-index --add -- tikk.json',
     'update-index --force-remove -- tickets/demo/gone.md',
@@ -390,6 +428,7 @@ it.each([
   'read-tree HEAD',
   `ls-files -z --deleted -- ${pathspecs}`,
   `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
+  'ls-files -z --others --ignored --exclude-standard -- tickets',
   'update-index --add -- tikk.json',
   'update-index --force-remove -- tickets/demo/gone.md',
   'write-tree',

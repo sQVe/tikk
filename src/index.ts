@@ -4,6 +4,7 @@ import type { Dirent } from 'node:fs';
 import {
   appendFile,
   link,
+  lstat,
   mkdtemp,
   mkdir,
   open,
@@ -623,6 +624,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
     commitArguments: (root) => commitArguments(runSyncGit, root),
     lockStore: () => acquireStoreLock(storeLock, { root: storeRoot }),
     stat: (path) => stat(path),
+    lstat: (path) => lstat(path),
     readFile: (path) => readFile(path, 'utf8'),
     now: () => Date.now(),
     readdir: (directory) => readdir(directory),
