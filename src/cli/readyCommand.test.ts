@@ -305,3 +305,76 @@ it('returns the instruction once the blocking task is done', async () => {
 
   expect(output.json).toMatchObject({ candidates: [{ id: 'demo-3467' }], skipped: [] });
 });
+
+const mergedPr = makeFact({
+  kind: 'pr',
+  ticket: 'demo-3468',
+  repository: 'acme/app',
+  number: 8,
+  state: 'merged',
+  base: 'main',
+  head: 'head2',
+  mergeCommit: 'merge2',
+  trunk: 'main',
+  inTrunk: true,
+});
+
+const metAudit = makeFact({
+  kind: 'audit',
+  ticket: 'demo-3468',
+  repository: 'acme/app',
+  changeHash: 'hash2',
+  head: 'head2',
+  base: 'main',
+  verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],
+});
+
+it('names a merged, audited slice with an open task as a flagged blocker', async () => {
+  const merged = sliceWith('demo-3468', {});
+
+  const task = makeTicket('demo-3469', {
+    frontMatter: {
+      ...makeKindTicket('demo-3469', 'task').frontMatter,
+      parent: ticketIdOf('demo-3468'),
+    },
+  });
+
+  const blocked = sliceWith('demo-3467', { blockedBy: [ticketIdOf('demo-3468')] });
+
+  const output = successOf(
+    await ready(['--kind', 'slice'], [merged, task, blocked], [mergedPr, metAudit]),
+  );
+
+  expect(output.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      { id: 'demo-3467', reason: 'blocked', blockers: [{ id: 'demo-3468', state: 'flagged' }] },
+    ],
+  });
+});
+
+it('clears a plan blocker once its slices are done and blocks while a direct task is open', async () => {
+  const plan = makeKindTicket('demo-3466', 'plan');
+  const merged = sliceWith('demo-3468', { parent: ticketIdOf('demo-3466') });
+  const blocked = sliceWith('demo-3467', { blockedBy: [ticketIdOf('demo-3466')] });
+
+  const task = makeTicket('demo-3469', {
+    frontMatter: {
+      ...makeKindTicket('demo-3469', 'task').frontMatter,
+      parent: ticketIdOf('demo-3466'),
+    },
+  });
+
+  const facts = [mergedPr, metAudit];
+  const done = successOf(await ready(['--kind', 'slice'], [plan, merged, blocked], facts));
+  const open = successOf(await ready(['--kind', 'slice'], [plan, merged, blocked, task], facts));
+
+  expect(done.json).toMatchObject({ candidates: [{ id: 'demo-3467' }], skipped: [] });
+
+  expect(open.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      { id: 'demo-3467', reason: 'blocked', blockers: [{ id: 'demo-3466', state: 'open' }] },
+    ],
+  });
+});

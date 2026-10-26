@@ -5,7 +5,7 @@ import type { ListRow } from './rowList.tsx';
 const planRowOf = (plan: TreeGroup['plan']): ListRow =>
   plan === null
     ? { key: 'no-plan', id: null, text: 'No plan' }
-    : { key: plan.id, id: plan.id, text: `${plan.id}  ${singleLine(plan.title)}  ${plan.status}` };
+    : { key: plan.id, id: plan.id, text: `${plan.id}  ${singleLine(plan.title)}  ${plan.state}` };
 
 export const treeRowsOf = (groups: readonly TreeGroup[]): ListRow[] =>
   groups.flatMap((group) => [

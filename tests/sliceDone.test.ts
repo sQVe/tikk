@@ -10,7 +10,6 @@ import type { FakeGh, FakePullRequest } from './fakeGh.ts';
 
 interface SliceShow {
   state: string;
-  flagged: boolean;
   openInstructions: string[];
 }
 
@@ -224,7 +223,7 @@ it('lists ready work with one reconcile problem and appends no fact when gh cann
   expect(await readFacts()).toEqual(before);
 });
 
-it('flags a merged slice that still has an open instruction', async () => {
+it('flags a merged, audited slice that still has an open instruction', async () => {
   const id = await createSlice();
 
   const instruction = await cli().runJson<{ id: string }>([
@@ -236,9 +235,10 @@ it('flags a merged slice that still has an open instruction', async () => {
   ]);
 
   await cli().runJson(['pr', 'link', id, prUrl]);
+  await auditAllMet(id, 'head1');
 
   const shown = await showSlice(id);
 
-  expect(shown.flagged).toBe(true);
+  expect(shown.state).toBe('flagged');
   expect(shown.openInstructions).toEqual([instruction.id]);
 });

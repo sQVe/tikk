@@ -215,16 +215,34 @@ describe('deriveSliceState', () => {
     expect(result.state).toBe('mergedUnverified');
   });
 
-  it('flags a merged slice with an open instruction and names the instruction', () => {
-    const result = derive(slice, [slice, instruction], [prFact()], now);
+  it('derives flagged for a merged, audited slice with an open instruction', () => {
+    const result = derive(slice, [slice, instruction], [prFact(), auditFact('aaa')], now);
 
-    expect(result).toMatchObject({ flagged: true, openInstructions: [instructionId('3478')] });
+    expect(result).toMatchObject({ state: 'flagged', openInstructions: [instructionId('3478')] });
   });
 
-  it('does not flag a merged slice whose instructions are done', () => {
+  it('derives done for a merged, audited slice whose instructions are done', () => {
     const accept = makeFact('3478', { kind: 'accept' });
-    const result = derive(slice, [slice, instruction], [prFact(), accept], now);
+    const result = derive(slice, [slice, instruction], [prFact(), auditFact('aaa'), accept], now);
 
-    expect(result).toMatchObject({ flagged: false, openInstructions: [] });
+    expect(result).toMatchObject({ state: 'done', openInstructions: [] });
+  });
+
+  it('derives flagged for a merged, audited slice with an open task, and done once it is done', () => {
+    const task = makeTicket('3479', { kind: 'task', parent: '3469' });
+    const doneTask = makeTicket('3479', { kind: 'task', parent: '3469', status: 'done' });
+    const facts = [prFact(), auditFact('aaa')];
+    const open = derive(slice, [slice, task], facts, now);
+    const finished = derive(slice, [slice, doneTask], facts, now);
+
+    expect(open).toMatchObject({ state: 'flagged', openTasks: [instructionId('3479')] });
+    expect(finished).toMatchObject({ state: 'done', openTasks: [] });
+  });
+
+  it('keeps a merged slice with an open task and no audit as mergedUnverified', () => {
+    const task = makeTicket('3479', { kind: 'task', parent: '3469' });
+    const result = derive(slice, [slice, task], [prFact()], now);
+
+    expect(result).toMatchObject({ state: 'mergedUnverified', openTasks: [instructionId('3479')] });
   });
 });

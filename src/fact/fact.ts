@@ -14,6 +14,7 @@ export { buildPlanTree } from './planTree.ts';
 export type { TreeGroup } from './planTree.ts';
 export { selectReady } from './readyQueue.ts';
 export { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
+export { derivePlanState } from './planState.ts';
 export type { SliceIndex, SliceState } from './sliceState.ts';
 export { deriveInstructionState } from './instructionState.ts';
 

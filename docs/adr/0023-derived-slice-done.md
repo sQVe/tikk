@@ -15,8 +15,16 @@ A slice is done when its PR merged into trunk and its criteria are met for the m
 derived from facts and is never written to the file. A slice whose PR merged with no current audit
 shows as merged but unverified.
 
-Open instructions at merge stay open and flag the slice until each is accepted or canceled with a
-reason.
+Open instructions and open tasks at merge stay open. A slice whose PR merged into trunk with a
+passing audit is `flagged`, not done, while it has an open instruction or an open task. An
+instruction counts until it is accepted or canceled with a reason. A task counts while its status is
+`open`. Archived instructions and tasks count too, because archive hides a ticket but does not
+complete it. A flagged slice does not clear the tickets it blocks.
+
+A plan's completion is derived the same way. An open plan is done when it has at least one slice or
+task that is not canceled, every slice that is not canceled is done, and every direct task is done
+or canceled. A draft or canceled plan keeps its stored status. A done plan clears the tickets it
+blocks.
 
 PR facts come from `tikk reconcile`. It runs on `ready` and `needs`, and after `tikk pr link`. It
 checks every linked PR that tikk has not yet seen merged into trunk, closed ones included, so a
@@ -34,7 +42,8 @@ head match the PR at merge, and it has a `met` verdict for every current criteri
 ### Positive
 
 - Done means merged and verified against the merged code.
-- Open instructions never disappear at merge.
+- Open instructions and tasks never disappear at merge, and a plan is not done while work under it
+  is open.
 
 ### Negative
 

@@ -41,7 +41,7 @@ it('shows instructions only under the active slice, with each slice state and PR
 
   expect(tree).toEqual([
     {
-      plan: { id: plan.id, title: 'The plan', status: 'open' },
+      plan: { id: plan.id, title: 'The plan', state: 'open' },
       slices: [
         {
           id: active.id,
@@ -126,4 +126,38 @@ it('orders plans by rank with unranked last, then by id, and puts no plan at the
   const tree = buildPlanTree([late, orphan, early], [], now);
 
   expect(tree.map((group) => group.plan?.id ?? null)).toEqual([early.id, late.id, null]);
+});
+
+it('shows a plan as done once its slices are done and its direct tasks are done', () => {
+  const plan = makeTicket('333a', { kind: 'plan' });
+  const slice = makeTicket('333b', { kind: 'slice', parent: '333a' });
+  const openTask = makeTicket('333c', { kind: 'task', parent: '333a' });
+  const doneTask = makeTicket('333c', { kind: 'task', parent: '333a', status: 'done' });
+
+  const merged = makeFact('333b', {
+    kind: 'pr',
+    repository: 'acme/app',
+    number: 42,
+    state: 'merged',
+    base: 'main',
+    head: 'head1',
+    mergeCommit: 'merge1',
+    trunk: 'main',
+    inTrunk: true,
+  });
+
+  const audit = makeFact('333b', {
+    kind: 'audit',
+    repository: 'acme/app',
+    changeHash: 'hash1',
+    head: 'head1',
+    base: 'main',
+    verdicts: [{ criterion: 'It works.', verdict: 'met', evidence: 'Ran it.' }],
+  });
+
+  const open = buildPlanTree([plan, slice, openTask], [merged, audit], now);
+  const done = buildPlanTree([plan, slice, doneTask], [merged, audit], now);
+
+  expect(open[0]?.plan?.state).toBe('open');
+  expect(done[0]?.plan?.state).toBe('done');
 });

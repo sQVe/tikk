@@ -89,7 +89,7 @@ export const treeGroups = (): TreeGroup[] => {
 
   return [
     {
-      plan: { id: planId, title: 'Plan title', status: 'open' },
+      plan: { id: planId, title: 'Plan title', state: 'open' },
       slices: [
         {
           id: activeId,

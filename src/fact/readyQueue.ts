@@ -5,6 +5,8 @@ import type {
   InstructionStateName,
   InstructionTicket,
 } from './instructionState.ts';
+import { derivePlanState } from './planState.ts';
+import type { PlanStateName } from './planState.ts';
 import { compareRank } from './rankOrder.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceStateName } from './sliceState.ts';
@@ -20,7 +22,7 @@ interface Blocker {
   state: string;
 }
 
-type ReadyStateName = InstructionStateName | SliceStateName;
+type ReadyStateName = InstructionStateName | SliceStateName | PlanStateName;
 
 interface Consideration {
   state: ReadyStateName;
@@ -85,6 +87,10 @@ const deriveStates = (
         state: deriveSliceState(ticket, index, now).state,
         claim: null,
       });
+    }
+
+    if (kind === 'plan') {
+      states.set(ticket.id, { state: derivePlanState(ticket, index, now), claim: null });
     }
   }
 
