@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, symlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
@@ -59,6 +59,16 @@ it("lists design.md and nested files in the plan's folder with show --json", asy
   const shown = await cli().runJson<ShownPlan>(['show', id]);
 
   expect(shown.files).toEqual(['design.md', 'reports/review.md']);
+});
+
+it('still lists design.md when the folder also holds a dangling symlink', async () => {
+  const id = await createPlanWithFolder(['design.md']);
+
+  await symlink('missing.md', join(cli().storePath, 'tickets', 'demo', id, 'dangling.md'));
+
+  const shown = await cli().runJson<ShownPlan>(['show', id]);
+
+  expect(shown.files).toEqual(['dangling.md', 'design.md']);
 });
 
 it('leaves folder files out of ls --json', async () => {

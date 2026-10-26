@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { existsSync, watch } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import {
   appendFile,
   link,
@@ -15,7 +16,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 import { z } from 'zod';
 
@@ -249,19 +250,18 @@ const listFactsRecovering = async (
   return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
 };
 
-const isFileInFolder = async (folder: string, name: string): Promise<boolean> => {
-  const stats = await stat(join(folder, name));
-
-  return stats.isFile();
-};
+// A symlink is listed whether or not its target exists, so the list needs no stat of each entry.
+const isFolderFileEntry = (entry: Dirent): boolean => entry.isFile() || entry.isSymbolicLink();
 
 const listTicketFolderFiles = async (
   folder: string,
 ): Promise<Result<string[], { message: string }>> => {
   try {
-    const names = await readdir(folder, { recursive: true });
-    const fileFlags = await Promise.all(names.map((name) => isFileInFolder(folder, name)));
-    const files = names.filter((_name, index) => fileFlags[index] === true);
+    const entries = await readdir(folder, { recursive: true, withFileTypes: true });
+
+    const files = entries
+      .filter((entry) => isFolderFileEntry(entry))
+      .map((entry) => relative(folder, join(entry.parentPath, entry.name)));
 
     return { ok: true, value: files.toSorted() };
   } catch (error) {
