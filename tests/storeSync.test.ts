@@ -4,6 +4,8 @@ import { chmod, mkdir, readdir, readFile, rename, rm, utimes, writeFile } from '
 import { dirname, join, relative } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
+import { ticketFolderPath } from '../src/store/storePaths.ts';
+import { parseProjectName, parseTicketId } from '../src/ticket/ticket.ts';
 import { createCliFixture, createCloneFixtures } from './cliFixture.ts';
 import type { CliFixture, CloneFixtures } from './cliFixture.ts';
 
@@ -65,6 +67,15 @@ const ageFile = async (path: string): Promise<void> => {
   const past = new Date(Date.now() - 5000);
 
   await utimes(path, past, past);
+};
+
+const folderOf = (storePath: string, id: string): string => {
+  const project = parseProjectName('demo');
+  const ticketId = parseTicketId(id);
+
+  invariant(project.ok && ticketId.ok, 'The test project and ticket ID must be valid.');
+
+  return ticketFolderPath({ root: storePath }, project.value, ticketId.value);
 };
 
 const createInstructionIn = async (
@@ -230,6 +241,38 @@ it('leaves a fresh ticket file and one that does not parse out of the commit as 
   expect(tracked).toContain(settledPath);
   expect(tracked).not.toContain(freshPath);
   expect(tracked).not.toContain(brokenRelative);
+});
+
+it("a design.md in a plan's folder syncs to a second clone", async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const plan = await first.runJson<ShownInstruction>([
+    'new',
+    'plan',
+    'Design plan',
+    '--project',
+    'demo',
+    '--status',
+    'draft',
+  ]);
+
+  const designPath = join(folderOf(first.storePath, plan.id), 'design.md');
+  const designText = '# Design\n\nNot ticket front matter.\n';
+
+  await ageFile(plan.path);
+  await mkdir(dirname(designPath), { recursive: true });
+  await writeFile(designPath, designText);
+
+  const firstReport = await first.runJson<SyncReport>(['sync']);
+  await second.runChecked(['sync']);
+
+  const syncedPath = join(second.storePath, relative(first.storePath, designPath));
+
+  expect(firstReport.pending).toEqual([]);
+  expect(await readFile(syncedPath, 'utf8')).toBe(designText);
 });
 
 it('a claim fetches first and sees a claim made on another clone', async () => {

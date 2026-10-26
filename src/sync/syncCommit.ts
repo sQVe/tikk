@@ -29,6 +29,7 @@ export interface SyncCommit {
 
 const storePathspecs = ['facts', 'logs', 'tickets', 'tikk.json', '.gitattributes'];
 const settleMilliseconds = 2000;
+const ticketPathSegments = 3;
 const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 const failedReason = (message: string): { ok: false; reason: SyncReason } => ({
@@ -58,7 +59,12 @@ const listPaths = async (
     : failedReason(listed.reason.message);
 };
 
-const isTicketPath = (path: string): boolean => path.startsWith('tickets/');
+// A ticket file sits directly in a project folder. A deeper path is a design file in a
+// ticket's folder, so it is committed as it is.
+const isTicketPath = (path: string): boolean =>
+  path.startsWith('tickets/') &&
+  path.split('/').length === ticketPathSegments &&
+  path.endsWith('.md');
 
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
 // not changed for two seconds. The age is read after the text, so an edit in between makes it fresh.
@@ -211,7 +217,9 @@ const listHeadTicketNames = async (
 
   const paths = listed.ok ? listed.value.split('\n') : [];
 
-  return paths.map((path) => path.slice(path.lastIndexOf('/') + 1));
+  return paths
+    .filter((path) => isTicketPath(path))
+    .map((path) => path.slice(path.lastIndexOf('/') + 1));
 };
 
 // Returns the text to commit, or `undefined` when the file waits for a later sync.

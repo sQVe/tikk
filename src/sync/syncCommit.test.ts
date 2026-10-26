@@ -88,6 +88,25 @@ it('stages facts, settled tickets, and deletions, and lists the rest as pending'
   expect(fake.commands()).toContain('read-tree HEAD');
 });
 
+it('stages a fresh folder file that does not parse, and keeps a fresh ticket pending', async () => {
+  const folderFile = 'tickets/demo/demo-aaaa/design.md';
+  const ticketFile = 'tickets/demo/demo-aaaa-a.md';
+
+  const fake = makeSync({
+    now,
+    git: listing([], [folderFile, ticketFile]),
+    files: {
+      [`/store/${folderFile}`]: { text: 'no front matter', mtimeMs: now },
+      [`/store/${ticketFile}`]: { text: 'no front matter', mtimeMs: now },
+    },
+  });
+
+  const result = await commitStore(fake.functions, root);
+
+  expect(result).toEqual({ ok: true, value: { committed: true, pending: [ticketFile] } });
+  expect(stagedEntries(fake)).toEqual([`--add --cacheinfo 100644,blob1,${folderFile}`]);
+});
+
 it('makes no commit when only pending tickets changed', async () => {
   const fake = makeSync({
     now,
@@ -183,6 +202,23 @@ it('keeps committed alias lines whose ticket is gone from HEAD when a line is ap
   await commitStore(fake.functions, root);
 
   expect(fake.blobs).toEqual([aliasLine + newLine]);
+});
+
+it('does not count a folder file in HEAD as the ticket that an alias waits for', async () => {
+  const factPath = 'facts/laptop/2026-10.jsonl';
+  const alias = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
+
+  const fake = makeSync({
+    git: (args) =>
+      args.includes('ls-tree')
+        ? gitOutput('tickets/demo/demo-qqqq/demo-qqqq-b.md\n')
+        : listing([], [factPath])(args),
+    files: { [`/store/${factPath}`]: { text: alias, mtimeMs: 0 } },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([]);
 });
 
 it('holds back an unplaced alias that sits before the committed lines of a fact file', async () => {
