@@ -78,12 +78,25 @@ const subcommandOf = (args: string[]): string => {
 export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   const gitCalls: GitCall[] = [];
   const blobs: string[] = [];
+  let blobCount = 0;
+
+  // `hash-object` and `writeBlob` share one count, so blob names follow the order of staging.
+  const nextBlobId = (): string => {
+    blobCount += 1;
+
+    return `blob${blobCount}\n`;
+  };
+
   let indexUpdates = 0;
 
   // The index tree differs from the `HEAD` tree once an `update-index` call has run.
   const defaultReply = (args: string[]): GitReply => {
     if (args.includes('write-tree')) {
       return gitOutput(`tree${indexUpdates}\n`);
+    }
+
+    if (args.includes('hash-object')) {
+      return gitOutput(nextBlobId());
     }
 
     return args.includes('HEAD^{tree}') ? gitOutput('tree0\n') : gitOutput('');
@@ -125,7 +138,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       blobs.push(text);
 
-      return Promise.resolve({ ok: true, value: `blob${blobs.length}\n` });
+      return Promise.resolve({ ok: true, value: nextBlobId() });
     },
     listAliases: () => Promise.resolve(options.aliases ?? []),
     lockStore: () => {
@@ -150,6 +163,11 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     },
     stat: (path) => {
       const file = disk.get(path);
+
+      // Like `readFile`, a fact file or config the test does not list is present.
+      if (file === undefined && !path.includes('/tickets/')) {
+        return Promise.resolve({ mtimeMs: options.now ?? defaultNow });
+      }
 
       return file === undefined ? missingFile() : Promise.resolve({ mtimeMs: file.mtimeMs });
     },

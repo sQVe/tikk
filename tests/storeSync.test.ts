@@ -275,6 +275,38 @@ it("a design.md in a plan's folder syncs to a second clone", async () => {
   expect(await readFile(syncedPath, 'utf8')).toBe(designText);
 });
 
+it("a binary file in a plan's folder syncs to a second clone byte for byte", async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const plan = await first.runJson<ShownInstruction>([
+    'new',
+    'plan',
+    'Binary plan',
+    '--project',
+    'demo',
+    '--status',
+    'draft',
+  ]);
+
+  const imagePath = join(folderOf(first.storePath, plan.id), 'diagram.png');
+  const imageBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00, 0xfe, 0x0a, 0xc3]);
+
+  await ageFile(plan.path);
+  await mkdir(dirname(imagePath), { recursive: true });
+  await writeFile(imagePath, imageBytes);
+
+  const firstReport = await first.runJson<SyncReport>(['sync']);
+  await second.runChecked(['sync']);
+
+  const syncedPath = join(second.storePath, relative(first.storePath, imagePath));
+
+  expect(firstReport.pending).toEqual([]);
+  expect((await readFile(syncedPath)).equals(Buffer.from(imageBytes))).toBe(true);
+});
+
 it('a claim fetches first and sees a claim made on another clone', async () => {
   const { first, second, remotePath } = clonePair();
 

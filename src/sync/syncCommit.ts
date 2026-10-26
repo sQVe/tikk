@@ -113,6 +113,24 @@ export const resetIndex = async (
   return reset.ok ? { ok: true, value: undefined } : failedReason(reset.reason.message);
 };
 
+const stageBlob = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+  blobId: string,
+): Promise<Result<undefined, SyncReason>> => {
+  const staged = await functions.runGit([
+    '-C',
+    root,
+    'update-index',
+    '--add',
+    '--cacheinfo',
+    `100644,${blobId.trim()},${path}`,
+  ]);
+
+  return staged.ok ? { ok: true, value: undefined } : failedReason(staged.reason.message);
+};
+
 // Puts exactly this text in the index, so the commit holds the bytes that were checked.
 export const stageText = async (
   functions: SyncCommitFunctions,
@@ -122,20 +140,7 @@ export const stageText = async (
 ): Promise<Result<undefined, SyncReason>> => {
   const blob = await functions.writeBlob(root, text);
 
-  if (!blob.ok) {
-    return failedReason(blob.reason.message);
-  }
-
-  const staged = await functions.runGit([
-    '-C',
-    root,
-    'update-index',
-    '--add',
-    '--cacheinfo',
-    `100644,${blob.value.trim()},${path}`,
-  ]);
-
-  return staged.ok ? { ok: true, value: undefined } : failedReason(staged.reason.message);
+  return blob.ok ? stageBlob(functions, root, path, blob.value) : failedReason(blob.reason.message);
 };
 
 export const stageRemoval = async (
@@ -156,6 +161,9 @@ export const stageRemoval = async (
 };
 
 const isFactPath = (path: string): boolean => path.startsWith('facts/');
+
+// Ticket and fact files are checked or filtered as text. Every other file is staged from its bytes.
+const isTextPath = (path: string): boolean => isTicketPath(path) || isFactPath(path);
 
 // A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
 // waits for the clash commit. A line that `HEAD` already holds is never dropped, since facts are
@@ -279,17 +287,81 @@ const commitIndex = async (
   return committed.ok ? { ok: true, value: undefined } : failedReason(committed.reason.message);
 };
 
-// Checks the candidates together, then stages the ones that pass. Returns the ones that wait.
+const isPresent = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<boolean> => {
+  try {
+    await functions.stat(join(root, path));
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// The index takes the bytes on disk, since `--no-filters` skips the attribute filters that would
+// rewrite them. A file that is gone waits for a later sync, as a text file does.
+const stageDesignFile = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  path: string,
+): Promise<Result<boolean, SyncReason>> => {
+  if (!(await isPresent(functions, root, path))) {
+    return { ok: true, value: false };
+  }
+
+  const hashed = await functions.runGit([
+    '-C',
+    root,
+    'hash-object',
+    '-w',
+    '--no-filters',
+    '--',
+    path,
+  ]);
+
+  if (!hashed.ok) {
+    return failedReason(hashed.reason.message);
+  }
+
+  const staged = await stageBlob(functions, root, path, hashed.value);
+
+  return staged.ok ? { ok: true, value: true } : staged;
+};
+
+// Checks the text candidates together, then stages the ones that pass. Returns the ones that wait.
 const stageCandidates = async (
   functions: SyncCommitFunctions,
   root: string,
   candidates: string[],
 ): Promise<Result<string[], SyncReason>> => {
-  const texts = await Promise.all(candidates.map((path) => checkChanged(functions, root, path)));
+  const texts = await Promise.all(
+    candidates.map((path) =>
+      isTextPath(path) ? checkChanged(functions, root, path) : Promise.resolve(undefined),
+    ),
+  );
+
   const pending: string[] = [];
   const headNames = await listHeadTicketNames(functions, root);
 
   for (const [index, path] of candidates.entries()) {
+    if (!isTextPath(path)) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Runs with the one-at-a-time staging below.
+      const design = await stageDesignFile(functions, root, path);
+
+      if (!design.ok) {
+        return design;
+      }
+
+      if (!design.value) {
+        pending.push(path);
+      }
+
+      continue;
+    }
+
     const checked = texts[index];
 
     if (checked === undefined) {

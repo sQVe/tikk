@@ -260,6 +260,10 @@ const strictGit = (options: StrictOptions = {}): NonNullable<FakeSyncOptions['gi
       return gitFailure('injected failure');
     }
 
+    if (command.startsWith('hash-object')) {
+      return gitOutput('blob1\n');
+    }
+
     if (command.startsWith('update-index')) {
       updates += 1;
 
@@ -375,6 +379,7 @@ it('runs exactly the expected Git calls and commits with signing off', async () 
     `ls-files -z --deleted -- ${pathspecs}`,
     `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
     'ls-tree -r --name-only HEAD -- tickets',
+    'hash-object -w --no-filters -- tikk.json',
     'update-index --add --cacheinfo 100644,blob1,tikk.json',
     'update-index --force-remove -- tickets/demo/gone.md',
     'write-tree',
@@ -390,6 +395,7 @@ it.each([
   'read-tree HEAD',
   `ls-files -z --deleted -- ${pathspecs}`,
   `ls-files -z --modified --others --exclude-standard -- ${pathspecs}`,
+  'hash-object -w --no-filters -- tikk.json',
   'update-index --add --cacheinfo 100644,blob1,tikk.json',
   'update-index --force-remove -- tickets/demo/gone.md',
   'write-tree',
@@ -414,9 +420,9 @@ it.each([
 it('fails with the blob error and commits nothing when the text cannot be stored', async () => {
   const fake = makeSync({
     now,
-    git: strictGit({ changed: ['tikk.json'] }),
+    git: strictGit({ changed: ['tickets/demo/settled.md'] }),
     blobFails: 'blob refused',
-    files: { '/store/tikk.json': { text: '{}', mtimeMs: 0 } },
+    files: { '/store/tickets/demo/settled.md': { text: validTicket, mtimeMs: 0 } },
   });
 
   const result = await commitStore(fake.functions, root);
