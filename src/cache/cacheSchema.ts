@@ -13,7 +13,7 @@ export interface CacheOpenReason {
 
 type VersionCheck = 'current' | 'outdated' | 'busy';
 
-const cacheVersion = 7;
+const cacheVersion = 8;
 
 // Other tikk processes write the same cache, so a query waits for their lock instead of failing.
 const defaultBusyTimeoutMilliseconds = 5000;
@@ -50,6 +50,7 @@ const createTables = (database: Database): void => {
       covers TEXT,
       status TEXT,
       archived TEXT,
+      new INTEGER,
       body TEXT,
       error TEXT
     )`,
@@ -106,7 +107,7 @@ const isIntact = (database: Database): boolean =>
 const requiredColumns = new Map([
   [
     'tickets',
-    'path,mtime_ms,size,hash,id,kind,title,project,parent,rank,blocked_by,discovered_from,related,criteria,covers,status,archived,body,error',
+    'path,mtime_ms,size,hash,id,kind,title,project,parent,rank,blocked_by,discovered_from,related,criteria,covers,status,archived,new,body,error',
   ],
   ['facts', 'path,line,ticket,kind,at,log_type,json'],
   ['fact_errors', 'path,line,message'],

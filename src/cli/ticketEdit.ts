@@ -1,5 +1,5 @@
 import type { Result } from '../result.ts';
-import { parseTicketId, ticketFrontMatterSchema } from '../ticket/ticket.ts';
+import { parseTicketId, ticketFrontMatterSchema, withoutNew } from '../ticket/ticket.ts';
 import type { TicketFrontMatter } from '../ticket/ticket.ts';
 import {
   invalidArguments,
@@ -47,9 +47,21 @@ const kindChange = (
     return invalidArguments(`The kind of a ticket can only change to slice or plan, not ${kind}.`);
   }
 
-  if (current !== 'issue') {
+  if (current !== 'task') {
     return invalidArguments(
-      `Ticket ${ticket.id} is a ${current}, and only an issue can change its kind.`,
+      `Ticket ${ticket.id} is a ${current}, and only a task can change its kind.`,
+    );
+  }
+
+  if (ticket.frontMatter.parent !== undefined) {
+    return invalidArguments(
+      `Ticket ${ticket.id} has a parent, and only a loose task can change its kind.`,
+    );
+  }
+
+  if (ticket.frontMatter.status !== 'open') {
+    return invalidArguments(
+      `Ticket ${ticket.id} is ${ticket.frontMatter.status}, so it cannot change its kind.`,
     );
   }
 
@@ -87,13 +99,17 @@ const buildFrontMatter = (
     return parent;
   }
 
+  const status = edit.status ?? ticket.frontMatter.status;
+  const keepsNew = kind.value === 'task' && status === 'open';
+  const current = keepsNew ? ticket.frontMatter : withoutNew(ticket.frontMatter);
+
   const frontMatter = ticketFrontMatterSchema.safeParse({
-    ...ticket.frontMatter,
+    ...current,
     kind: kind.value,
-    parent: parent.value ?? ticket.frontMatter.parent,
-    title: edit.title ?? ticket.frontMatter.title,
-    status: edit.status ?? ticket.frontMatter.status,
-    criteria: criteria ?? ticket.frontMatter.criteria,
+    parent: parent.value ?? current.parent,
+    title: edit.title ?? current.title,
+    status,
+    criteria: criteria ?? current.criteria,
   });
 
   if (!frontMatter.success) {

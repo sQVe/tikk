@@ -1,5 +1,6 @@
 import { deriveInstructionState } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
+import { withoutNew } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { conflict, refuseFileErrors, withLockedTicket } from './instructionLock.ts';
@@ -10,7 +11,7 @@ const writeCanceled = async (
   input: CommandInput,
   ticket: CliTicket,
 ): Promise<Result<CliTicket, CliFailure>> => {
-  const frontMatter = { ...ticket.frontMatter, status: 'canceled' as const };
+  const frontMatter = withoutNew({ ...ticket.frontMatter, status: 'canceled' as const });
 
   const written = await writeTicketWithStatus(input, {
     expectedHash: ticket.hash,
@@ -63,8 +64,8 @@ const cancelOther = async (input: CommandInput, ticket: CliTicket): Promise<Comm
     return showOutput(input.session, now, ticket);
   }
 
-  if (status === 'closed') {
-    return conflict(`Issue ${ticket.id} is closed, so it cannot be canceled.`);
+  if (status === 'done') {
+    return conflict(`Task ${ticket.id} is done, so it cannot be canceled.`);
   }
 
   const canceled = await writeCanceled(input, ticket);

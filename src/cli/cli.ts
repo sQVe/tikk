@@ -18,7 +18,7 @@ import { sliceAudit } from './sliceAudit.ts';
 import { syncCommand } from './syncCommand.ts';
 import { ticketArchive, ticketUnarchive } from './ticketArchive.ts';
 import { ticketCancel } from './ticketCancel.ts';
-import { ticketClose } from './ticketClose.ts';
+import { ticketDone } from './ticketDone.ts';
 import { ticketEdit } from './ticketEdit.ts';
 import { ticketList } from './ticketList.ts';
 import { ticketNew } from './ticketNew.ts';
@@ -49,7 +49,7 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['submit', instructionSubmit],
   ['accept', instructionAccept],
   ['cancel', ticketCancel],
-  ['close', ticketClose],
+  ['done', ticketDone],
   ['ready', readyCommand],
   ['needs', needsCommand],
   ['pr', prCommand],
@@ -65,7 +65,7 @@ const sessionCommands = new Map<string, SessionCommand>([
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|close|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|done|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

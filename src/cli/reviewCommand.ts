@@ -2,7 +2,7 @@ import { parseReviewFindings, redactSecrets, selectFindings } from '../fact/fact
 import type { Fact, ReviewFinding } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments } from './cliArguments.ts';
-import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
+import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { appendEvidence, readEvidenceTarget, targetOptions } from './evidenceTarget.ts';
 import { readTarget, requireValue } from './instructionCommand.ts';
 import { refuseFileErrors, withLockedTicket } from './instructionLock.ts';
@@ -15,6 +15,18 @@ const addUsage =
 const listUsage = 'Usage: tikk review ls <id> [--json]';
 
 const subcommandUsage = 'Usage: tikk review <add|ls> <id> [arguments] [--json]';
+
+const requireReviewable = (ticket: CliTicket): Result<undefined, CliFailure> => {
+  const { kind } = ticket.frontMatter;
+
+  if (kind === 'slice' || kind === 'instruction') {
+    return { ok: true, value: undefined };
+  }
+
+  return invalidArguments(
+    `Ticket ${ticket.id} is a ${kind}, and review add needs a slice or an instruction.`,
+  );
+};
 
 const readFindings = async (
   input: CommandInput,
@@ -89,6 +101,12 @@ const reviewAdd = async (input: CommandInput): Promise<CommandResult> => {
   }
 
   return withLockedTicket(input, rawId, refuseFileErrors, async (ticket) => {
+    const reviewable = requireReviewable(ticket);
+
+    if (!reviewable.ok) {
+      return reviewable;
+    }
+
     const facts = await input.session.listFacts([ticket.id]);
 
     if (!facts.ok) {

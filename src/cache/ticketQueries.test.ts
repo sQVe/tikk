@@ -157,6 +157,32 @@ it('returns parent, rank, and blockedBy of a ticket', async () => {
   });
 });
 
+const taskText = (title: string, extra: string): string =>
+  `---\nkind: task\ntitle: ${title}\nproject: tikk\nstatus: open\n${extra}---\n`;
+
+it('returns new for a loose open task and leaves it out of a task with no flag', async () => {
+  using cache = openTestCache(databasePath);
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), taskText('Marked', 'new: true\n'));
+  fake.set(ticketPath('tikk-3a4c'), taskText('Plain', ''));
+
+  await cache.refresh(fake.files);
+
+  const markedId = parseTicketId('tikk-3a4b');
+  const plainId = parseTicketId('tikk-3a4c');
+
+  if (!markedId.ok || !plainId.ok) {
+    throw new Error('bad id');
+  }
+
+  const marked = cache.getTicket(markedId.value);
+  const plain = cache.getTicket(plainId.value);
+
+  expect(marked.ok && marked.value.frontMatter.new).toBe(true);
+  expect(plain.ok && plain.value.frontMatter.new).toBeUndefined();
+});
+
 it('returns the criteria and covers of a slice', async () => {
   using cache = openTestCache(databasePath);
   const fake = createFakeFiles();

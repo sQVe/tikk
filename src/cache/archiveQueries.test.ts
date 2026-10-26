@@ -112,8 +112,8 @@ it('answers yes for a root that finished 15 days ago', async () => {
 });
 
 it('answers yes for a finished root with no status fact for its current status', async () => {
-  const closedIssue = { id: 'tikk-3a4b', kind: 'issue', status: 'closed' };
-  const answers = await answersFor([closedIssue], [canceledAt(tenDaysAgo)]);
+  const doneTask = { id: 'tikk-3a4b', kind: 'task', status: 'done' };
+  const answers = await answersFor([doneTask], [canceledAt(tenDaysAgo)]);
 
   expect(answers).toEqual({ precheck: true, rules: true });
 });
@@ -195,10 +195,10 @@ it('answers yes for a due tree with a ticket unarchived before the finish', asyn
 });
 
 it('answers yes for a due root when only another ticket was unarchived after the finish', async () => {
-  const openIssue = { id: 'tikk-3a4d', kind: 'issue', status: 'open' };
+  const openTask = { id: 'tikk-3a4d', kind: 'task', status: 'open' };
   const facts = [canceledAt(fifteenDaysAgo), unarchivedAt('tikk-3a4d', tenDaysAgo)];
 
-  expect(await answersFor([canceledPlan, openIssue], facts)).toEqual({
+  expect(await answersFor([canceledPlan, openTask], facts)).toEqual({
     precheck: true,
     rules: true,
   });

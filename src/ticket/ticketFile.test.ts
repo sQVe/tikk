@@ -32,14 +32,14 @@ it('parses an instruction file and returns the same values after a round trip', 
 
 it('round trips every optional field', () => {
   const text = `---
-kind: issue
+kind: task
 title: "Colon: in title"
 project: my-project
 parent: my-project-ab3d
 rank: 2.5
 blockedBy:
   - my-project-cd4e
-status: closed
+status: done
 archived: 2026-10-18
 ---
 `;
@@ -71,8 +71,8 @@ const failures: [string, string, string][] = [
     'invalidFrontMatter',
   ],
   [
-    'status closed on an instruction',
-    instructionText.replace('status: open', 'status: closed'),
+    'status done on an instruction',
+    instructionText.replace('status: open', 'status: done'),
     'invalidFrontMatter',
   ],
   ['an empty title', instructionText.replace('Fix the parser', '""'), 'invalidFrontMatter'],
@@ -88,6 +88,33 @@ const failures: [string, string, string][] = [
   ],
   ['an empty front matter block', '---\n---\n', 'invalidFrontMatter'],
 ];
+
+const taskText = `---
+kind: task
+title: Call the vendor
+project: tikk
+status: open
+---
+`;
+
+const taskRefusals: [string, string][] = [
+  ['a task that is a draft', taskText.replace('status: open', 'status: draft')],
+  [
+    'new on a task with a parent',
+    taskText.replace('status: open', 'status: open\nparent: tikk-3467\nnew: true'),
+  ],
+  ['new on a done task', taskText.replace('status: open', 'status: done\nnew: true')],
+];
+
+it.each(taskRefusals)('refuses %s', (_name, text) => {
+  expect(parseTicketFile(text).ok).toBe(false);
+});
+
+it('keeps new on a loose open task', () => {
+  const parsed = parseTicketFile(taskText.replace('status: open', 'status: open\nnew: true'));
+
+  expect(parsed.ok && parsed.value.frontMatter.new).toBe(true);
+});
 
 it.each(failures)('returns a failure with a message for %s', (_name, text, kind) => {
   const parsed = parseTicketFile(text);
@@ -132,7 +159,7 @@ const refusedFiles: [string, string][] = [
     'an instruction file with criteria',
     'kind: instruction\ncriteria:\n  - id: a\n    check: c\n    expected: e',
   ],
-  ['an issue file with covers', 'kind: issue\ncovers:\n  - a'],
+  ['a task file with covers', 'kind: task\ncovers:\n  - a'],
   [
     'a slice file with duplicate criterion IDs',
     'kind: slice\ncriteria:\n  - id: a\n    check: c\n    expected: e\n  - id: a\n    check: c\n    expected: e',
@@ -190,4 +217,24 @@ it('parses a plan with two criteria that have different IDs', () => {
     'a',
     'b',
   ]);
+});
+
+it('fails to parse a slice file with new and names new', () => {
+  const sliceText = `---
+kind: slice
+title: Slice
+project: tikk
+status: open
+criteria:
+  - id: works
+    check: Run the command.
+    expected: It prints ok.
+new: true
+---
+`;
+
+  const parsed = parseTicketFile(sliceText);
+
+  expect(parsed.ok).toBe(false);
+  expect(!parsed.ok && parsed.reason.message).toContain('new');
 });

@@ -94,17 +94,17 @@ it('does not archive a plan canceled 13 days ago', async () => {
   expect(listed.tickets.map((ticket) => ticket.id)).toHaveLength(3);
 });
 
-it('archives a closed stand-alone issue 14 days after it closed', async () => {
-  const issue = ticketOf('demo-3467', 'issue', 'closed');
+it('archives a done stand-alone task 14 days after it was done', async () => {
+  const task = ticketOf('demo-3467', 'task', 'done');
 
   const fakeSession = makeSession({
-    tickets: [issue],
-    facts: [statusFact('demo-3467', 'closed', '2026-10-06T12:00:00.000Z')],
+    tickets: [task],
+    facts: [statusFact('demo-3467', 'done', '2026-10-06T12:00:00.000Z')],
   });
 
   const listed = await runLs(fakeSession);
 
-  expect(archivedOf(fakeSession, issue.path)).toBe('2026-10-20');
+  expect(archivedOf(fakeSession, task.path)).toBe('2026-10-20');
   expect(listed.tickets).toEqual([]);
 });
 

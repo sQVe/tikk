@@ -22,14 +22,14 @@ const broken = idOf('tikk-3a4d');
 
 const lookup: TicketLookup = (id) => {
   if (id === broken) {
-    return { kind: 'issue', hasFileError: true };
+    return { kind: 'task', hasFileError: true };
   }
 
-  return id === known ? { kind: 'issue', hasFileError: false } : undefined;
+  return id === known ? { kind: 'task', hasFileError: false } : undefined;
 };
 
 const issueWith = (fields: Partial<TicketFrontMatter>): TicketFrontMatter => ({
-  kind: 'issue',
+  kind: 'task',
   title: 'T',
   project: project.value,
   blockedBy: [],

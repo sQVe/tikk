@@ -17,11 +17,11 @@ interface TreeTicket {
   frontMatter: { parent?: TicketId | undefined };
 }
 
-const parentKinds: Record<TicketKind, TicketKind | undefined> = {
-  plan: undefined,
-  slice: 'plan',
-  instruction: 'slice',
-  issue: undefined,
+const allowedParentKinds: Record<TicketKind, TicketKind[]> = {
+  plan: [],
+  slice: ['plan'],
+  task: ['plan', 'slice'],
+  instruction: ['slice'],
 };
 
 const fail = (message: string): { ok: false; reason: TreeFailure } => ({
@@ -45,9 +45,9 @@ const checkParent = (
     return { ok: true, value: undefined };
   }
 
-  const allowedKind = parentKinds[kind];
+  const allowedKinds = allowedParentKinds[kind];
 
-  if (allowedKind === undefined) {
+  if (allowedKinds.length === 0) {
     return fail(`A ${kind} has no parent, but the parent is ${parent}.`);
   }
 
@@ -61,9 +61,11 @@ const checkParent = (
     return fail(`The parent ${parent} has a file error. Fix it first.`);
   }
 
-  if (found.kind !== allowedKind) {
+  if (!allowedKinds.includes(found.kind)) {
+    const allowed = allowedKinds.map(withArticle).join(' or ');
+
     return fail(
-      `The parent ${parent} is ${withArticle(found.kind)}, but the parent of ${withArticle(kind)} must be ${withArticle(allowedKind)}.`,
+      `The parent ${parent} is ${withArticle(found.kind)}, but the parent of ${withArticle(kind)} must be ${allowed}.`,
     );
   }
 

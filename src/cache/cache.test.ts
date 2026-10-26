@@ -272,7 +272,7 @@ it('lists status and unarchive facts as state facts', async () => {
   fake.setFactFile(
     factPath(),
     factText('tikk-3a4b', note, '2026-10-20T10:00:00.000Z') +
-      factText('tikk-3a4b', { kind: 'status', status: 'closed' }, '2026-10-20T10:01:00.000Z') +
+      factText('tikk-3a4b', { kind: 'status', status: 'done' }, '2026-10-20T10:01:00.000Z') +
       factText('tikk-3a4b', { kind: 'unarchive' }, '2026-10-20T10:02:00.000Z'),
   );
 
@@ -296,7 +296,7 @@ it('lists only the facts that date a finish or an unarchive as archive facts', a
     factPath(),
     factText('tikk-3a4b', claim, '2026-10-20T10:00:00.000Z') +
       factText('tikk-3a4b', { kind: 'accept' }, '2026-10-20T10:01:00.000Z') +
-      factText('tikk-3a4b', { kind: 'status', status: 'closed' }, '2026-10-20T10:02:00.000Z') +
+      factText('tikk-3a4b', { kind: 'status', status: 'done' }, '2026-10-20T10:02:00.000Z') +
       factText('tikk-3a4c', { kind: 'unarchive' }, '2026-10-20T10:03:00.000Z'),
   );
 

@@ -119,9 +119,9 @@ it('appends a status fact when it cancels an instruction', async () => {
   ]);
 });
 
-it('cancels an issue', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
-  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [issue] });
+it('cancels a task', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [task] });
 
   expect(successOf(result).json).toMatchObject({ id: 'demo-3467' });
   expect(fakeSession.writes).toHaveLength(1);
@@ -137,9 +137,9 @@ it('returns a canceled slice unchanged and appends nothing', async () => {
   expect(fakeSession.appends).toEqual([]);
 });
 
-it('refuses to cancel a closed issue and changes nothing', async () => {
-  const closed = makeKindTicket('demo-3467', 'issue', 'closed');
-  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [closed] });
+it('refuses to cancel a done task and changes nothing', async () => {
+  const done = makeKindTicket('demo-3467', 'task', 'done');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [done] });
 
   expect(failureOf(result).code).toBe('conflict');
   expect(fakeSession.writes).toEqual([]);

@@ -183,11 +183,11 @@ it('refuses a claim without a holder and writes nothing', async () => {
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 
-it('refuses a claim on an issue and writes nothing', async () => {
-  const issue = makeTicket('demo-3467', {
+it('refuses a claim on a task and writes nothing', async () => {
+  const task = makeTicket('demo-3467', {
     frontMatter: {
-      kind: 'issue',
-      title: 'An issue',
+      kind: 'task',
+      title: 'A task',
       project: projectNameOf('demo'),
       blockedBy: [],
       discoveredFrom: [],
@@ -197,10 +197,11 @@ it('refuses a claim on an issue and writes nothing', async () => {
   });
 
   const { fakeSession, result } = await run(instructionClaim, ['demo-3467', '--holder', 'agent'], {
-    tickets: [issue],
+    tickets: [task],
   });
 
   expect(failureOf(result).code).toBe('invalidArguments');
+  expect(failureOf(result).message).toContain('task');
   expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });
 

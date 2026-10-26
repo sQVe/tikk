@@ -32,12 +32,12 @@ describe('selectReady', () => {
     expect(result.skipped).toEqual([]);
   });
 
-  it('does not let an accepted instruction or a closed issue block', () => {
+  it('does not let an accepted instruction or a done task block', () => {
     const accepted = makeTicket('3469');
-    const issue = makeTicket('3478', { kind: 'issue', status: 'closed' });
+    const task = makeTicket('3478', { kind: 'task', status: 'done' });
     const instruction = makeTicket('3479', { blockedBy: ['3469', '3478'] });
     const facts = [makeFact('3469', { kind: 'accept' })];
-    const result = selectReady([accepted, issue, instruction], facts, now, noScope);
+    const result = selectReady([accepted, task, instruction], facts, now, noScope);
 
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([instruction.id]);
   });
@@ -95,13 +95,13 @@ describe('selectReady', () => {
     expect(result.skipped.map((entry) => entry.reason)).toEqual(['submitted', 'blocked']);
   });
 
-  it('orders ranked instructions first, then by ID, and ignores drafts, issues, and archived instructions', () => {
+  it('orders ranked instructions first, then by ID, and ignores drafts, tasks, and archived instructions', () => {
     const unranked = makeTicket('3469');
     const ranked = makeTicket('3478', { rank: 5 });
     const draft = makeTicket('3479', { status: 'draft', rank: 0 });
-    const issue = makeTicket('3489', { kind: 'issue', rank: 0 });
+    const task = makeTicket('3489', { kind: 'task', rank: 0 });
     const archived = makeTicket('3498', { archived: '2026-01-01', rank: 0 });
-    const result = selectReady([unranked, archived, issue, draft, ranked], [], now, noScope);
+    const result = selectReady([unranked, archived, task, draft, ranked], [], now, noScope);
 
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([ranked.id, unranked.id]);
   });

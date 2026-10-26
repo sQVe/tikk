@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import { parseTicketFile } from '../ticket/ticket.ts';
 import {
   failed,
   failureOf,
@@ -97,7 +98,7 @@ const refusals: [string, string[], boolean][] = [
   ['no field in json mode', ['demo-3467', '--hash', 'h'], true],
   ['a field without --hash', ['demo-3467', '--title', 'New'], false],
   ['an empty title', ['demo-3467', '--hash', 'h', '--title', ''], true],
-  ['a closed instruction', ['demo-3467', '--hash', 'h', '--status', 'closed'], true],
+  ['a done instruction', ['demo-3467', '--hash', 'h', '--status', 'done'], true],
   ['an unknown status', ['demo-3467', '--hash', 'h', '--status', 'nope'], true],
   ['a missing body file', ['demo-3467', '--hash', 'h', '--body-file', '/missing.md'], true],
 ];
@@ -119,12 +120,12 @@ it('names the missing body file in the error', async () => {
 });
 
 it('gives a message for a rejected front matter', async () => {
-  const { result } = edit(['demo-3467', '--hash', 'h', '--status', 'closed'], true);
+  const { result } = edit(['demo-3467', '--hash', 'h', '--status', 'done'], true);
 
   const reason = failureOf(await result);
 
   expect(reason.code).toBe('invalidArguments');
-  expect(reason.message).toContain('closed');
+  expect(reason.message).toContain('done');
 });
 
 it('returns notFound naming the ID and writes nothing for an unknown ticket', async () => {
@@ -273,32 +274,32 @@ it('prints the derived state of a done instruction in the text after an edit', a
   expect(output.text).toContain('demo-3467  done');
 });
 
-it('turns an issue into a slice under a plan and keeps its ID and path', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+it('turns a task into a slice under a plan and keeps its ID and path', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
   const plan = makeKindTicket('demo-3468', 'plan');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
     true,
-    { tickets: [issue, plan] },
+    { tickets: [task, plan] },
     criteriaFiles,
   );
 
-  expect(successOf(await result).json).toMatchObject({ id: 'demo-3467', path: issue.path });
+  expect(successOf(await result).json).toMatchObject({ id: 'demo-3467', path: task.path });
   expect(fakeSession.writes).toHaveLength(1);
-  expect(fakeSession.writes[0]?.path).toBe(issue.path);
+  expect(fakeSession.writes[0]?.path).toBe(task.path);
   expect(fakeSession.writes[0]?.text).toContain('kind: slice');
   expect(fakeSession.writes[0]?.text).toContain('parent: demo-3468');
   expect(fakeSession.appends).toEqual([]);
 });
 
-it('turns an issue into a plan', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+it('turns a task into a plan', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'plan', ...criteriaArgs],
     true,
-    { tickets: [issue] },
+    { tickets: [task] },
     criteriaFiles,
   );
 
@@ -306,22 +307,97 @@ it('turns an issue into a plan', async () => {
   expect(fakeSession.writes[0]?.text).toContain('kind: plan');
 });
 
-it('turns a draft issue into a draft slice without criteria', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue', 'draft');
+it('promotes a loose task to a slice under a plan and keeps its ID, body, and links', async () => {
+  const plan = makeKindTicket('demo-3468', 'plan');
+  const blocker = makeKindTicket('demo-3469', 'task');
+  const source = makeKindTicket('demo-3473', 'task');
+  const related = makeKindTicket('demo-3474', 'task');
+  const loose = makeKindTicket('demo-3467', 'task');
 
-  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'slice'], true, {
-    tickets: [issue],
+  const task = {
+    ...loose,
+    frontMatter: {
+      ...loose.frontMatter,
+      blockedBy: [blocker.id],
+      discoveredFrom: [source.id],
+      related: [related.id],
+    },
+  };
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
+    true,
+    { tickets: [plan, blocker, source, related, task] },
+    criteriaFiles,
+  );
+
+  expect(successOf(await result).json).toMatchObject({ id: 'demo-3467', path: task.path });
+
+  const written = parseTicketFile(fakeSession.writes[0]?.text ?? '');
+
+  expect(written.ok && written.value.frontMatter).toMatchObject({
+    kind: 'slice',
+    parent: 'demo-3468',
+    blockedBy: ['demo-3469'],
+    discoveredFrom: ['demo-3473'],
+    related: ['demo-3474'],
   });
 
-  successOf(await result);
-  expect(fakeSession.writes[0]?.text).toContain('kind: slice');
+  expect(written.ok && written.value.body).toBe(task.body);
 });
 
-it('refuses to turn an open issue into a slice without criteria and writes nothing', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+it('drops new when a loose task is promoted', async () => {
+  const plan = makeKindTicket('demo-3468', 'plan');
+  const loose = makeKindTicket('demo-3467', 'task');
+  const task = { ...loose, frontMatter: { ...loose.frontMatter, new: true } };
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
+    true,
+    { tickets: [plan, task] },
+    criteriaFiles,
+  );
+
+  successOf(await result);
+  expect(fakeSession.writes[0]?.text).not.toContain('new');
+});
+
+it('refuses to promote a task with a parent and writes nothing', async () => {
+  const plan = makeKindTicket('demo-3468', 'plan');
+  const loose = makeKindTicket('demo-3467', 'task');
+  const child = { ...loose, frontMatter: { ...loose.frontMatter, parent: plan.id } };
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
+    true,
+    { tickets: [plan, child] },
+    criteriaFiles,
+  );
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('refuses to promote a done task and names its status', async () => {
+  const plan = makeKindTicket('demo-3468', 'plan');
+  const done = makeKindTicket('demo-3467', 'task', 'done');
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
+    true,
+    { tickets: [plan, done] },
+    criteriaFiles,
+  );
+
+  expect(failureOf(await result).message).toContain('done');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('refuses to turn an open task into a slice without criteria and writes nothing', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
 
   const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--kind', 'slice'], true, {
-    tickets: [issue],
+    tickets: [task],
   });
 
   expect(failureOf(await result).code).toBe('invalidArguments');
@@ -329,13 +405,13 @@ it('refuses to turn an open issue into a slice without criteria and writes nothi
   expect(fakeSession.appends).toEqual([]);
 });
 
-it('turns an open issue into a slice with the criteria of --criteria-file', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+it('turns an open task into a slice with the criteria of --criteria-file', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
 
   const { fakeSession, fakeEffects, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'slice', ...criteriaArgs],
     true,
-    { tickets: [issue] },
+    { tickets: [task] },
     criteriaFiles,
   );
 
@@ -352,12 +428,12 @@ it('turns an open issue into a slice with the criteria of --criteria-file', asyn
 });
 
 it('refuses a criteria file that cannot be read and writes nothing', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue', 'draft');
+  const task = makeKindTicket('demo-3467', 'task');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'slice', ...criteriaArgs],
     true,
-    { tickets: [issue] },
+    { tickets: [task] },
   );
 
   expect(failureOf(await result).code).toBe('invalidArguments');
@@ -391,13 +467,13 @@ it('refuses --kind on a slice and writes nothing', async () => {
 });
 
 it('refuses a kind other than slice or plan', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+  const task = makeKindTicket('demo-3467', 'task');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'instruction'],
     true,
     {
-      tickets: [issue],
+      tickets: [task],
     },
   );
 
@@ -406,13 +482,13 @@ it('refuses a kind other than slice or plan', async () => {
 });
 
 it('refuses --parent without --kind slice', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+  const task = makeKindTicket('demo-3467', 'task');
   const plan = makeKindTicket('demo-3468', 'plan');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'plan', '--parent', 'demo-3468'],
     true,
-    { tickets: [issue, plan] },
+    { tickets: [task, plan] },
   );
 
   expect(failureOf(await result).code).toBe('invalidArguments');
@@ -420,13 +496,13 @@ it('refuses --parent without --kind slice', async () => {
 });
 
 it('refuses a parent that is not a plan and writes nothing', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
-  const other = makeKindTicket('demo-3468', 'issue');
+  const task = makeKindTicket('demo-3467', 'task');
+  const other = makeKindTicket('demo-3468', 'task');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
     true,
-    { tickets: [issue, other] },
+    { tickets: [task, other] },
     criteriaFiles,
   );
 
@@ -485,12 +561,12 @@ it('refuses to move an instruction to another slice with --parent and writes not
 });
 
 it('refuses a --parent that is not a valid ID with invalidArguments and writes nothing', async () => {
-  const issue = makeKindTicket('demo-3467', 'issue');
+  const task = makeKindTicket('demo-3467', 'task');
 
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'Not An ID', ...criteriaArgs],
     true,
-    { tickets: [issue] },
+    { tickets: [task] },
     criteriaFiles,
   );
 
@@ -508,4 +584,54 @@ it('edits a title without a machine name, since no status fact is needed', async
 
   successOf(await result);
   expect(fakeSession.writes).toHaveLength(1);
+});
+
+it('keeps new on a loose open task that is only retitled', async () => {
+  const loose = makeKindTicket('demo-3467', 'task');
+  const task = { ...loose, frontMatter: { ...loose.frontMatter, new: true } };
+
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--title', 'New'], true, {
+    tickets: [task],
+  });
+
+  successOf(await result);
+  expect(fakeSession.writes[0]?.text).toContain('new: true');
+});
+
+it('drops new when an edit marks the task done', async () => {
+  const loose = makeKindTicket('demo-3467', 'task');
+  const task = { ...loose, frontMatter: { ...loose.frontMatter, new: true } };
+
+  const { fakeSession, result } = edit(['demo-3467', '--hash', 'h', '--status', 'done'], true, {
+    tickets: [task],
+  });
+
+  successOf(await result);
+  expect(fakeSession.writes[0]?.text).not.toContain('new');
+});
+
+it('refuses to promote a done task even when the same edit sets its status to open', async () => {
+  const plan = makeKindTicket('demo-3468', 'plan');
+  const done = makeKindTicket('demo-3467', 'task', 'done');
+
+  const { fakeSession, result } = edit(
+    [
+      'demo-3467',
+      '--hash',
+      'h',
+      '--kind',
+      'slice',
+      '--parent',
+      'demo-3468',
+      '--status',
+      'open',
+      ...criteriaArgs,
+    ],
+    true,
+    { tickets: [plan, done] },
+    criteriaFiles,
+  );
+
+  expect(failureOf(await result).message).toContain('done');
+  expect(fakeSession.writes).toEqual([]);
 });

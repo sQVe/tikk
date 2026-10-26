@@ -173,8 +173,8 @@ const recordTicket = (
   database.run(
     `INSERT INTO tickets (
       path, mtime_ms, size, hash, id, kind, title, project, parent, rank,
-      blocked_by, discovered_from, related, criteria, covers, status, archived, body, error
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      blocked_by, discovered_from, related, criteria, covers, status, archived, new, body, error
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT (path) DO UPDATE SET
       mtime_ms = excluded.mtime_ms,
       size = excluded.size,
@@ -192,6 +192,7 @@ const recordTicket = (
       covers = excluded.covers,
       status = excluded.status,
       archived = excluded.archived,
+      new = excluded.new,
       body = excluded.body,
       error = NULL`,
     [
@@ -212,6 +213,7 @@ const recordTicket = (
       jsonOrNull(frontMatter.covers),
       frontMatter.status,
       frontMatter.archived ?? null,
+      frontMatter.new === true ? 1 : null,
       body,
     ],
   );
@@ -301,7 +303,7 @@ const markDuplicates = (database: Database): void => {
       `UPDATE tickets SET
         id = NULL, kind = NULL, title = NULL, project = NULL, parent = NULL, rank = NULL,
         blocked_by = NULL, discovered_from = NULL, related = NULL,
-        criteria = NULL, covers = NULL, status = NULL, archived = NULL, body = NULL,
+        criteria = NULL, covers = NULL, status = NULL, archived = NULL, new = NULL, body = NULL,
         mtime_ms = ?, hash = ?, error = ?
       WHERE path = ?`,
       [

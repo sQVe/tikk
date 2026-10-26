@@ -217,16 +217,16 @@ it('selects every slice with --kind slice and refuses --kind together with --par
   expect(unknown.code).toBe('invalidArguments');
 });
 
-it('fails for a missing parent and for an instruction or issue parent', async () => {
+it('fails for a missing parent and for an instruction or task parent', async () => {
   const instruction = instructionWith('demo-3467', {});
-  const issue = makeKindTicket('demo-3468', 'issue');
+  const task = makeKindTicket('demo-3468', 'task');
   const missing = failureOf(await ready(['--parent', 'demo-3499'], [instruction]));
   const instructionParent = failureOf(await ready(['--parent', 'demo-3467'], [instruction]));
-  const issueParent = failureOf(await ready(['--parent', 'demo-3468'], [issue]));
+  const taskParent = failureOf(await ready(['--parent', 'demo-3468'], [task]));
 
   expect(missing.code).toBe('notFound');
   expect(instructionParent.code).toBe('invalidArguments');
-  expect(issueParent.code).toBe('invalidArguments');
+  expect(taskParent.code).toBe('invalidArguments');
 });
 
 it('reports an unreadable slice as parseError and still resolves an archived parent', async () => {
@@ -283,4 +283,25 @@ it('returns the list with one reconcile problem when gh fails', async () => {
 
   expect(output.text).toContain('problem: ');
   expect(output.text).toContain('offline');
+});
+
+it('skips an instruction blocked by an open task and names the task', async () => {
+  const task = makeKindTicket('demo-3468', 'task');
+  const blocked = instructionWith('demo-3467', { blockedBy: [ticketIdOf('demo-3468')] });
+  const output = successOf(await ready([], [blocked, task]));
+
+  expect(output.json).toMatchObject({
+    candidates: [],
+    skipped: [
+      { id: 'demo-3467', reason: 'blocked', blockers: [{ id: 'demo-3468', state: 'open' }] },
+    ],
+  });
+});
+
+it('returns the instruction once the blocking task is done', async () => {
+  const task = makeKindTicket('demo-3468', 'task', 'done');
+  const blocked = instructionWith('demo-3467', { blockedBy: [ticketIdOf('demo-3468')] });
+  const output = successOf(await ready([], [blocked, task]));
+
+  expect(output.json).toMatchObject({ candidates: [{ id: 'demo-3467' }], skipped: [] });
 });

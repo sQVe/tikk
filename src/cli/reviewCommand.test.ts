@@ -1,6 +1,13 @@
 import { expect, it } from 'bun:test';
 
-import { failureOf, makeEffects, makeSession, makeTicket } from './cliHarness.ts';
+import {
+  failureOf,
+  makeEffects,
+  makeKindTicket,
+  makeSession,
+  makeTicket,
+  successOf,
+} from './cliHarness.ts';
 import { reviewCommand } from './reviewCommand.ts';
 
 const run = async (args: string[], files: Record<string, string> = {}) => {
@@ -65,4 +72,43 @@ it('refuses ls without an ID', async () => {
   const { result } = await run(['ls']);
 
   expect(failureOf(result).code).toBe('invalidArguments');
+});
+
+it('adds a review to an instruction', async () => {
+  const { result, fakeSession } = await run(['add', 'demo-3467', ...addFlags], {
+    '/findings.json': '[]',
+  });
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
+});
+
+it('refuses a review on a plan, names its kind, and appends nothing', async () => {
+  const fakeSession = makeSession({ tickets: [makeKindTicket('demo-3467', 'plan')] });
+  const { effects } = makeEffects({ session: fakeSession, files: { '/findings.json': '[]' } });
+
+  const result = await reviewCommand({
+    args: ['add', 'demo-3467', ...addFlags],
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  expect(failureOf(result).message).toContain('plan');
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('adds a review to a slice', async () => {
+  const fakeSession = makeSession({ tickets: [makeKindTicket('demo-3467', 'slice')] });
+  const { effects } = makeEffects({ session: fakeSession, files: { '/findings.json': '[]' } });
+
+  const result = await reviewCommand({
+    args: ['add', 'demo-3467', ...addFlags],
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  successOf(result);
+  expect(fakeSession.appends).toHaveLength(1);
 });

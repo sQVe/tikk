@@ -13,13 +13,13 @@ import { ticketList } from './ticketList.ts';
 
 const other = makeTicket('other-3467', {
   frontMatter: {
-    kind: 'issue',
+    kind: 'task',
     title: 'Other title',
     project: projectNameOf('other'),
     blockedBy: [],
     discoveredFrom: [],
     related: [],
-    status: 'draft',
+    status: 'open',
   },
 });
 
@@ -64,7 +64,7 @@ it('formats one text line per ticket', () => {
   const output = successOf(list([]).result);
 
   expect(output.text).toBe(
-    'demo-3467  instruction  open  A title\nother-3467  issue  draft  Other title\n',
+    'demo-3467  instruction  open  A title\nother-3467  task  open  Other title\n',
   );
 });
 

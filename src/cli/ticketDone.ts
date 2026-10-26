@@ -1,3 +1,4 @@
+import { withoutNew } from '../ticket/ticket.ts';
 import {
   forceOptions,
   invalidArguments,
@@ -9,25 +10,25 @@ import { conflict, refuseFileErrors, withLockedTicket } from './instructionLock.
 import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
 import { showAfterRefresh, showOutput } from './ticketView.ts';
 
-const closeLocked = async (
+const doneLocked = async (
   input: CommandInput,
   ticket: CliTicket,
   forced: string | undefined,
 ): Promise<CommandResult> => {
   const { frontMatter } = ticket;
 
-  if (frontMatter.kind !== 'issue') {
+  if (frontMatter.kind !== 'task') {
     return invalidArguments(
-      `Ticket ${ticket.id} is not an issue: its kind is ${frontMatter.kind}, and only an issue closes.`,
+      `Ticket ${ticket.id} is not a task: its kind is ${frontMatter.kind}, and only a task can be done.`,
     );
   }
 
-  if (frontMatter.status === 'closed') {
+  if (frontMatter.status === 'done') {
     return showOutput(input.session, input.effects.now(), ticket);
   }
 
   if (frontMatter.status === 'canceled') {
-    return conflict(`Issue ${ticket.id} is canceled, so it cannot be closed.`);
+    return conflict(`Task ${ticket.id} is canceled, so it cannot be done.`);
   }
 
   const tree = forced === undefined ? checkSessionTree(input.session, frontMatter) : undefined;
@@ -36,12 +37,12 @@ const closeLocked = async (
     return tree;
   }
 
-  const closed = { ...frontMatter, status: 'closed' as const };
+  const done = withoutNew({ ...frontMatter, status: 'done' as const });
 
   const written = await writeTicketWithStatus(input, {
     expectedHash: ticket.hash,
     ticket,
-    frontMatter: closed,
+    frontMatter: done,
     forced,
   });
 
@@ -52,7 +53,7 @@ const closeLocked = async (
   return showAfterRefresh(input.session, input.effects.now(), ticket.id);
 };
 
-export const ticketClose = async (input: CommandInput): Promise<CommandResult> => {
+export const ticketDone = async (input: CommandInput): Promise<CommandResult> => {
   const parsed = parseCommandArguments(input.args, forceOptions);
 
   if (!parsed.ok) {
@@ -62,7 +63,7 @@ export const ticketClose = async (input: CommandInput): Promise<CommandResult> =
   const [rawId, ...extra] = parsed.value.positionals;
 
   if (rawId === undefined || extra.length > 0) {
-    return invalidArguments('Usage: tikk close <id> [--force --reason <text>] [--json]');
+    return invalidArguments('Usage: tikk done <id> [--force --reason <text>] [--json]');
   }
 
   const forced = readForce(parsed.value.values);
@@ -72,6 +73,6 @@ export const ticketClose = async (input: CommandInput): Promise<CommandResult> =
   }
 
   return withLockedTicket(input, rawId, refuseFileErrors, (ticket) =>
-    closeLocked(input, ticket, forced.value),
+    doneLocked(input, ticket, forced.value),
   );
 };

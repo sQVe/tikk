@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0018 (Plans, slices, instructions, and issues)](./0018-work-model-and-kinds.md),
+**Related**: [ADR 0018 (Plans, slices, instructions, and tasks)](./0018-work-model-and-kinds.md),
 [ADR 0022 (Claims with leases and a ready queue)](./0022-claims-leases-and-ready-queue.md)
 
 ## Context
@@ -20,13 +20,14 @@ Tickets link to each other with three edges in front matter, besides `parent`:
 - `related`: a plain link with no effect on readiness.
 
 Only `blockedBy` is read by the ready queue ([ADR 0022](./0022-claims-leases-and-ready-queue.md)).
+Any ticket, a task too, can be a `blockedBy` target. A done or canceled target no longer blocks.
 
 ## Consequences
 
 ### Positive
 
 - Readiness has one cause, so `ready` can name what blocks each skipped item.
-- A discovered issue keeps its link to the work that found it.
+- A discovered task keeps its link to the work that found it.
 
 ### Negative
 

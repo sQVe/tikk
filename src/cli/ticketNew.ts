@@ -1,5 +1,6 @@
 import type { Result } from '../result.ts';
 import {
+  isLooseOpenTask,
   parseProjectName,
   parseTicketId,
   serializeTicketFile,
@@ -28,6 +29,7 @@ import { showAfterRefresh, storeFailure } from './ticketView.ts';
 
 interface FrontMatterInput {
   values: ParsedArguments['values'];
+  json: boolean;
   kind: string;
   title: string;
   project: ProjectName;
@@ -41,7 +43,7 @@ interface Edges {
 }
 
 const usage =
-  'Usage: tikk new <plan|slice|instruction|issue> <title> [--project <p>] [--parent <id>] [--status <s>] [--rank <n>] [--blocked-by <id>]... [--discovered-from <id>]... [--related <id>]... [--covers <criterion>]... [--criteria-file <f>] [--body-file <f>] [--json]';
+  'Usage: tikk new <plan|slice|task|instruction> <title> [--project <p>] [--parent <id>] [--status <s>] [--rank <n>] [--blocked-by <id>]... [--discovered-from <id>]... [--related <id>]... [--covers <criterion>]... [--criteria-file <f>] [--body-file <f>] [--json]';
 
 const chooseProject = async (
   effects: CliEffects,
@@ -131,13 +133,17 @@ const parseRank = (values: ParsedArguments['values']): Result<number | undefined
 };
 
 const buildFrontMatter = (input: FrontMatterInput): Result<TicketFrontMatter, CliFailure> => {
-  const { values, kind, title, project, criteria } = input;
+  const { values, json, kind, title, project, criteria } = input;
   const rawParent = stringValue(values, 'parent');
   const parent = rawParent === undefined ? undefined : parseTicketId(rawParent);
 
   if (parent !== undefined && !parent.ok) {
     return invalidArguments(parent.reason.message);
   }
+
+  const status = stringValue(values, 'status') ?? 'open';
+  const parentId = parent?.value;
+  const isNew = json && isLooseOpenTask({ kind, status, parent: parentId });
 
   const rank = parseRank(values);
 
@@ -157,12 +163,13 @@ const buildFrontMatter = (input: FrontMatterInput): Result<TicketFrontMatter, Cl
     kind,
     title,
     project,
-    parent: parent?.value,
+    parent: parentId,
     rank: rank.value,
     ...edges.value,
     criteria,
     covers: covers.length === 0 ? undefined : covers,
-    status: stringValue(values, 'status') ?? 'open',
+    status,
+    ...(isNew ? { new: true } : {}),
   });
 
   if (!frontMatter.success) {
@@ -239,6 +246,7 @@ export const ticketNew = async (input: CommandInput): Promise<CommandResult> => 
 
   const frontMatter = buildFrontMatter({
     values,
+    json: input.json,
     kind,
     title,
     project: project.value,

@@ -1,4 +1,4 @@
-# ADR 0021: Strict validation at claim, submit, and close
+# ADR 0021: Strict validation at claim, submit, and done
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
@@ -12,13 +12,13 @@ effort fighting the validator. A hand edit can break front matter at any time.
 
 ## Decision
 
-tikk validates strictly at `claim`, `submit`, and `close`. Prose gets warnings, not errors. Log
-lines are never blocked. `--force --reason` overrides a strict check.
+tikk validates strictly at `claim`, `submit`, and `done`. Prose gets warnings, not errors. Log lines
+are never blocked. `--force --reason` overrides a strict check.
 
 ### Levels
 
 - Strict: front matter fields, the tree, edges, and criteria on plans and slices must be valid at
-  claim, submit, and close. A command that fails strict validation exits with an error.
+  claim, submit, and done. A command that fails strict validation exits with an error.
 - Warning: prose in the body, and the criteria coverage report. A warning does not stop a command.
 - Never blocked: `log` lines, so a worker can always report progress, questions, and discoveries.
 
@@ -36,7 +36,7 @@ agents can meet it.
 
 ### Negative
 
-- A warning can be ignored, so weak prose can reach a close.
+- A warning can be ignored, so weak prose can reach a done task.
 - `--force` can hide a real problem if agents use it too often.
 
 ## Alternatives considered

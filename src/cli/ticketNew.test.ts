@@ -12,6 +12,7 @@ import {
   successOf,
 } from './cliHarness.ts';
 import type { EffectsOptions, SessionOptions } from './cliHarness.ts';
+import { ticketDone } from './ticketDone.ts';
 import { ticketNew } from './ticketNew.ts';
 
 const create = (
@@ -38,7 +39,7 @@ const create = (
   return { fakeSession, fakeEffects, result };
 };
 
-const ticketOfKind = (id: string, kind: 'plan' | 'slice' | 'instruction' | 'issue'): CliTicket =>
+const ticketOfKind = (id: string, kind: 'plan' | 'slice' | 'instruction' | 'task'): CliTicket =>
   makeTicket(id, {
     frontMatter: {
       kind,
@@ -138,7 +139,7 @@ const refusals: [string, string[]][] = [
   ['an unknown option', ['instruction', 'Title', '--bogus']],
   ['an invalid kind', ['epic', 'Title']],
   ['an empty title', ['instruction', '']],
-  ['a closed instruction', ['instruction', 'Title', '--status', 'closed']],
+  ['a done instruction', ['instruction', 'Title', '--status', 'done']],
   ['an invalid project', ['instruction', 'Title', '--project', 'Bad Name']],
   ['an invalid parent', ['instruction', 'Title', '--parent', 'nonsense']],
   ['a missing body file', ['instruction', 'Title', '--body-file', '/missing.md']],
@@ -172,12 +173,12 @@ it('names the missing body file in the error', async () => {
 });
 
 it('gives a message for a rejected front matter', async () => {
-  const { result } = create(['instruction', 'Title', '--status', 'closed']);
+  const { result } = create(['instruction', 'Title', '--status', 'done']);
 
   const reason = failureOf(await result);
 
   expect(reason.code).toBe('invalidArguments');
-  expect(reason.message).toContain('closed');
+  expect(reason.message).toContain('done');
 });
 
 it('fails with the project message when the project cannot be resolved', async () => {
@@ -300,11 +301,17 @@ const treeRefusals: [string, string[], SessionOptions, string][] = [
   ],
   [
     'a missing discovered-from target',
-    ['issue', 'Title', '--discovered-from', 'demo-3474'],
+    ['task', 'Title', '--discovered-from', 'demo-3474'],
     {},
     'demo-3474',
   ],
-  ['a missing related target', ['issue', 'Title', '--related', 'demo-3475'], {}, 'demo-3475'],
+  ['a missing related target', ['task', 'Title', '--related', 'demo-3475'], {}, 'demo-3475'],
+  [
+    'a task whose parent is an instruction',
+    ['task', 'Title', '--parent', 'demo-3468'],
+    { tickets: [ticketOfKind('demo-3468', 'instruction')] },
+    'an instruction',
+  ],
 ];
 
 for (const [name, args, sessionOptions, mention] of treeRefusals) {
@@ -325,6 +332,86 @@ for (const [name, args, sessionOptions, mention] of treeRefusals) {
     expect(fakeSession.appends).toEqual([]);
   });
 }
+
+it('creates a task under a plan, under a slice, or with no parent', async () => {
+  const cases: [string[], SessionOptions][] = [
+    [['task', 'Title', '--parent', 'demo-3468'], { tickets: [ticketOfKind('demo-3468', 'plan')] }],
+    [['task', 'Title', '--parent', 'demo-3468'], { tickets: [slice('demo-3468')] }],
+    [['task', 'Title'], {}],
+  ];
+
+  for (const [args, sessionOptions] of cases) {
+    const { fakeSession, result } = create(args, {}, {}, sessionOptions);
+
+    successOf(await result);
+    expect(fakeSession.creates[0]?.text).toContain('kind: task');
+  }
+});
+
+it('refuses the retired issue kind and names task', async () => {
+  const { fakeSession, result } = create(['issue', 'Title']);
+
+  const reason = failureOf(await result);
+
+  expect(reason.code).toBe('invalidArguments');
+  expect(reason.message).toContain('task');
+  expect(fakeSession.creates).toEqual([]);
+});
+
+const createTaskWithJson = (args: string[], sessionOptions: SessionOptions = {}) => {
+  const fakeSession = makeSession({
+    created: makeTicket('demo-3467', { body: 'Made\n' }),
+    readBack: true,
+    ...sessionOptions,
+  });
+
+  const { effects } = makeEffects({ session: fakeSession });
+  const result = ticketNew({ args, json: true, effects, session: fakeSession.session });
+
+  return { fakeSession, result };
+};
+
+it('marks a task made with --json and no parent as new', async () => {
+  const { fakeSession, result } = createTaskWithJson(['task', 'Title']);
+
+  expect(successOf(await result).json).toMatchObject({ kind: 'task', new: true });
+  expect(fakeSession.creates[0]?.text).toContain('new: true');
+});
+
+it('does not mark a task made without --json as new', async () => {
+  const { fakeSession, result } = create(['task', 'Title']);
+
+  successOf(await result);
+  expect(fakeSession.creates[0]?.text).not.toContain('new');
+});
+
+it('does not mark a task made with --json under a parent as new', async () => {
+  const { fakeSession, result } = createTaskWithJson(['task', 'Title', '--parent', 'demo-3468'], {
+    tickets: [slice('demo-3468')],
+  });
+
+  expect(successOf(await result).json).not.toMatchObject({ new: true });
+  expect(fakeSession.creates[0]?.text).not.toContain('new');
+});
+
+it('removes new from a task when tikk done finishes it', async () => {
+  const fresh = makeTicket('demo-3467', {
+    frontMatter: { ...ticketOfKind('demo-3467', 'task').frontMatter, new: true },
+  });
+
+  const fakeSession = makeSession({ tickets: [fresh] });
+  const { effects } = makeEffects({ session: fakeSession });
+
+  const result = await ticketDone({
+    args: ['demo-3467'],
+    json: true,
+    effects,
+    session: fakeSession.session,
+  });
+
+  successOf(result);
+  expect(fakeSession.writes[0]?.text).not.toContain('new');
+});
 
 it('accepts a link to an archived ticket', async () => {
   const archived = makeTicket('demo-3468', {
