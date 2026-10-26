@@ -55,6 +55,18 @@ const defaultNow = 10_000;
 const missingFile = (): Promise<never> =>
   Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
 
+const pathsUnder = (disk: Map<string, unknown>, directory: string): string[] =>
+  [...disk.keys()].filter((path) => path.startsWith(`${directory}/`));
+
+// Names of the direct entries of a directory on the fake disk.
+const namesUnder = (disk: Map<string, unknown>, directory: string): string[] => [
+  ...new Set(
+    pathsUnder(disk, directory).map((path) =>
+      path.slice(directory.length + 1).replace(/\/.*$/, ''),
+    ),
+  ),
+];
+
 // The subcommand follows the `-c` identity pairs and the `-C <root>` pair.
 const subcommandOf = (args: string[]): string => {
   const index = args.indexOf('-C');
@@ -161,7 +173,13 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
       const folder = options.folder ?? 'missing';
 
-      return folder === 'missing' ? missingFile() : Promise.resolve(folder);
+      if (folder !== 'missing') {
+        return Promise.resolve(folder);
+      }
+
+      const names = namesUnder(disk, directory);
+
+      return names.length === 0 ? missingFile() : Promise.resolve(names);
     },
     rename: (from, to) => {
       if (options.renameFails === true) {
@@ -175,6 +193,17 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       if (file !== undefined) {
         disk.set(to, file);
         disk.delete(from);
+      }
+
+      // A folder takes every entry under it along.
+      for (const path of pathsUnder(disk, from)) {
+        const entry = disk.get(path);
+
+        disk.delete(path);
+
+        if (entry !== undefined) {
+          disk.set(`${to}${path.slice(from.length)}`, entry);
+        }
       }
 
       return Promise.resolve();

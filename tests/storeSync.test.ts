@@ -412,6 +412,38 @@ it('an ID clash found at merge gives the newer ticket a new ID and writes an ali
   expect(await gitOutput(second.storePath, ['status', '--porcelain'])).toBe('');
 });
 
+it('an ID clash after a sync merge moves the folder to the new ID', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  await writeHandTicket(first, 'demo-aaaa-first.md');
+  await writeHandTicket(second, 'demo-aaaa-second.md');
+
+  const oldFolder = folderOf(second.storePath, 'demo-aaaa');
+
+  await mkdir(oldFolder, { recursive: true });
+  await writeFile(join(oldFolder, 'design.md'), '# Design\n');
+
+  await first.runChecked(['sync']);
+
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The sync should report one alias.');
+
+  expect(alias.from).toBe('demo-aaaa');
+  expect(existsSync(join(folderOf(second.storePath, alias.to), 'design.md'))).toBe(true);
+  expect(existsSync(oldFolder)).toBe(false);
+
+  const facts = await readAllFacts(second);
+
+  expect(facts).toContain('"kind":"alias"');
+  expect(facts).toContain('"from":"demo-aaaa"');
+  expect(await gitOutput(second.storePath, ['status', '--porcelain'])).toBe('');
+});
+
 const remoteTree = (remotePath: string): Promise<string> =>
   gitOutput(remotePath, ['ls-tree', '-r', '--name-only', 'main']);
 

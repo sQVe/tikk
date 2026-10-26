@@ -54,8 +54,16 @@ export interface ClashResolution {
   moves: MovedPath[];
 }
 
+interface FolderMove {
+  from: string;
+  to: string;
+  // The tracked files of the folder, before and after the move.
+  files: MovedPath[];
+}
+
 interface Renames extends ClashResolution {
   factPaths: string[];
+  folders: FolderMove[];
 }
 
 const maxIdAttempts = 100;
@@ -64,6 +72,11 @@ const failed = (message: string): { ok: false; reason: SyncReason } => ({
   ok: false,
   reason: { kind: 'failed', message },
 });
+
+const allMoves = (renames: Renames): MovedPath[] => [
+  ...renames.moves,
+  ...renames.folders.flatMap((folder) => folder.files),
+];
 
 const listNames = async (functions: SyncClashFunctions, directory: string): Promise<string[]> => {
   try {
@@ -256,6 +269,85 @@ const renameFile = async (
   return { ok: true, value: { alias: { from: file.id, to, path }, factPath: fact.value } };
 };
 
+// A folder named as a ticket ID keeps that ID, so a new ID must not take it.
+const folderIds = async (
+  functions: SyncClashFunctions,
+  root: string,
+  project: ProjectName,
+): Promise<string[]> => {
+  const names = await listNames(functions, join(root, 'tickets', project));
+
+  return names.flatMap((name) => {
+    const parsed = parseTicketId(name);
+
+    return parsed.ok ? [parsed.value] : [];
+  });
+};
+
+const folderExists = (functions: SyncClashFunctions, folder: string): Promise<boolean> =>
+  functions.readdir(folder).then(
+    () => true,
+    () => false,
+  );
+
+// A repository with no commit yet tracks no file, and Git fails for it.
+const trackedFolderFiles = async (
+  functions: SyncClashFunctions,
+  root: string,
+  folder: string,
+): Promise<string[]> => {
+  const listed = await functions.runGit([
+    '-C',
+    root,
+    'ls-tree',
+    '-r',
+    '-z',
+    '--name-only',
+    'HEAD',
+    '--',
+    folder,
+  ]);
+
+  return listed.ok ? listed.value.split('\0').filter((path) => path !== '') : [];
+};
+
+// The folder is named by the old ID, so it moves with the ticket to the new ID.
+const renameFolder = async (
+  functions: SyncClashFunctions,
+  root: string,
+  project: ProjectName,
+  alias: SyncAlias,
+  renames: Renames,
+): Promise<Result<undefined, SyncReason>> => {
+  const from = join('tickets', project, alias.from);
+  const to = join('tickets', project, alias.to);
+  const exists = await folderExists(functions, join(root, from));
+
+  if (!exists) {
+    return { ok: true, value: undefined };
+  }
+
+  const tracked = await trackedFolderFiles(functions, root, from);
+
+  try {
+    await functions.rename(join(root, from), join(root, to));
+  } catch {
+    return failed(`Cannot rename ${from} to ${to}.`);
+  }
+
+  renames.folders.push({
+    from,
+    to,
+    files: tracked.map((path) => ({
+      from: path,
+      to: join(to, relative(from, path)),
+      tracked: true,
+    })),
+  });
+
+  return { ok: true, value: undefined };
+};
+
 // Adds each rename to `renames` as it happens, so a failure leaves the caller a full list to undo.
 const renameClashes = async (
   functions: SyncClashFunctions,
@@ -264,7 +356,8 @@ const renameClashes = async (
   renames: Renames,
 ): Promise<Result<undefined, SyncReason>> => {
   const files = await listProjectFiles(functions, root, project);
-  const taken = new Set<string>(files.map((file) => file.id));
+  const folderNames = await folderIds(functions, root, project);
+  const taken = new Set<string>([...files.map((file) => file.id), ...folderNames]);
   const clashing = await newerClashingFiles(functions, root, project, files);
 
   for (const { file, addedAt: addedTime } of clashing) {
@@ -287,6 +380,13 @@ const renameClashes = async (
     });
 
     renames.factPaths.push(factPath);
+
+    // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
+    const folder = await renameFolder(functions, root, project, alias, renames);
+
+    if (!folder.ok) {
+      return folder;
+    }
   }
 
   return { ok: true, value: undefined };
@@ -332,7 +432,7 @@ const stageClashes = async (
     return reset;
   }
 
-  for (const move of renames.moves.filter((entry) => entry.tracked)) {
+  for (const move of allMoves(renames).filter((entry) => entry.tracked)) {
     // Each call rewrites the index file, so they run one at a time.
     // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
     const staged = await stageMove(functions, root, move);
@@ -387,17 +487,34 @@ const commitClashes = async (
   return committed.ok ? { ok: true, value: undefined } : failed(committed.reason.message);
 };
 
-// Puts every renamed file back, so a failed sync leaves the clash for the next one. The alias
-// facts stay, since facts are append-only, and the next sync reuses them.
+// A folder that appeared at the old path since the move stays where it is, so both folders survive.
+const restoreFolder = async (
+  functions: SyncClashFunctions,
+  root: string,
+  folder: FolderMove,
+): Promise<void> => {
+  const exists = await folderExists(functions, join(root, folder.from));
+
+  if (exists) {
+    return;
+  }
+
+  await functions.rename(join(root, folder.to), join(root, folder.from)).catch(() => undefined);
+};
+
+// Puts every renamed file and folder back, so a failed sync leaves the clash for the next one. The
+// alias facts stay, since facts are append-only, and the next sync reuses them.
 // A file written to the old path since the rename is kept, so both files stay and the next sync
 // finds the clash again.
 const undoMoves = async (
   functions: SyncClashFunctions,
   root: string,
-  moves: MovedPath[],
+  renames: Renames,
 ): Promise<void> => {
+  await Promise.all(renames.folders.map((folder) => restoreFolder(functions, root, folder)));
+
   await Promise.all(
-    moves.map(async (move) => {
+    renames.moves.map(async (move) => {
       const to = join(root, move.to);
 
       // `link` fails when the old path exists, so a save there is never replaced.
@@ -421,7 +538,7 @@ export const resolveIdClashes = async (
 ): Promise<Result<ClashResolution, SyncReason>> => {
   const names = await listNames(functions, join(root, 'tickets'));
   const projects = names.map((name) => parseProjectName(name)).filter((parsed) => parsed.ok);
-  const renames: Renames = { aliases: [], moves: [], factPaths: [] };
+  const renames: Renames = { aliases: [], moves: [], factPaths: [], folders: [] };
 
   let failure: SyncReason | undefined;
 
@@ -438,12 +555,12 @@ export const resolveIdClashes = async (
   }
 
   if (failure !== undefined) {
-    await undoMoves(functions, root, renames.moves);
+    await undoMoves(functions, root, renames);
 
     return { ok: false, reason: failure };
   }
 
-  const resolution = { aliases: renames.aliases, moves: renames.moves };
+  const resolution = { aliases: renames.aliases, moves: allMoves(renames) };
 
   if (renames.aliases.length === 0) {
     return { ok: true, value: resolution };
@@ -452,7 +569,7 @@ export const resolveIdClashes = async (
   const committed = await commitClashes(functions, root, renames);
 
   if (!committed.ok) {
-    await undoMoves(functions, root, renames.moves);
+    await undoMoves(functions, root, renames);
 
     return committed;
   }

@@ -20,7 +20,7 @@ const clashingStore = (
   makeSync({
     ...extra,
     files: { [factPath]: { text: 'alias line\n', mtimeMs: 0 }, ...extra.files },
-    folders: { '/store/tickets': ['demo'], '/store/tickets/demo': fileNames },
+    folders: { '/store/tickets': ['demo'], '/store/tickets/demo': fileNames, ...extra.folders },
     git: (args) => {
       const reply = extra.git?.(args);
 
@@ -513,4 +513,138 @@ it('stages the fact file of every reused alias', async () => {
     '--add --cacheinfo 100644,blob1,facts/fake/first.jsonl',
     '--add --cacheinfo 100644,blob2,facts/fake/second.jsonl',
   ]);
+});
+
+const folderPath = '/store/tickets/demo/demo-aaaa';
+const folderDesign = `${folderPath}/design.md`;
+const newFolderDesign = '/store/tickets/demo/demo-zzzz/design.md';
+
+const commitFails = (args: string[]) =>
+  args.includes('commit') ? gitFailure('hook refused') : undefined;
+
+// Answers the Git calls for the folder of `demo-aaaa`, where `tracked` lists the files HEAD holds.
+const folderGit = (args: string[], tracked: string[]) => {
+  const command = commandOf(args);
+
+  if (command === 'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa') {
+    return gitOutput(tracked.map((file) => `tickets/demo/demo-aaaa/${file}\0`).join(''));
+  }
+
+  return command.startsWith('rev-parse HEAD:tickets/demo/demo-aaaa/')
+    ? gitOutput('abc999\n')
+    : undefined;
+};
+
+// The newer ticket `demo-aaaa-b.md` clashes, so its folder moves with it.
+const folderStore = (
+  extra: Parameters<typeof makeSync>[0] = {},
+  files: string[] = ['design.md'],
+  tracked: string[] = ['design.md'],
+) =>
+  clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+    {
+      ...extra,
+      files: {
+        [oldPath]: { text: 'ticket bytes', mtimeMs: 0 },
+        ...Object.fromEntries(
+          files.map((file) => [`${folderPath}/${file}`, { text: `${file} bytes`, mtimeMs: 0 }]),
+        ),
+        ...extra.files,
+      },
+      git: (args) => folderGit(args, tracked) ?? extra.git?.(args),
+    },
+  );
+
+it('stages the tracked folder files at the new path and removes them at the old path', async () => {
+  const fake = folderStore();
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(true);
+
+  expect(stagedEntries(fake).filter((entry) => entry.includes('design.md'))).toEqual([
+    '--add --cacheinfo 100644,abc999,tickets/demo/demo-zzzz/design.md',
+    '--force-remove -- tickets/demo/demo-aaaa/design.md',
+  ]);
+});
+
+it('moves an untracked folder file with the folder, and leaves it out of the clash commit', async () => {
+  const fake = folderStore({}, ['design.md', 'notes.md'], ['design.md']);
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(true);
+  expect(fake.disk.get('/store/tickets/demo/demo-zzzz/notes.md')?.text).toBe('notes.md bytes');
+  expect(stagedEntries(fake).filter((entry) => entry.includes('notes.md'))).toEqual([]);
+});
+
+it('puts the folder back at the old path when the clash commit fails', async () => {
+  let movedAtCommit: string | undefined;
+
+  const fake: ReturnType<typeof makeSync> = folderStore({
+    git: (args) => {
+      if (args.includes('commit')) {
+        movedAtCommit = fake.disk.get(newFolderDesign)?.text;
+      }
+
+      return commitFails(args);
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(movedAtCommit).toBe('design.md bytes');
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(folderDesign)?.text).toBe('design.md bytes');
+  expect(fake.disk.has(newFolderDesign)).toBe(false);
+});
+
+it('keeps a file saved in the old folder, and the moved folder, when the clash commit fails', async () => {
+  const fake: ReturnType<typeof makeSync> = folderStore({
+    git: (args) => {
+      if (!args.includes('commit')) {
+        return undefined;
+      }
+
+      fake.disk.set(`${folderPath}/notes.md`, { text: 'saved', mtimeMs: 0 });
+
+      return gitFailure('hook refused');
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(`${folderPath}/notes.md`)?.text).toBe('saved');
+  expect(fake.disk.get(newFolderDesign)?.text).toBe('design.md bytes');
+  expect(fake.disk.has(folderDesign)).toBe(false);
+});
+
+it('does not give a clashing ticket an ID that a folder already uses', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-zzzz'],
+    { suffixes: ['zzzz', 'qqqq'] },
+  );
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-qqqq']);
+});
+
+it('does not reuse an alias whose new ID a folder already uses', async () => {
+  const fake = clashingStore(
+    { 'demo-aaaa-a.md': '100', 'demo-aaaa-b.md': '200' },
+    ['demo-aaaa-a.md', 'demo-aaaa-b.md', 'demo-qqqq'],
+    {
+      aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/2026-10.jsonl' }],
+    },
+  );
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-zzzz']);
+  expect(fake.aliasWrites()).toBe(1);
 });
