@@ -117,7 +117,6 @@ it('skips an instruction blocked by an open instruction and names the blocker', 
   // Bun versions differ in how they write an empty list, as `[]` on the same line or the next.
   const emptyBlockedBy = /blockedBy:\s*\[\]/;
 
-  // The ranks put the blocked instruction first, so the ready rule reports it as skipped.
   await Bun.write(blocker.path, blockerText.replace(emptyBlockedBy, 'rank: 2\nblockedBy: []'));
   await Bun.write(blocked.path, blockedText.replace(emptyBlockedBy, blockedFrontMatter));
 

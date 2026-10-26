@@ -144,7 +144,6 @@ const runGit = async (args: string[]): Promise<void> => {
   invariant(exitCode === 0, `git ${args.join(' ')} exited with ${exitCode}.\nstderr: ${stderr}`);
 };
 
-// A draft slice that instructions in a test can name as their parent. Run after `tikk init`.
 export const createParentSlice = async (fixture: CliFixture): Promise<string> => {
   const created = await fixture.runJson<{ id: string }>([
     'new',

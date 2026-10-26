@@ -67,8 +67,6 @@ const ageFile = async (path: string): Promise<void> => {
   await utimes(path, past, past);
 };
 
-// Creates an instruction under a new draft slice. The slice is old enough for sync to commit it, so
-// the slice does not change which files a test expects to be pending.
 const createInstructionIn = async (
   fixture: CliFixture,
   title: string,
@@ -86,7 +84,6 @@ const createInstructionIn = async (
   return fixture.runJson<ShownInstruction>(['new', 'instruction', title, '--parent', parent.id]);
 };
 
-// Creates an instruction whose file is old enough for sync to commit it.
 const createSettledInstruction = async (
   fixture: CliFixture,
   title: string,

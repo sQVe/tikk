@@ -81,7 +81,6 @@ const isStillSelected = (change: Change, index: SliceIndex): boolean => {
 
 // Another process may link a different PR while gh runs, so the selection is read again under the
 // lock before anything is appended.
-// Picking a slice's PR reads only the slice's own facts, so the index holds no instructions.
 const readCurrentIndex = async (
   session: CliSession,
   sliceIds: TicketId[],

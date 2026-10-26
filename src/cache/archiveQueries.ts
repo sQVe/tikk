@@ -6,8 +6,6 @@ const daySeconds = 86_400;
 const slackDays = 1 / daySeconds;
 const archiveDelayDays = 14;
 
-// A finished root has its finish time, or NULL when no fact dates its status. A done instruction finishes
-// at its newest accept fact, and any other root at its newest status fact for its current status.
 const finishedRootsSql = `finished(id, final, finish) AS (
   SELECT t.id, t.status IN ('canceled', 'closed'),
     CASE WHEN t.status IN ('canceled', 'closed')
@@ -39,8 +37,6 @@ const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
       AND julianday(f.at) > tree.finish + ${slackDays})
   LIMIT 1`;
 
-// A root finishes by a closed or canceled status, or by an accept fact on an instruction. Without either,
-// no root has a finish time and none is final, so the larger query cannot find work.
 const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'closed'))
   OR EXISTS (SELECT 1 FROM facts WHERE kind = 'accept')`;
 

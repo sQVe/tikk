@@ -45,12 +45,10 @@ const ticketIdAt = (index: number): string => {
   return `bench-${suffix}`;
 };
 
-// Every instruction needs a slice parent. The slice has the ID after the last instruction.
 const parentSliceId = ticketIdAt(ticketCount);
 
 const sliceText = `---\nkind: slice\ntitle: Parent\nproject: bench\nstatus: draft\n---\n`;
 
-// Every tenth instruction is blocked by the instruction before it, so the ready rule has blockers to resolve.
 const ticketText = (index: number): string => {
   const blockedBy = index % 10 === 9 ? `\n  - ${ticketIdAt(index - 1)}` : ' []';
 
@@ -70,8 +68,6 @@ const writeTickets = async (): Promise<void> => {
   await Promise.all(writes);
 };
 
-// Each instruction has an old claim and its release, then progress notes. Every instruction stays open, so the
-// ready rule reads the whole history.
 const factFields = (index: number, step: number): Record<string, unknown> => {
   if (step === 0) {
     return { kind: 'claim', holder: 'old', leaseEnd: '2026-10-01T01:00:00.000Z' };
