@@ -60,6 +60,7 @@ const ticketRowSchema = z.object({
   covers: z.string().nullable(),
   status: z.string(),
   archived: z.string().nullable(),
+  new: z.number().nullable(),
   body: z.string(),
 });
 
@@ -68,7 +69,7 @@ const pathRowSchema = z.object({ path: z.string() });
 const errorRowSchema = z.object({ path: z.string(), error: z.string() });
 
 const ticketColumns =
-  'id, path, hash, error, kind, title, project, parent, rank, blocked_by, discovered_from, related, criteria, covers, status, archived, body';
+  'id, path, hash, error, kind, title, project, parent, rank, blocked_by, discovered_from, related, criteria, covers, status, archived, new, body';
 
 const parseOptionalJson = (text: string | null): unknown =>
   text === null ? undefined : (JSON.parse(text) ?? undefined);
@@ -120,6 +121,7 @@ const parseCachedTicket = (raw: unknown): CachedTicket | undefined => {
     covers: lists.covers,
     status: row.data.status,
     archived: row.data.archived ?? undefined,
+    new: row.data.new === 1 ? true : undefined,
   });
 
   if (!frontMatter.success) {

@@ -46,7 +46,7 @@ export interface ReadySelection<Ticket extends InstructionTicket> {
 }
 
 const consideredStates = new Set<ReadyStateName>(['open', 'active', 'submitted', 'planned']);
-const clearingStates = new Set(['done', 'canceled', 'closed']);
+const clearingStates = new Set(['done', 'canceled']);
 
 const inScope = (ticket: InstructionTicket, scope: ReadyScope): boolean => {
   const { frontMatter } = ticket;

@@ -12,7 +12,7 @@ import {
 const full = makeTicket('demo-3467', {
   error: 'Stale.',
   frontMatter: {
-    kind: 'issue',
+    kind: 'task',
     title: 'Full',
     project: projectNameOf('demo'),
     parent: ticketIdOf('demo-3468'),
@@ -20,7 +20,7 @@ const full = makeTicket('demo-3467', {
     blockedBy: [ticketIdOf('demo-3469')],
     discoveredFrom: [ticketIdOf('demo-3473')],
     related: [ticketIdOf('demo-3474')],
-    status: 'draft',
+    status: 'open',
     archived: '2026-01-01',
   },
 });
@@ -30,7 +30,7 @@ it('maps every ticket field into the view', () => {
     id: 'demo-3467',
     path: full.path,
     hash: full.hash,
-    kind: 'issue',
+    kind: 'task',
     title: 'Full',
     project: 'demo',
     parent: 'demo-3468',
@@ -40,7 +40,7 @@ it('maps every ticket field into the view', () => {
     related: ['demo-3474'],
     criteria: null,
     covers: null,
-    status: 'draft',
+    status: 'open',
     archived: '2026-01-01',
     error: 'Stale.',
   });

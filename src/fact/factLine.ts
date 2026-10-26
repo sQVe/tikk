@@ -50,7 +50,7 @@ const acceptSchema = z.strictObject({
 const statusSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('status'),
-  status: z.enum(['draft', 'open', 'canceled', 'closed']),
+  status: z.enum(['draft', 'open', 'canceled', 'done']),
   forced: z.string().min(1).optional(),
 });
 

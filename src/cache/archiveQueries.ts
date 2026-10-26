@@ -7,8 +7,8 @@ const slackDays = 1 / daySeconds;
 const archiveDelayDays = 14;
 
 const finishedRootsSql = `finished(id, final, finish) AS (
-  SELECT t.id, t.status IN ('canceled', 'closed'),
-    CASE WHEN t.status IN ('canceled', 'closed')
+  SELECT t.id, t.status IN ('canceled', 'done'),
+    CASE WHEN t.status IN ('canceled', 'done')
       THEN (SELECT max(julianday(f.at)) FROM facts f
         WHERE f.ticket = t.id AND f.kind = 'status' AND json_valid(f.json)
           AND json_extract(f.json, '$.status') = t.status)
@@ -17,7 +17,7 @@ const finishedRootsSql = `finished(id, final, finish) AS (
   FROM tickets t
   WHERE t.title IS NOT NULL AND t.error IS NULL
     AND (t.kind = 'plan' OR t.parent IS NULL)
-    AND (t.status IN ('canceled', 'closed') OR (t.kind = 'instruction' AND t.status = 'open'))
+    AND (t.status IN ('canceled', 'done') OR (t.kind = 'instruction' AND t.status = 'open'))
 )`;
 
 // Every ticket under a due root, with the root's finish. UNION ends a parent cycle.
@@ -37,7 +37,7 @@ const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
       AND julianday(f.at) > tree.finish + ${slackDays})
   LIMIT 1`;
 
-const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'closed'))
+const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'done'))
   OR EXISTS (SELECT 1 FROM facts WHERE kind = 'accept')`;
 
 // False only when no root is due and every finished root has a fact that dates its finish. True

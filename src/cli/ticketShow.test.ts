@@ -69,20 +69,20 @@ it('shows the state of an instruction and its claim while the claim is active', 
   });
 });
 
-it('shows no state for an issue', async () => {
-  const issue = makeTicket('demo-3467', {
+it('shows no state for a task', async () => {
+  const task = makeTicket('demo-3467', {
     frontMatter: {
-      kind: 'issue',
-      title: 'An issue',
+      kind: 'task',
+      title: 'A task',
       project: projectNameOf('demo'),
       blockedBy: [],
       discoveredFrom: [],
       related: [],
-      status: 'closed',
+      status: 'done',
     },
   });
 
-  const output = successOf(await show(['demo-3467'], [issue]));
+  const output = successOf(await show(['demo-3467'], [task]));
 
   expect(output.json).not.toHaveProperty('state');
   expect(output.json).not.toHaveProperty('claim');

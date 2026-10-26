@@ -109,9 +109,29 @@ it('shows the new title after a file is edited on disk', async () => {
   expect(shown.title).toBe('Renamed');
 });
 
+it('keeps new through the cache after a title-only edit', async () => {
+  await run(['init', '--json']);
+
+  const created = await runJson<ShownTicket & { new?: boolean }>([
+    'new',
+    'task',
+    'Call the vendor',
+  ]);
+
+  expect(created.new).toBe(true);
+
+  await runJson<ShownTicket>(['edit', created.id, '--hash', created.hash, '--title', 'Renamed']);
+
+  const text = await readFile(created.path, 'utf8');
+  const shown = await runJson<ShownTicket & { new?: boolean }>(['show', created.id]);
+
+  expect(text).toContain('new: true');
+  expect(shown).toMatchObject({ title: 'Renamed', new: true });
+});
+
 it('lists the same tickets after the cache database is deleted', async () => {
   await createInstruction('First');
-  await runJson<ShownTicket>(['new', 'issue', 'Second']);
+  await runJson<ShownTicket>(['new', 'task', 'Second']);
 
   const before = await runJson<Listing>(['ls']);
 
@@ -277,13 +297,7 @@ it('creates a ticket with a body from a file and hides archived tickets in ls', 
 
   await writeFile(bodyFile, 'Details.\n');
 
-  const created = await runJson<ShownTicket>([
-    'new',
-    'issue',
-    'With body',
-    '--body-file',
-    bodyFile,
-  ]);
+  const created = await runJson<ShownTicket>(['new', 'task', 'With body', '--body-file', bodyFile]);
 
   const text = await readFile(created.path, 'utf8');
 

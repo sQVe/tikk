@@ -7,7 +7,7 @@ export interface ArchiveTicket {
   frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
 }
 
-type FinalStatus = 'canceled' | 'closed';
+type FinalStatus = 'canceled' | 'done';
 
 export interface ArchiveDue {
   date: string;
@@ -48,7 +48,7 @@ const newestTime = (own: Fact[], matches: (fact: Fact) => boolean): number | und
 const finishOf = (root: ArchiveTicket, own: Fact[]): Finish | undefined => {
   const { kind, status } = root.frontMatter;
 
-  if (status === 'canceled' || status === 'closed') {
+  if (status === 'canceled' || status === 'done') {
     const at = newestTime(own, (fact) => fact.kind === 'status' && fact.status === status);
 
     return at === undefined ? { kind: 'undated', status } : { kind: 'dated', at };

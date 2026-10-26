@@ -24,6 +24,7 @@ export interface TicketView {
   status: string;
   archived: string | null;
   body?: string;
+  new?: true;
   error: string | null;
 }
 
@@ -58,6 +59,10 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
 
   if (withBody) {
     view.body = ticket.body;
+  }
+
+  if (frontMatter.new === true) {
+    view.new = true;
   }
 
   return view;

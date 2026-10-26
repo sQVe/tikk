@@ -172,13 +172,13 @@ describe('selectNeeds', () => {
     expect(selectNeeds([makeTicket('3467')], [future], now)[0]?.ageSeconds).toBe(0);
   });
 
-  it('lists nothing for archived, canceled, draft, done, and issue tickets', () => {
+  it('lists nothing for archived, canceled, draft, done, and task tickets', () => {
     const tickets = [
       makeTicket('3467', { archived: '2026-10-01' }),
       makeTicket('3468', { status: 'canceled' }),
       makeTicket('3469', { status: 'draft' }),
       makeTicket('3478'),
-      makeTicket('3479', { kind: 'issue' }),
+      makeTicket('3479', { kind: 'task' }),
     ];
 
     const question = { kind: 'log', type: 'question', text: '' };

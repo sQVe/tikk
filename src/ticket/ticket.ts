@@ -10,7 +10,13 @@ export {
   type TicketId,
 } from './ticketId.ts';
 
-export { ticketFrontMatterSchema, type TicketFrontMatter } from './ticketSchema.ts';
+export {
+  isLooseOpenTask,
+  ticketFrontMatterSchema,
+  withoutNew,
+  type TicketFrontMatter,
+} from './ticketSchema.ts';
+
 export { createTicketSlug } from './ticketSlug.ts';
 
 export { findCoverageGaps, type CoverageGap } from './ticketCoverage.ts';

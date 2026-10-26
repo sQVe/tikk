@@ -104,13 +104,13 @@ it('ignores a covers ID that names no criterion', () => {
 
 it('counts only slices for a plan and only instructions for a slice', () => {
   const instructionUnderPlan = ticket(instruction, { kind: 'instruction', parent: slicePlan });
-  const issueUnderSlice = ticket(idOf('tikk-3a4e'), { kind: 'issue', parent: slice });
+  const taskUnderSlice = ticket(idOf('tikk-3a4e'), { kind: 'task', parent: slice });
 
   const gaps = findCoverageGaps([
     plan,
     sliceFor({ covers: undefined }),
     instructionUnderPlan,
-    issueUnderSlice,
+    taskUnderSlice,
   ]);
 
   expect(gaps).toEqual([

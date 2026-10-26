@@ -91,10 +91,10 @@ it('dates a finish from the newest status fact that matches the current status',
 });
 
 it('asks for a status fact when the only status fact names another status', () => {
-  const issue = ticketOf('demo-3467', { kind: 'issue', status: 'canceled' });
-  const facts = [factOf('demo-3467', fifteenDaysAgo, { kind: 'status', status: 'closed' })];
+  const task = ticketOf('demo-3467', { kind: 'task', status: 'canceled' });
+  const facts = [factOf('demo-3467', fifteenDaysAgo, { kind: 'status', status: 'done' })];
 
-  expect(dueOf([issue], facts)).toEqual({
+  expect(dueOf([task], facts)).toEqual({
     date: '2026-10-20',
     archive: [],
     statusFacts: [{ ticket: 'demo-3467', status: 'canceled' }],
@@ -141,7 +141,7 @@ it('leaves a canceled slice of an open plan to its plan', () => {
 it('treats an accept fact as a finish only for an open instruction', () => {
   const tickets = [
     ticketOf('demo-3467', { kind: 'instruction', status: 'draft' }),
-    ticketOf('demo-4789', { kind: 'issue', status: 'open' }),
+    ticketOf('demo-4789', { kind: 'task', status: 'open' }),
   ];
 
   const facts = [

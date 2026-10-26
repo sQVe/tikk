@@ -95,7 +95,7 @@ it('disposes the session when no load is pending', async () => {
 
 it('loads the plan tree from the session tickets and facts', async () => {
   const fakeSession = makeSession({
-    tickets: [makeKindTicket('demo-3467', 'plan'), makeKindTicket('demo-3468', 'issue')],
+    tickets: [makeKindTicket('demo-3467', 'plan'), makeKindTicket('demo-3468', 'task')],
   });
 
   const fakeEffects = makeEffects({ session: fakeSession });

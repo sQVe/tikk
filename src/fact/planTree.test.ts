@@ -30,11 +30,11 @@ it('shows instructions only under the active slice, with each slice state and PR
   const instructionA = makeTicket('333e', { parent: '333b', rank: 2 });
   const instructionB = makeTicket('333f', { parent: '333b', rank: 1 });
   const plannedInstruction = makeTicket('333g', { parent: '333c' });
-  const issue = makeTicket('333h', { kind: 'issue' });
+  const task = makeTicket('333h', { kind: 'task' });
   const facts = [claim('333f'), prFact('333d')];
 
   const tree = buildPlanTree(
-    [plan, active, planned, reviewed, instructionA, instructionB, plannedInstruction, issue],
+    [plan, active, planned, reviewed, instructionA, instructionB, plannedInstruction, task],
     facts,
     now,
   );
@@ -77,7 +77,7 @@ it('leaves out archived and canceled tickets and groups orphan slices under no p
 
   const archivedPlan = makeTicket('333b', {
     kind: 'plan',
-    status: 'closed',
+    status: 'done',
     archived: '2026-10-01',
   });
 
