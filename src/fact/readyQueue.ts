@@ -5,9 +5,11 @@ import type {
   InstructionStateName,
   InstructionTicket,
 } from './instructionState.ts';
+import { derivePlanState } from './planState.ts';
+import type { PlanStateName } from './planState.ts';
 import { compareRank } from './rankOrder.ts';
-import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
-import type { SliceStateName } from './sliceState.ts';
+import { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
+import type { SliceIndex, SliceStateName } from './sliceState.ts';
 
 export interface ReadyScope {
   kind?: 'instruction' | 'slice';
@@ -18,9 +20,21 @@ export interface ReadyScope {
 interface Blocker {
   id: string;
   state: string;
+  via?: string;
 }
 
-type ReadyStateName = InstructionStateName | SliceStateName;
+interface StackParent {
+  id: string;
+  repository: string;
+  number: number;
+}
+
+interface ResolvedBlockers {
+  blockers: Blocker[];
+  stackParents: StackParent[];
+}
+
+type ReadyStateName = InstructionStateName | SliceStateName | PlanStateName;
 
 interface Consideration {
   state: ReadyStateName;
@@ -30,15 +44,15 @@ interface Consideration {
 interface ReadyCandidate<Ticket extends InstructionTicket> {
   ticket: Ticket;
   state: ReadyStateName;
+  stackParents?: StackParent[];
 }
 
-interface SkippedInstruction<Ticket extends InstructionTicket> {
-  ticket: Ticket;
-  reason: 'blocked' | 'active' | 'submitted';
-  blockers?: Blocker[];
-  holder?: string;
-  leaseEnd?: string;
-}
+type SkipDetail =
+  | { reason: 'blocked'; blockers: Blocker[] }
+  | { reason: 'active'; holder: string; leaseEnd: string }
+  | { reason: 'submitted' };
+
+type SkippedInstruction<Ticket extends InstructionTicket> = { ticket: Ticket } & SkipDetail;
 
 export interface ReadySelection<Ticket extends InstructionTicket> {
   candidates: ReadyCandidate<Ticket>[];
@@ -64,10 +78,9 @@ const isCandidateKind = (ticket: InstructionTicket, scope: ReadyScope): boolean 
 
 const deriveStates = (
   tickets: InstructionTicket[],
-  facts: Fact[],
+  index: SliceIndex,
   now: Date,
 ): Map<string, Consideration> => {
-  const index = buildSliceIndex(tickets, facts);
   const states = new Map<string, Consideration>();
 
   for (const ticket of tickets) {
@@ -86,6 +99,10 @@ const deriveStates = (
         claim: null,
       });
     }
+
+    if (kind === 'plan') {
+      states.set(ticket.id, { state: derivePlanState(ticket, index, now), claim: null });
+    }
   }
 
   return states;
@@ -102,6 +119,107 @@ const blockerState = (
   return states.get(target.id)?.state ?? target.frontMatter.status;
 };
 
+const parentOf = (
+  ticket: InstructionTicket,
+  byId: Map<string, InstructionTicket>,
+): InstructionTicket | undefined => {
+  const { parent } = ticket.frontMatter;
+
+  return parent === undefined ? undefined : byId.get(parent);
+};
+
+const inheritedLevels = (
+  ticket: InstructionTicket,
+  byId: Map<string, InstructionTicket>,
+): InstructionTicket[] => {
+  const parent = parentOf(ticket, byId);
+
+  if (parent?.frontMatter.kind === 'plan') {
+    return [parent];
+  }
+
+  if (parent?.frontMatter.kind !== 'slice') {
+    return [];
+  }
+
+  const plan = parentOf(parent, byId);
+
+  return plan?.frontMatter.kind === 'plan' ? [parent, plan] : [parent];
+};
+
+const stackParentOf = (
+  level: InstructionTicket,
+  target: InstructionTicket | undefined,
+  index: SliceIndex,
+): StackParent | undefined => {
+  if (level.frontMatter.kind !== 'slice' || target?.frontMatter.kind !== 'slice') {
+    return undefined;
+  }
+
+  const pr = selectSlicePr(target.id, index);
+
+  if (pr?.state !== 'open') {
+    return undefined;
+  }
+
+  return { id: target.id, repository: pr.repository, number: pr.number };
+};
+
+const resolveBlockers = (
+  ticket: InstructionTicket,
+  byId: Map<string, InstructionTicket>,
+  states: Map<string, Consideration>,
+  index: SliceIndex,
+): ResolvedBlockers => {
+  const sources = [
+    { level: ticket, via: undefined },
+    ...inheritedLevels(ticket, byId).map((level) => ({ level, via: level.id })),
+  ];
+
+  const seen = new Set<string>();
+  const blockers: Blocker[] = [];
+  const stackParents: StackParent[] = [];
+
+  for (const { level, via } of sources) {
+    for (const id of level.frontMatter.blockedBy) {
+      if (seen.has(id)) {
+        continue;
+      }
+
+      seen.add(id);
+
+      const target = byId.get(id);
+      const state = blockerState(target, states);
+
+      if (clearingStates.has(state)) {
+        continue;
+      }
+
+      const stackParent = stackParentOf(level, target, index);
+
+      if (stackParent !== undefined) {
+        stackParents.push(stackParent);
+
+        continue;
+      }
+
+      blockers.push({ id, state, ...(via === undefined ? {} : { via }) });
+    }
+  }
+
+  return { blockers, stackParents };
+};
+
+const candidateOf = <Ticket extends InstructionTicket>(
+  ticket: Ticket,
+  state: ReadyStateName,
+  resolved: ResolvedBlockers,
+): ReadyCandidate<Ticket> => {
+  const stackParents = ticket.frontMatter.kind === 'slice' ? resolved.stackParents : [];
+
+  return { ticket, state, ...(stackParents.length === 0 ? {} : { stackParents }) };
+};
+
 export const selectReady = <Ticket extends InstructionTicket>(
   tickets: Ticket[],
   facts: Fact[],
@@ -109,7 +227,8 @@ export const selectReady = <Ticket extends InstructionTicket>(
   scope: ReadyScope,
 ): ReadySelection<Ticket> => {
   const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
-  const states = deriveStates(tickets, facts, now);
+  const index = buildSliceIndex(tickets, facts);
+  const states = deriveStates(tickets, index, now);
 
   const considered: {
     ticket: Ticket;
@@ -148,17 +267,15 @@ export const selectReady = <Ticket extends InstructionTicket>(
       continue;
     }
 
-    const blockers = ticket.frontMatter.blockedBy
-      .map((id) => ({ id, state: blockerState(byId.get(id), states) }))
-      .filter((blocker) => !clearingStates.has(blocker.state));
+    const resolved = resolveBlockers(ticket, byId, states, index);
 
-    if (blockers.length > 0) {
-      pending.push({ ticket, reason: 'blocked', blockers });
+    if (resolved.blockers.length > 0) {
+      pending.push({ ticket, reason: 'blocked', blockers: resolved.blockers });
 
       continue;
     }
 
-    candidates.push({ ticket, state });
+    candidates.push(candidateOf(ticket, state, resolved));
     skipped.push(...pending);
     pending.length = 0;
   }

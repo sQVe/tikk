@@ -2,9 +2,15 @@ import type { TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
 
-export type SliceStateName = 'planned' | 'active' | 'inReview' | 'mergedUnverified' | 'done';
+export type SliceStateName =
+  | 'planned'
+  | 'active'
+  | 'inReview'
+  | 'mergedUnverified'
+  | 'flagged'
+  | 'done';
 
-interface SliceTicket {
+export interface SliceTicket {
   id: TicketId;
   frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'criteria'>;
 }
@@ -24,14 +30,16 @@ export interface SliceState {
   state: SliceStateName;
   since: string | null;
   ageSeconds: number | null;
-  flagged: boolean;
   openInstructions: TicketId[];
+  openTasks: TicketId[];
   pr: SlicePr | null;
 }
 
 export interface SliceIndex {
   factsByTicket: Map<TicketId, Fact[]>;
   instructionsBySlice: Map<TicketId, SliceTicket[]>;
+  tasksByParent: Map<TicketId, SliceTicket[]>;
+  slicesByPlan: Map<TicketId, SliceTicket[]>;
 }
 
 type PrFact = Extract<Fact, { kind: 'pr' }>;
@@ -103,7 +111,7 @@ const pending = (
       ? null
       : Math.max(0, Math.floor((now.getTime() - Date.parse(since)) / millisecondsPerSecond));
 
-  return { state, since, ageSeconds, flagged: false, openInstructions: [], pr: null, ...extra };
+  return { state, since, ageSeconds, openInstructions: [], openTasks: [], pr: null, ...extra };
 };
 
 const prView = (fact: PrFact): SlicePr => ({
@@ -117,23 +125,35 @@ const prView = (fact: PrFact): SlicePr => ({
   checkedAt: fact.at,
 });
 
-export const buildSliceIndex = (tickets: SliceTicket[], facts: Fact[]): SliceIndex => {
-  const instructions = tickets.filter(
+const childrenByParent = (
+  tickets: SliceTicket[],
+  kind: SliceTicket['frontMatter']['kind'],
+): Map<TicketId, SliceTicket[]> => {
+  const children = tickets.filter(
     (ticket): ticket is SliceTicket & { frontMatter: { parent: TicketId } } =>
-      ticket.frontMatter.kind === 'instruction' && ticket.frontMatter.parent !== undefined,
+      ticket.frontMatter.kind === kind && ticket.frontMatter.parent !== undefined,
   );
 
-  return {
-    factsByTicket: Map.groupBy(facts, (fact) => fact.ticket),
-    instructionsBySlice: Map.groupBy(instructions, (ticket) => ticket.frontMatter.parent),
-  };
+  return Map.groupBy(children, (ticket) => ticket.frontMatter.parent);
 };
+
+export const buildSliceIndex = (tickets: SliceTicket[], facts: Fact[]): SliceIndex => ({
+  factsByTicket: Map.groupBy(facts, (fact) => fact.ticket),
+  instructionsBySlice: childrenByParent(tickets, 'instruction'),
+  tasksByParent: childrenByParent(tickets, 'task'),
+  slicesByPlan: childrenByParent(tickets, 'slice'),
+});
 
 export const selectSlicePr = (sliceId: TicketId, index: SliceIndex): SlicePr | null => {
   const pr = winningPrFact(index.factsByTicket.get(sliceId) ?? []);
 
   return pr === undefined ? null : prView(pr);
 };
+
+const openTasksOf = (sliceId: TicketId, index: SliceIndex): TicketId[] =>
+  (index.tasksByParent.get(sliceId) ?? [])
+    .filter((task) => task.frontMatter.status === 'open')
+    .map((task) => task.id);
 
 export const deriveSliceState = (slice: SliceTicket, index: SliceIndex, now: Date): SliceState => {
   const { factsByTicket } = index;
@@ -174,12 +194,16 @@ export const deriveSliceState = (slice: SliceTicket, index: SliceIndex, now: Dat
     .filter((instruction) => isOpenInstruction(instruction.state))
     .map((instruction) => instruction.id);
 
-  const flags = { flagged: openInstructions.length > 0, openInstructions, pr: view };
+  const openTasks = openTasksOf(slice.id, index);
+  const open = { openInstructions, openTasks, pr: view };
   const audit = decidingAudit(own, pr);
 
-  if (audit !== undefined && meetsEveryCriterion(slice, audit)) {
-    return pending('done', [pr.at, audit.at], now, flags);
+  if (audit === undefined || !meetsEveryCriterion(slice, audit)) {
+    return pending('mergedUnverified', [pr.at], now, open);
   }
 
-  return pending('mergedUnverified', [pr.at], now, flags);
+  const hasOpenWork = openInstructions.length > 0 || openTasks.length > 0;
+  const state = hasOpenWork ? 'flagged' : 'done';
+
+  return pending(state, [pr.at, audit.at], now, open);
 };

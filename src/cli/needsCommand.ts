@@ -18,7 +18,7 @@ interface NeedViewBase {
 export type NeedView = NeedViewBase &
   (
     | { reason: 'question' | 'submitted' | 'mergedUnverified' }
-    | { reason: 'flagged'; openInstructions: TicketId[] }
+    | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
     | { reason: 'staleClaim'; holder: string }
     | { reason: 'blockedFinding'; fingerprint: string; claim: string }
   );
@@ -67,9 +67,18 @@ const itemView = (item: NeedItem<CliTicket>): NeedView => {
   }
 
   if (item.reason === 'flagged') {
-    const { openInstructions } = item;
+    const { openInstructions, openTasks } = item;
 
-    return { id, title, reason: item.reason, since, ageSeconds, openInstructions, ...parseError };
+    return {
+      id,
+      title,
+      reason: item.reason,
+      since,
+      ageSeconds,
+      openInstructions,
+      openTasks,
+      ...parseError,
+    };
   }
 
   if (item.reason === 'blockedFinding') {
@@ -84,12 +93,17 @@ const itemView = (item: NeedItem<CliTicket>): NeedView => {
 export const itemSubject = (view: NeedView): string =>
   view.reason === 'blockedFinding' ? `${view.fingerprint}  ${view.claim}` : view.title;
 
+const openWorkOf = (view: Extract<NeedView, { reason: 'flagged' }>): TicketId[] => [
+  ...view.openInstructions,
+  ...view.openTasks,
+];
+
 const itemLine = (view: NeedView): string => {
   const line = `${view.id}  ${view.reason}  ${shortAge(view.ageSeconds)}  ${itemSubject(view)}`;
-  const instructions = view.reason === 'flagged' ? `  ${view.openInstructions.join(' ')}` : '';
+  const openWork = view.reason === 'flagged' ? `  ${openWorkOf(view).join(' ')}` : '';
   const suffix = view.parseError === undefined ? '' : `  parseError ${view.parseError}`;
 
-  return `${line}${instructions}${suffix}\n`;
+  return `${line}${openWork}${suffix}\n`;
 };
 
 export const readNeeds = async (

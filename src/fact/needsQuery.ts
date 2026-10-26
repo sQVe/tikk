@@ -14,7 +14,7 @@ interface NeedBase<Ticket extends InstructionTicket> {
 
 type NeedDetail =
   | { reason: 'question' | 'submitted' | 'mergedUnverified' }
-  | { reason: 'flagged'; openInstructions: TicketId[] }
+  | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
   | { reason: 'staleClaim'; holder: string }
   | { reason: 'blockedFinding'; fingerprint: string; claim: string };
 
@@ -172,13 +172,17 @@ const sliceNeedsOf = <Ticket extends InstructionTicket>(
     items.push({ ticket: slice, reason: 'mergedUnverified', since, ageSeconds });
   }
 
-  if (derived.flagged) {
+  const { openInstructions, openTasks } = derived;
+  const hasOpenWork = openInstructions.length > 0 || openTasks.length > 0;
+
+  if (hasOpenWork) {
     items.push({
       ticket: slice,
       reason: 'flagged',
       since,
       ageSeconds,
-      openInstructions: derived.openInstructions,
+      openInstructions,
+      openTasks,
     });
   }
 

@@ -38,6 +38,13 @@ the store lock. A failed fetch or a conflicting merge does not stop the claim.
 - `ready` returns the ordered candidates, by `rank`, that no `blockedBy` edge holds back
   ([ADR 0020](./0020-edges.md)).
 - For each higher-ranked item it skipped, `ready` names what blocks it.
+- An instruction is also held back by the `blockedBy` edges of its slice and of that slice's plan. A
+  slice is held back by the `blockedBy` edges of its plan. A blocker that a closer level names is
+  listed once, at that level. A blocker from a slice or plan names the ticket that holds it.
+- A slice's own `blockedBy` may name a slice whose PR is open. That blocker counts as cleared for
+  the slice and for the instructions that inherit it. The ready slice names that PR as its stack
+  parent. A task, instruction, or plan blocker never clears this way, and an instruction's own
+  `blockedBy` does not either.
 - `ready` takes a scope, such as a plan or a slice. Within a plan it returns the next slice to
   start; within a slice, the next instruction. It weighs order, `blockedBy` edges, and merge state,
   so Tau asks tikk what comes next instead of working out the order itself.

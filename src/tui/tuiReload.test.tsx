@@ -194,7 +194,7 @@ it('keeps the selected tree row across reloads that insert and then remove rows'
   expect(selectedLine()).toContain('Plan title');
 
   groups.unshift({
-    plan: { id: 'demo-3409' as NeedView['id'], title: 'Added plan', status: 'open' },
+    plan: { id: 'demo-3409' as NeedView['id'], title: 'Added plan', state: 'open' },
     slices: [],
   });
 

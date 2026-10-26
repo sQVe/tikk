@@ -138,7 +138,7 @@ it('shows a merged open slice with its derived state, PR, and open instructions'
     state: 'mergedUnverified',
     since: '2026-10-20T11:00:00.000Z',
     ageSeconds: 3600,
-    flagged: true,
+    openTasks: [],
     openInstructions: ['demo-3478'],
     pr: {
       repository: 'sqve/tikk',

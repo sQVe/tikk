@@ -2,6 +2,8 @@ import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 import { deriveInstructionState } from './instructionState.ts';
 import type { InstructionStateName, InstructionTicket } from './instructionState.ts';
+import { derivePlanState } from './planState.ts';
+import type { PlanStateName } from './planState.ts';
 import { compareRank } from './rankOrder.ts';
 import { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
 import type { SliceStateName } from './sliceState.ts';
@@ -23,7 +25,7 @@ interface TreeSlice {
 interface TreePlanHeader {
   id: TicketId;
   title: string;
-  status: InstructionTicket['frontMatter']['status'];
+  state: PlanStateName;
 }
 
 export interface TreeGroup {
@@ -81,7 +83,7 @@ export const buildPlanTree = (
   const slicesByPlan = Map.groupBy(slices, (slice) => slice.frontMatter.parent);
 
   const groups: TreeGroup[] = plans.map((plan) => ({
-    plan: { id: plan.id, title: plan.frontMatter.title, status: plan.frontMatter.status },
+    plan: { id: plan.id, title: plan.frontMatter.title, state: derivePlanState(plan, index, now) },
     slices: (slicesByPlan.get(plan.id) ?? []).map(treeSlice),
   }));
 
