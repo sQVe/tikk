@@ -23,7 +23,6 @@ export interface TuiFixture {
   press: (key: string) => Promise<void>;
   storeChanged: () => Promise<void>;
   selectedLine: () => string | undefined;
-  // Each key is pressed in the layout effect of the next commit after a reload.
   pressAtNextCommit: (...keys: string[]) => void;
   cleanup: () => void;
 }
@@ -67,7 +66,6 @@ const WithKeymap = ({
   );
 };
 
-// Ticket IDs are a project name, a dash, and a suffix, so each demo-<number> ID is one.
 const isDemoId = (raw: string): raw is NeedView['id'] => /^demo-\d+$/.test(raw);
 
 const demoId = (raw: string): NeedView['id'] => {
@@ -105,7 +103,6 @@ export const treeGroups = (): TreeGroup[] => {
   ];
 };
 
-// Renders the app with fake effects. The caller must call `cleanup` when the test ends.
 export const createTuiFixture = async (
   items: NeedView[],
   size: { width: number; height: number },
