@@ -250,7 +250,6 @@ const listFactsRecovering = async (
   return second.ok ? second : { ok: false, reason: { message: second.reason.message } };
 };
 
-// A symlink is listed whether or not its target exists, so the list needs no stat of each entry.
 const isFolderFileEntry = (entry: Dirent): boolean => entry.isFile() || entry.isSymbolicLink();
 
 const listTicketFolderFiles = async (

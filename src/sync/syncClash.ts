@@ -57,7 +57,6 @@ export interface ClashResolution {
 interface FolderMove {
   from: string;
   to: string;
-  // The tracked files of the folder, before and after the move.
   files: MovedPath[];
 }
 
@@ -269,7 +268,6 @@ const renameFile = async (
   return { ok: true, value: { alias: { from: file.id, to, path }, factPath: fact.value } };
 };
 
-// A folder named as a ticket ID keeps that ID, so a new ID must not take it.
 const folderIds = async (
   functions: SyncClashFunctions,
   root: string,
@@ -284,7 +282,6 @@ const folderIds = async (
   });
 };
 
-// Only a missing folder counts as absent. Any other error fails, so a design is never left at the old ID.
 const folderExists = async (
   functions: SyncClashFunctions,
   folder: string,
@@ -321,7 +318,6 @@ const trackedFolderFiles = async (
   return listed.ok ? listed.value.split('\0').filter((path) => path !== '') : [];
 };
 
-// The folder is named by the old ID, so it moves with the ticket to the new ID.
 const renameFolder = async (
   functions: SyncClashFunctions,
   root: string,
@@ -417,7 +413,6 @@ const stageMove = async (
     return failed(listed.reason.message);
   }
 
-  // The output is `<mode> <type> <blob>` and the path. Empty output means `HEAD` has no entry.
   const [mode, , blobId] = listed.value.trim().split(/\s+/);
 
   if (blobId === undefined) {
@@ -508,7 +503,6 @@ const commitClashes = async (
   return committed.ok ? { ok: true, value: undefined } : failed(committed.reason.message);
 };
 
-// A folder that appeared at the old path since the move stays where it is, so both folders survive.
 const restoreFolder = async (
   functions: SyncClashFunctions,
   root: string,
@@ -525,10 +519,6 @@ const restoreFolder = async (
   await functions.rename(join(root, folder.to), join(root, folder.from)).catch(() => undefined);
 };
 
-// Puts every renamed file and folder back, so a failed sync leaves the clash for the next one. The
-// alias facts stay, since facts are append-only, and the next sync reuses them.
-// A file written to the old path since the rename is kept, so both files stay and the next sync
-// finds the clash again.
 const undoMoves = async (
   functions: SyncClashFunctions,
   root: string,

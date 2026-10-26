@@ -536,7 +536,6 @@ const newFolderDesign = '/store/tickets/demo/demo-zzzz/design.md';
 const commitFails = (args: string[]) =>
   args.includes('commit') ? gitFailure('hook refused') : undefined;
 
-// Answers the Git calls for the folder of `demo-aaaa`, where `tracked` lists the files HEAD holds.
 const folderGit = (args: string[], tracked: string[]) => {
   const command = commandOf(args);
 
@@ -551,7 +550,6 @@ const folderGit = (args: string[], tracked: string[]) => {
     : undefined;
 };
 
-// The newer ticket `demo-aaaa-b.md` clashes, so its folder moves with it.
 const folderStore = (
   extra: Parameters<typeof makeSync>[0] = {},
   files: string[] = ['design.md'],

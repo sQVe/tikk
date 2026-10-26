@@ -58,7 +58,6 @@ const missingFile = (): Promise<never> =>
 const pathsUnder = (disk: Map<string, unknown>, directory: string): string[] =>
   [...disk.keys()].filter((path) => path.startsWith(`${directory}/`));
 
-// Names of the direct entries of a directory on the fake disk.
 const namesUnder = (disk: Map<string, unknown>, directory: string): string[] => [
   ...new Set(
     pathsUnder(disk, directory).map((path) =>
@@ -82,7 +81,6 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
 
   const headBlobId = 'abc123';
 
-  // Blob names follow the order of staging.
   const nextBlobId = (): string => {
     blobCount += 1;
 
@@ -97,7 +95,6 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
       return gitOutput(`tree${indexUpdates}\n`);
     }
 
-    // A single-path `ls-tree` reports a regular file, so a tracked move keeps the 100644 mode.
     if (args.includes('ls-tree') && !args.includes('-r')) {
       return gitOutput(`100644 blob ${headBlobId}\t${args.at(-1)}\n`);
     }
@@ -167,7 +164,6 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
     stat: (path) => {
       const file = disk.get(path);
 
-      // Like `readFile`, a fact file or config the test does not list is present.
       if (file === undefined && !path.includes('/tickets/')) {
         return Promise.resolve({ mtimeMs: options.now ?? defaultNow });
       }
@@ -216,7 +212,6 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
         disk.delete(from);
       }
 
-      // A folder takes every entry under it along.
       for (const path of pathsUnder(disk, from)) {
         const entry = disk.get(path);
 

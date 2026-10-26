@@ -59,8 +59,6 @@ const listPaths = async (
     : failedReason(listed.reason.message);
 };
 
-// A ticket file sits directly in a project folder. A deeper path is a design file in a
-// ticket's folder, so it is committed as it is.
 const isTicketPath = (path: string): boolean =>
   path.startsWith('tickets/') &&
   path.split('/').length === ticketPathSegments &&
@@ -162,7 +160,6 @@ export const stageRemoval = async (
 
 const isFactPath = (path: string): boolean => path.startsWith('facts/');
 
-// Ticket and fact files are checked or filtered as text. Every other file is staged from its bytes.
 const isTextPath = (path: string): boolean => isTicketPath(path) || isFactPath(path);
 
 // A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
@@ -326,7 +323,6 @@ const stageDesignFile = async (
   return staged.ok ? { ok: true, value: true } : failedReason(staged.reason.message);
 };
 
-// Checks the text candidates together, then stages the ones that pass. Returns the ones that wait.
 const stageCandidates = async (
   functions: SyncCommitFunctions,
   root: string,
