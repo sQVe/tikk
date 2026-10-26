@@ -17,11 +17,14 @@ import { refreshSession } from './sessionRefresh.ts';
 import { sliceAudit } from './sliceAudit.ts';
 import { syncCommand } from './syncCommand.ts';
 import { ticketArchive, ticketUnarchive } from './ticketArchive.ts';
+import { ticketBlock, ticketUnblock } from './ticketBlock.ts';
 import { ticketCancel } from './ticketCancel.ts';
 import { ticketDone } from './ticketDone.ts';
 import { ticketEdit } from './ticketEdit.ts';
 import { ticketList } from './ticketList.ts';
+import { ticketMove } from './ticketMove.ts';
 import { ticketNew } from './ticketNew.ts';
+import { ticketRank } from './ticketRank.ts';
 import { ticketShow } from './ticketShow.ts';
 
 export type { CliEffects, CliFailure, CliSession } from './cliEffects.ts';
@@ -43,6 +46,10 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['show', ticketShow],
   ['ls', ticketList],
   ['edit', ticketEdit],
+  ['block', ticketBlock],
+  ['unblock', ticketUnblock],
+  ['move', ticketMove],
+  ['rank', ticketRank],
   ['claim', instructionClaim],
   ['release', instructionRelease],
   ['log', instructionLog],
@@ -65,7 +72,7 @@ const sessionCommands = new Map<string, SessionCommand>([
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|claim|release|log|submit|accept|cancel|done|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|cancel|done|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

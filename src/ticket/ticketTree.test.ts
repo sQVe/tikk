@@ -3,7 +3,7 @@ import { expect, it } from 'bun:test';
 import { invariant } from '../invariant.ts';
 import { parseProjectName, parseTicketId } from './ticket.ts';
 import type { TicketFrontMatter, TicketId, TicketLookup } from './ticket.ts';
-import { checkTicketTree } from './ticketTree.ts';
+import { checkTicketTree, findWaitCycle } from './ticketTree.ts';
 
 const idOf = (raw: string): TicketId => {
   const parsed = parseTicketId(raw);
@@ -62,4 +62,55 @@ it('refuses an edge target whose file has an error and names it', () => {
 
   expect(!checked.ok && checked.reason.message).toContain('tikk-3a4d');
   expect(!checked.ok && checked.reason.message).toContain('file error');
+});
+
+const waitTicket = (id: string, fields: { parent?: string; blockedBy?: string[] } = {}) => ({
+  id: idOf(id),
+  frontMatter: {
+    ...(fields.parent === undefined ? {} : { parent: idOf(fields.parent) }),
+    blockedBy: (fields.blockedBy ?? []).map(idOf),
+  },
+});
+
+it('finds the blockedBy path that a new edge would close', () => {
+  const tickets = [
+    waitTicket('tikk-4a63'),
+    waitTicket('tikk-4a64', { blockedBy: ['tikk-4a66'] }),
+    waitTicket('tikk-4a66', { blockedBy: ['tikk-4a63'] }),
+  ];
+
+  expect(findWaitCycle(tickets, idOf('tikk-4a63'), idOf('tikk-4a64'))).toEqual([
+    idOf('tikk-4a63'),
+    idOf('tikk-4a64'),
+    idOf('tikk-4a66'),
+    idOf('tikk-4a63'),
+  ]);
+});
+
+it('finds a cycle through a parent link', () => {
+  const tickets = [waitTicket('tikk-4a63'), waitTicket('tikk-4a64', { parent: 'tikk-4a63' })];
+
+  expect(findWaitCycle(tickets, idOf('tikk-4a63'), idOf('tikk-4a64'))).toEqual([
+    idOf('tikk-4a63'),
+    idOf('tikk-4a64'),
+    idOf('tikk-4a63'),
+  ]);
+});
+
+it('finds no cycle when the target does not wait on the ticket', () => {
+  const tickets = [
+    waitTicket('tikk-4a63', { blockedBy: ['tikk-4a66'] }),
+    waitTicket('tikk-4a64', { parent: 'tikk-4a66', blockedBy: ['tikk-4a67', 'tikk-4a68'] }),
+    waitTicket('tikk-4a66', { blockedBy: ['tikk-4a67'] }),
+    waitTicket('tikk-4a67', { blockedBy: ['tikk-4a66', 'tikk-4a64'] }),
+  ];
+
+  expect(findWaitCycle(tickets, idOf('tikk-4a63'), idOf('tikk-4a64'))).toBeUndefined();
+});
+
+it('finds a cycle when a ticket waits on itself', () => {
+  expect(findWaitCycle([waitTicket('tikk-4a63')], idOf('tikk-4a63'), idOf('tikk-4a63'))).toEqual([
+    idOf('tikk-4a63'),
+    idOf('tikk-4a63'),
+  ]);
 });

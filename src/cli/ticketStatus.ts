@@ -1,9 +1,21 @@
 import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
-import { checkTicketTree, serializeTicketFile } from '../ticket/ticket.ts';
-import type { TicketFrontMatter, TicketLookup } from '../ticket/ticket.ts';
+import {
+  checkTicketTree,
+  findUnknownCovers,
+  findWaitCycle,
+  serializeTicketFile,
+} from '../ticket/ticket.ts';
+import type { TicketFrontMatter, TicketId, TicketLookup } from '../ticket/ticket.ts';
 import { invalidArguments } from './cliArguments.ts';
-import type { CliFailure, CliSession, CliTicket, CommandInput } from './cliEffects.ts';
+import type {
+  CliFailure,
+  CliSession,
+  CliTicket,
+  CommandInput,
+  CommandResult,
+} from './cliEffects.ts';
+import { showAfterRefresh } from './ticketView.ts';
 
 interface StatusWrite {
   ticket: CliTicket;
@@ -46,6 +58,54 @@ export const checkSessionTree = (
   }
 
   return checked;
+};
+
+export const checkWaitCycle = (
+  session: CliSession,
+  id: TicketId,
+  target: TicketId,
+): Result<undefined, CliFailure> => {
+  const tickets = session.listTickets({ includeArchived: true });
+  const cycle = findWaitCycle(tickets, id, target);
+
+  if (cycle !== undefined) {
+    return invalidArguments(
+      `Ticket ${id} cannot wait on ${target}, because it would wait on itself: ${cycle.join(', ')}.`,
+    );
+  }
+
+  return { ok: true, value: undefined };
+};
+
+export const checkCovers = (
+  session: CliSession,
+  id: TicketId,
+  covers: string[],
+  parent: TicketId | undefined,
+): Result<undefined, CliFailure> => {
+  if (covers.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  if (parent === undefined) {
+    return invalidArguments(
+      `Ticket ${id} covers ${covers.join(', ')}, but it has no parent, so it has no criteria to cover.`,
+    );
+  }
+
+  const found = session.getTicket(parent);
+
+  if (!found.ok) {
+    return invalidArguments(found.reason.message);
+  }
+
+  const unknown = findUnknownCovers(covers, found.value);
+
+  if (unknown.length > 0) {
+    return invalidArguments(`Covers names no criterion of ${parent}: ${unknown.join(', ')}.`);
+  }
+
+  return { ok: true, value: undefined };
 };
 
 // Writes the file first, then the fact. A failed append leaves the file written.
@@ -93,4 +153,17 @@ export const writeTicketWithStatus = async (
   }
 
   return written;
+};
+
+export const writeTicketAndShow = async (
+  input: CommandInput,
+  write: StatusWrite,
+): Promise<CommandResult> => {
+  const written = await writeTicketWithStatus(input, write);
+
+  if (!written.ok) {
+    return written;
+  }
+
+  return showAfterRefresh(input.session, input.effects.now(), write.ticket.id);
 };

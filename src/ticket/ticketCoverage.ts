@@ -52,6 +52,13 @@ const gapsOf = (
     .map((criterion) => ({ ticket: owner.id, kind, criterion }));
 };
 
+// The IDs in covers that the parent has no criterion for, in the order given.
+export const findUnknownCovers = (covers: string[], parent: CoverageTicket): string[] => {
+  const parentCriteria = criterionIds(parent);
+
+  return covers.filter((criterion) => !parentCriteria.includes(criterion));
+};
+
 // Gaps ordered by ticket ID, then by the criterion's order in front matter.
 export const findCoverageGaps = (tickets: CoverageTicket[]): CoverageGap[] => {
   const children = groupTicketChildren(tickets);

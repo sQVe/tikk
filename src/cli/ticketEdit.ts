@@ -3,6 +3,7 @@ import { parseTicketId, ticketFrontMatterSchema, withoutNew } from '../ticket/ti
 import type { TicketFrontMatter } from '../ticket/ticket.ts';
 import {
   invalidArguments,
+  listValue,
   parseCommandArguments,
   readBodyFile,
   stringValue,
@@ -12,8 +13,12 @@ import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEf
 import { refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { readCriteriaFile } from './ticketCriteria.ts';
 import { ticketEditor } from './ticketEditor.ts';
-import { checkSessionTree, writeTicketWithStatus } from './ticketStatus.ts';
-import { showAfterRefresh } from './ticketView.ts';
+import {
+  checkCovers,
+  checkSessionTree,
+  checkWaitCycle,
+  writeTicketAndShow,
+} from './ticketStatus.ts';
 
 interface FieldEdit {
   hash: string;
@@ -23,10 +28,12 @@ interface FieldEdit {
   parent: string | undefined;
   bodyPath: string | undefined;
   criteriaPath: string | undefined;
+  covers: string[] | undefined;
+  clearCovers: boolean;
 }
 
 const usage =
-  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] --json, or tikk edit <id>';
+  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] [--covers <criterion>]... [--clear-covers] --json, or tikk edit <id>';
 
 const kindChange = (
   ticket: CliTicket,
@@ -82,6 +89,14 @@ const parentChange = (edit: FieldEdit): Result<TicketFrontMatter['parent'], CliF
   return parent;
 };
 
+const coversChange = (current: TicketFrontMatter, edit: FieldEdit): string[] | undefined => {
+  if (edit.clearCovers) {
+    return undefined;
+  }
+
+  return edit.covers ?? current.covers;
+};
+
 const buildFrontMatter = (
   ticket: CliTicket,
   edit: FieldEdit,
@@ -103,6 +118,8 @@ const buildFrontMatter = (
   const keepsNew = kind.value === 'task' && status === 'open';
   const current = keepsNew ? ticket.frontMatter : withoutNew(ticket.frontMatter);
 
+  const covers = coversChange(current, edit);
+
   const frontMatter = ticketFrontMatterSchema.safeParse({
     ...current,
     kind: kind.value,
@@ -110,6 +127,7 @@ const buildFrontMatter = (
     title: edit.title ?? current.title,
     status,
     criteria: criteria ?? current.criteria,
+    covers,
   });
 
   if (!frontMatter.success) {
@@ -142,6 +160,24 @@ const applyEdit = async (
     return tree;
   }
 
+  const { parent } = frontMatter.value;
+  const changesParent = parent !== undefined && parent !== ticket.frontMatter.parent;
+
+  if (changesParent) {
+    const acyclic = checkWaitCycle(input.session, ticket.id, parent);
+
+    if (!acyclic.ok) {
+      return acyclic;
+    }
+  }
+
+  const givenCovers = edit.covers ?? [];
+  const covers = checkCovers(input.session, ticket.id, givenCovers, frontMatter.value.parent);
+
+  if (!covers.ok) {
+    return covers;
+  }
+
   const body =
     edit.bodyPath === undefined
       ? { ok: true as const, value: ticket.body }
@@ -151,18 +187,12 @@ const applyEdit = async (
     return body;
   }
 
-  const written = await writeTicketWithStatus(input, {
+  return writeTicketAndShow(input, {
     ticket,
     expectedHash: edit.hash,
     frontMatter: frontMatter.value,
     body: body.value,
   });
-
-  if (!written.ok) {
-    return written;
-  }
-
-  return showAfterRefresh(input.session, input.effects.now(), ticket.id);
 };
 
 const readFieldEdit = (
@@ -176,12 +206,22 @@ const readFieldEdit = (
   const bodyPath = stringValue(values, 'body-file');
   const criteriaPath = stringValue(values, 'criteria-file');
   const hash = stringValue(values, 'hash');
+  const covers = listValue(values, 'covers');
+  const coversGiven = covers.length > 0 ? covers : undefined;
+  const clearCovers = values['clear-covers'] === true;
+
+  if (coversGiven !== undefined && clearCovers) {
+    return invalidArguments('Give --covers or --clear-covers, not both.');
+  }
+
   const fields = [title, status, kind, parent, bodyPath, criteriaPath];
-  const hasField = fields.some((field) => field !== undefined);
+
+  const hasField =
+    fields.some((field) => field !== undefined) || coversGiven !== undefined || clearCovers;
 
   if (!hasField && json) {
     return invalidArguments(
-      `Give at least one of --title, --status, --kind, --parent, --criteria-file, or --body-file. ${usage}`,
+      `Give at least one of --title, --status, --kind, --parent, --criteria-file, --body-file, --covers, or --clear-covers. ${usage}`,
     );
   }
 
@@ -193,7 +233,20 @@ const readFieldEdit = (
     return invalidArguments(`Give --hash. ${usage}`);
   }
 
-  return { ok: true, value: { hash, title, status, kind, parent, bodyPath, criteriaPath } };
+  return {
+    ok: true,
+    value: {
+      hash,
+      title,
+      status,
+      kind,
+      parent,
+      bodyPath,
+      criteriaPath,
+      covers: coversGiven,
+      clearCovers,
+    },
+  };
 };
 
 export const ticketEdit = async (input: CommandInput): Promise<CommandResult> => {
@@ -205,6 +258,8 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     parent: { type: 'string' },
     'criteria-file': { type: 'string' },
     'body-file': { type: 'string' },
+    covers: { type: 'string', multiple: true },
+    'clear-covers': { type: 'boolean' },
   });
 
   if (!parsed.ok) {

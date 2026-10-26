@@ -13,6 +13,7 @@ export type { NeedItem } from './needsQuery.ts';
 export { buildPlanTree } from './planTree.ts';
 export type { TreeGroup } from './planTree.ts';
 export { selectReady } from './readyQueue.ts';
+export { compareRank } from './rankOrder.ts';
 export { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
 export { derivePlanState } from './planState.ts';
 export type { SliceIndex, SliceState } from './sliceState.ts';
