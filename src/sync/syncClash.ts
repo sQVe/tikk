@@ -284,11 +284,21 @@ const folderIds = async (
   });
 };
 
-const folderExists = (functions: SyncClashFunctions, folder: string): Promise<boolean> =>
-  functions.readdir(folder).then(
-    () => true,
-    () => false,
-  );
+// Only a missing folder counts as absent. Any other error fails, so a design is never left at the old ID.
+const folderExists = async (
+  functions: SyncClashFunctions,
+  folder: string,
+): Promise<Result<boolean, SyncReason>> => {
+  try {
+    await functions.readdir(folder);
+
+    return { ok: true, value: true };
+  } catch (error) {
+    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
+
+    return missing ? { ok: true, value: false } : failed(`Cannot read ${folder}.`);
+  }
+};
 
 // A repository with no commit yet tracks no file, and Git fails for it.
 const trackedFolderFiles = async (
@@ -323,7 +333,11 @@ const renameFolder = async (
   const to = join('tickets', project, alias.to);
   const exists = await folderExists(functions, join(root, from));
 
-  if (!exists) {
+  if (!exists.ok) {
+    return exists;
+  }
+
+  if (!exists.value) {
     return { ok: true, value: undefined };
   }
 
@@ -502,7 +516,9 @@ const restoreFolder = async (
 ): Promise<void> => {
   const exists = await folderExists(functions, join(root, folder.from));
 
-  if (exists) {
+  const absent = exists.ok && !exists.value;
+
+  if (!absent) {
     return;
   }
 

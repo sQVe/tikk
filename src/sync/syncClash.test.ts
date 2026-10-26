@@ -617,6 +617,24 @@ it('puts the folder back at the old path when the clash commit fails', async () 
   expect(fake.disk.has(newFolderDesign)).toBe(false);
 });
 
+it('fails, and moves nothing, when the folder cannot be read', async () => {
+  const fake = folderStore();
+  const denied = Object.assign(new Error('denied'), { code: 'EACCES' });
+
+  const functions = {
+    ...fake.functions,
+    readdir: (directory: string) =>
+      directory === folderPath ? Promise.reject(denied) : fake.functions.readdir(directory),
+  };
+
+  const result = await resolveIdClashes(functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.disk.get(folderDesign)?.text).toBe('design.md bytes');
+  expect(fake.disk.has(newFolderDesign)).toBe(false);
+  expect(fake.commands().some((command) => command.includes('commit'))).toBe(false);
+});
+
 it('keeps a file saved in the old folder, and the moved folder, when the clash commit fails', async () => {
   const fake: ReturnType<typeof makeSync> = folderStore({
     git: (args) => {
