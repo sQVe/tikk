@@ -604,6 +604,60 @@ it('writes the covers list of an instruction whose names the parent has', async 
   expect(fakeSession.writes[0]?.text).toContain('works');
 });
 
+const otherCriterion = { id: 'other', check: 'bun test', expected: 'It also passes.' };
+
+const twoCriteriaSlice = makeTicket('demo-3468', {
+  frontMatter: { ...criteriaSlice.frontMatter, criteria: [criterion, otherCriterion] },
+});
+
+const coveringInstruction = makeTicket('demo-3467', {
+  frontMatter: { ...criteriaInstruction.frontMatter, covers: ['works'] },
+});
+
+const coveringTickets: SessionOptions = { tickets: [twoCriteriaSlice, coveringInstruction] };
+
+const writtenCovers = (text: string | undefined): string[] | undefined => {
+  const parsed = parseTicketFile(text ?? '');
+
+  return parsed.ok ? parsed.value.frontMatter.covers : ['unparsed'];
+};
+
+it('replaces a stored covers list with the given one', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--covers', 'other'],
+    true,
+    coveringTickets,
+  );
+
+  successOf(await result);
+
+  expect(writtenCovers(fakeSession.writes[0]?.text)).toEqual(['other']);
+});
+
+it('keeps the stored covers when an edit changes only the title', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--title', 'Renamed'],
+    true,
+    coveringTickets,
+  );
+
+  successOf(await result);
+
+  expect(writtenCovers(fakeSession.writes[0]?.text)).toEqual(['works']);
+});
+
+it('removes the stored covers with --clear-covers', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--clear-covers'],
+    true,
+    coveringTickets,
+  );
+
+  successOf(await result);
+
+  expect(writtenCovers(fakeSession.writes[0]?.text)).toBeUndefined();
+});
+
 it('refuses --covers together with --clear-covers and writes nothing', async () => {
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'h', '--covers', 'works', '--clear-covers'],
