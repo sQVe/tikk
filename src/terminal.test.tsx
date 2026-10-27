@@ -29,6 +29,8 @@ const needView: NeedView = {
   reason: 'question',
   since: '2026-10-20T11:00:00.000Z',
   ageSeconds: 60,
+  item: '0000000000a1',
+  passedUp: true,
 };
 
 const settle = (): Promise<void> =>

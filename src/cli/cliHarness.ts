@@ -72,6 +72,8 @@ interface FakePullRequest {
 
 const fakeNow = new Date('2026-10-20T12:00:00.000Z');
 
+const itemIdLength = 12;
+
 export const ticketIdOf = (raw: string): TicketId => {
   const parsed = parseTicketId(raw);
 
@@ -349,6 +351,7 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
   let initCount = 0;
   let openCount = 0;
   let resolveCount = 0;
+  let itemCount = 0;
 
   const effects: CliEffects = {
     initStore: () => {
@@ -407,6 +410,11 @@ export const makeEffects = (options: EffectsOptions = {}): FakeEffects => {
     resolveMachine: () => Promise.resolve({ ok: true, value: 'laptop' }),
     runGh: recordGh(ghCalls, options.runGh),
     now: () => fakeNow,
+    newItemId: () => {
+      itemCount += 1;
+
+      return String(itemCount).padStart(itemIdLength, '0');
+    },
     ...options.overrides,
   };
 

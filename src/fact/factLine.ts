@@ -32,18 +32,46 @@ const releaseSchema = z.strictObject({
   holder: z.string().min(1),
 });
 
-const logSchema = z.strictObject({
+const itemIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{12}$/, 'Item must be 12 lower-case hex characters.');
+
+const logShape = {
   ...baseShape,
   kind: z.literal('log'),
-  type: z.enum(['progress', 'question', 'answer', 'discovered', 'submitted']),
   text: z.string(),
   holder: z.string().min(1).optional(),
   forced: z.string().min(1).optional(),
-});
+};
+
+// A question or a submission names its own item. An answer names the question it answers.
+const logSchema = z.discriminatedUnion('type', [
+  z.strictObject({ ...logShape, type: z.enum(['progress', 'discovered']) }),
+  z.strictObject({
+    ...logShape,
+    type: z.enum(['question', 'answer', 'submitted']),
+    item: itemIdSchema,
+  }),
+]);
 
 const acceptSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('accept'),
+  item: itemIdSchema,
+  holder: z.string().min(1).optional(),
+});
+
+const passUpSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('passUp'),
+  item: itemIdSchema,
+});
+
+const rejectSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('reject'),
+  item: itemIdSchema,
+  reason: z.string().min(1),
   holder: z.string().min(1).optional(),
 });
 
@@ -174,6 +202,8 @@ const factSchema = z.discriminatedUnion('kind', [
   releaseSchema,
   logSchema,
   acceptSchema,
+  passUpSchema,
+  rejectSchema,
   statusSchema,
   unarchiveSchema,
   aliasSchema,

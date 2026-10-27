@@ -113,9 +113,26 @@ it('lists the items of tikk needs in the same order', async () => {
   const asked = await createInstruction('Asked instruction');
   const submitted = await createInstruction('Submitted instruction');
 
-  await cli().runJson(['log', asked, '--type', 'question', '--text', 'Which one?']);
+  const question = await cli().runJson<{ item: string }>([
+    'log',
+    asked,
+    '--type',
+    'question',
+    '--text',
+    'Which one?',
+  ]);
+
+  await cli().runJson(['pass-up', asked, '--item', question.item]);
   await cli().runJson(['claim', submitted, '--holder', 'agent']);
-  await cli().runJson(['submit', submitted, '--holder', 'agent']);
+
+  const submission = await cli().runJson<{ item: string }>([
+    'submit',
+    submitted,
+    '--holder',
+    'agent',
+  ]);
+
+  await cli().runJson(['pass-up', submitted, '--item', submission.item]);
 
   const listing = await cli().runJson<NeedsListing>(['needs']);
   const setup = await openHome();

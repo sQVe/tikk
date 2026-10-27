@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { randomBytes } from 'node:crypto';
 import { watch } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { homedir, hostname } from 'node:os';
@@ -258,6 +259,9 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
   }
 };
 
+// Six random bytes print as the 12 hex characters of an item ID.
+const itemIdBytes = 6;
+
 export const createEffects = (storeRoot: string, cachePath: string): CliEffects => {
   const initLocalStore = async (): Promise<
     Result<{ store: string; created: boolean }, { message: string }>
@@ -297,6 +301,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
     readTextFile,
     runEditor,
     now: () => new Date(),
+    newItemId: () => randomBytes(itemIdBytes).toString('hex'),
   };
 };
 

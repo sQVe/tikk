@@ -19,8 +19,13 @@ export { derivePlanState } from './planState.ts';
 export type { SliceIndex, SliceState } from './sliceState.ts';
 export { deriveInstructionState } from './instructionState.ts';
 
+export { latestSubmission, selectOpenQuestions, selectPassedUp } from './instructionItems.ts';
+export type { InstructionItem } from './instructionItems.ts';
+
 export type {
   InstructionClaim,
+  InstructionRejection,
+  InstructionState,
   InstructionStateName,
   InstructionTicket,
 } from './instructionState.ts';

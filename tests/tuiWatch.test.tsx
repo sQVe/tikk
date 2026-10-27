@@ -210,7 +210,16 @@ it('shows a fact that another process writes without a restart', async () => {
 
   expect(setup.captureCharFrame()).toContain('Nothing needs you.');
 
-  await cli().runJson(['log', created.id, '--type', 'question', '--text', 'Which one?']);
+  const question = await cli().runJson<{ item: string }>([
+    'log',
+    created.id,
+    '--type',
+    'question',
+    '--text',
+    'Which one?',
+  ]);
+
+  await cli().runJson(['pass-up', created.id, '--item', question.item]);
 
   const shown = () =>
     setup

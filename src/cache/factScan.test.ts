@@ -129,9 +129,21 @@ it('orders facts by time, then file path, then line', async () => {
   const first = '2026-10-20T09:00:00Z';
   const second = '2026-10-20T09:00:00.5Z';
 
-  fake.setFactFile(factPath('b'), factText('me-3a4b', { kind: 'accept' }, first));
-  fake.setFactFile(factPath('a'), factText('me-3a4c', { kind: 'accept' }, first));
-  fake.setFactFile(factPath('c'), factText('me-3a4d', { kind: 'accept' }, second));
+  fake.setFactFile(
+    factPath('b'),
+    factText('me-3a4b', { kind: 'accept', item: '5ab0000000a1' }, first),
+  );
+
+  fake.setFactFile(
+    factPath('a'),
+    factText('me-3a4c', { kind: 'accept', item: '5ab0000000a1' }, first),
+  );
+
+  fake.setFactFile(
+    factPath('c'),
+    factText('me-3a4d', { kind: 'accept', item: '5ab0000000a1' }, second),
+  );
+
   await cache.refresh(fake.files);
 
   expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4c', 'me-3a4b', 'me-3a4d']);

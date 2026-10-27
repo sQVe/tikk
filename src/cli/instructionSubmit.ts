@@ -1,14 +1,15 @@
-import { deriveInstructionState } from '../fact/fact.ts';
 import { forceOptions, readForce, stringValue } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
 import {
   appendAndShow,
+  appendAndShowItem,
   checkTree,
   readTarget,
   requireHolder,
+  requireSubmission,
   requireValue,
 } from './instructionCommand.ts';
-import { conflict, withLockedInstruction } from './instructionLock.ts';
+import { withLockedInstruction } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 
 const submitUsage =
@@ -59,7 +60,7 @@ export const instructionSubmit = async (input: CommandInput): Promise<CommandRes
       return tree;
     }
 
-    return appendAndShow(input, locked, {
+    return appendAndShowItem(input, locked, {
       version: 1,
       kind: 'log',
       ticket: locked.instruction.id,
@@ -67,6 +68,7 @@ export const instructionSubmit = async (input: CommandInput): Promise<CommandRes
       machine: machine.value,
       type: 'submitted',
       text: stringValue(values, 'text') ?? '',
+      item: input.effects.newItemId(),
       holder: holder.value,
       ...(forced.value === undefined ? {} : { forced: forced.value }),
     });
@@ -87,10 +89,10 @@ export const instructionAccept = async (input: CommandInput): Promise<CommandRes
   }
 
   return withLockedInstruction(input, target.value.rawId, 'refuse', async (locked) => {
-    const { state } = deriveInstructionState(locked.instruction, locked.facts, locked.now);
+    const submission = requireSubmission(locked);
 
-    if (state !== 'submitted') {
-      return conflict(`Instruction ${locked.instruction.id} is ${state}, not submitted.`);
+    if (!submission.ok) {
+      return submission;
     }
 
     return appendAndShow(input, locked, {
@@ -99,6 +101,7 @@ export const instructionAccept = async (input: CommandInput): Promise<CommandRes
       ticket: locked.instruction.id,
       at: locked.now.toISOString(),
       machine: machine.value,
+      item: submission.value.item,
     });
   });
 };

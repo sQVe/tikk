@@ -50,7 +50,7 @@ export const factText = (
   extra?: Record<string, unknown>,
   at = '2026-10-20T10:00:00.000Z',
 ): string => {
-  const body = extra ?? { kind: 'accept' };
+  const body = extra ?? { kind: 'accept', item: '5ab0000000a1' };
 
   return `${JSON.stringify({ version: 1, ticket, at, machine: 'laptop', ...body })}\n`;
 };

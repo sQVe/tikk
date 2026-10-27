@@ -80,8 +80,8 @@ it('succeeds without a write when the instruction is already canceled', async ()
 
 it('refuses to cancel a done instruction and writes nothing', async () => {
   const facts = [
-    makeFact({ kind: 'log', type: 'submitted', text: '' }),
-    makeFact({ kind: 'accept', at: '2026-10-20T11:30:00.000Z' }),
+    makeFact({ kind: 'log', type: 'submitted', item: '5ab0000000a1', text: '' }),
+    makeFact({ kind: 'accept', item: '5ab0000000a1', at: '2026-10-20T11:30:00.000Z' }),
   ];
 
   const { fakeSession, result } = await cancel(['demo-3467'], { facts });

@@ -5,6 +5,7 @@ import { cliInit } from './cliInit.ts';
 import { coverageCommand } from './coverageCommand.ts';
 import { findingCommand } from './findingCommand.ts';
 import { instructionClaim, instructionRelease } from './instructionClaim.ts';
+import { instructionPassUp, instructionReject } from './instructionItem.ts';
 import { instructionLog } from './instructionLog.ts';
 import { instructionAccept, instructionSubmit } from './instructionSubmit.ts';
 import { needsCommand } from './needsCommand.ts';
@@ -55,6 +56,8 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['log', instructionLog],
   ['submit', instructionSubmit],
   ['accept', instructionAccept],
+  ['reject', instructionReject],
+  ['pass-up', instructionPassUp],
   ['cancel', ticketCancel],
   ['done', ticketDone],
   ['ready', readyCommand],
@@ -72,7 +75,7 @@ const sessionCommands = new Map<string, SessionCommand>([
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|cancel|done|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|reject|pass-up|cancel|done|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

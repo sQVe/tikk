@@ -3,10 +3,17 @@ import type { NeedView } from '../cli/cli.ts';
 import { singleLine } from './rowList.tsx';
 import type { ListRow } from './rowList.tsx';
 
-const rowKey = (item: NeedView): string =>
-  item.reason === 'blockedFinding'
-    ? `${item.id}:${item.reason}:${item.fingerprint}`
-    : `${item.id}:${item.reason}`;
+const rowKey = (item: NeedView): string => {
+  if (item.reason === 'blockedFinding') {
+    return `${item.id}:${item.reason}:${item.fingerprint}`;
+  }
+
+  if (item.reason === 'question' || item.reason === 'submitted') {
+    return `${item.id}:${item.reason}:${item.item}`;
+  }
+
+  return `${item.id}:${item.reason}`;
+};
 
 export const homeRowsOf = (items: readonly NeedView[]): ListRow[] =>
   items.map((item) => ({

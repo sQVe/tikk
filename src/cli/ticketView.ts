@@ -1,5 +1,11 @@
 import { buildSliceIndex, deriveSliceState, deriveInstructionState } from '../fact/fact.ts';
-import type { SliceState, InstructionClaim, InstructionStateName } from '../fact/fact.ts';
+import type {
+  SliceState,
+  InstructionClaim,
+  InstructionRejection,
+  InstructionState,
+  InstructionStateName,
+} from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
 import type { TicketId } from '../ticket/ticket.ts';
@@ -31,6 +37,7 @@ export interface TicketView {
 export interface InstructionView extends TicketView {
   state: InstructionStateName;
   claim: InstructionClaim | null;
+  rejection: InstructionRejection | null;
 }
 
 interface SliceView extends TicketView, SliceState {}
@@ -68,25 +75,30 @@ export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => 
   return view;
 };
 
-const instructionView = (
-  ticket: CliTicket,
-  state: InstructionStateName,
-  claim: InstructionClaim | null,
-): InstructionView => ({
+const instructionView = (ticket: CliTicket, derived: InstructionState): InstructionView => ({
   ...ticketView(ticket, true),
-  state,
-  claim,
+  state: derived.state,
+  claim: derived.claim,
+  rejection: derived.rejection,
 });
 
-export const instructionOutput = (
+export const instructionOutput = (ticket: CliTicket, derived: InstructionState): CommandResult => ({
+  ok: true,
+  value: {
+    json: instructionView(ticket, derived),
+    text: `${ticket.id}  ${derived.state}  ${ticket.frontMatter.title}\n`,
+  },
+});
+
+export const instructionItemOutput = (
   ticket: CliTicket,
-  state: InstructionStateName,
-  claim: InstructionClaim | null,
+  derived: InstructionState,
+  item: string,
 ): CommandResult => ({
   ok: true,
   value: {
-    json: instructionView(ticket, state, claim),
-    text: `${ticket.id}  ${state}  ${ticket.frontMatter.title}\n`,
+    json: { ...instructionView(ticket, derived), item },
+    text: `${ticket.id}  ${derived.state}  ${item}  ${ticket.frontMatter.title}\n`,
   },
 });
 
@@ -155,10 +167,10 @@ const showKind = async (
     return storeFailure(facts.reason.message);
   }
 
-  const { state, claim } = deriveInstructionState(ticket, facts.value, now);
-  const view = { ...instructionView(ticket, state, claim), files };
+  const derived = deriveInstructionState(ticket, facts.value, now);
+  const view = { ...instructionView(ticket, derived), files };
 
-  return { ok: true, value: { json: view, text: ticketText(ticket, state) } };
+  return { ok: true, value: { json: view, text: ticketText(ticket, derived.state) } };
 };
 
 export const showOutput = async (

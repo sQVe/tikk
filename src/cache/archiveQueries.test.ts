@@ -123,7 +123,7 @@ const instruction = { id: 'tikk-3a4b', kind: 'instruction', status: 'open' };
 const acceptedAt = (at: string): StoreFact => ({
   ticket: instruction.id,
   at,
-  fields: { kind: 'accept' },
+  fields: { kind: 'accept', item: '5ab0000000a1' },
 });
 
 it('answers no for a stand-alone instruction accepted 10 days ago', async () => {

@@ -37,13 +37,13 @@ const cancelInstruction = async (
     return storeFailure(facts.reason.message);
   }
 
-  const { state } = deriveInstructionState(instruction, facts.value, now);
+  const derived = deriveInstructionState(instruction, facts.value, now);
 
-  if (state === 'canceled') {
-    return instructionOutput(instruction, state, null);
+  if (derived.state === 'canceled') {
+    return instructionOutput(instruction, derived);
   }
 
-  if (state === 'done') {
+  if (derived.state === 'done') {
     return conflict(`Instruction ${instruction.id} is done, so it cannot be canceled.`);
   }
 
@@ -53,7 +53,10 @@ const cancelInstruction = async (
     return canceled;
   }
 
-  return instructionOutput(canceled.value, 'canceled', null);
+  return instructionOutput(
+    canceled.value,
+    deriveInstructionState(canceled.value, facts.value, now),
+  );
 };
 
 const cancelOther = async (input: CommandInput, ticket: CliTicket): Promise<CommandResult> => {

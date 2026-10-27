@@ -1,7 +1,8 @@
 import type { TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 import { selectFindings } from './findingStatus.ts';
-import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
+import { latestSubmission, selectOpenQuestions, selectPassedUp } from './instructionItems.ts';
+import { deriveInstructionStateFromOwnFacts, selectLastClaim } from './instructionState.ts';
 import type { InstructionTicket } from './instructionState.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
@@ -13,7 +14,8 @@ interface NeedBase<Ticket extends InstructionTicket> {
 }
 
 type NeedDetail =
-  | { reason: 'question' | 'submitted' | 'mergedUnverified' }
+  | { reason: 'question' | 'submitted'; item: string; passedUp: boolean }
+  | { reason: 'mergedUnverified' }
   | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
   | { reason: 'staleClaim'; holder: string }
   | { reason: 'blockedFinding'; fingerprint: string; claim: string };
@@ -27,33 +29,66 @@ const millisecondsPerSecond = 1000;
 const ageSecondsOf = (since: string, now: Date): number =>
   Math.max(0, Math.floor((now.getTime() - new Date(since).getTime()) / millisecondsPerSecond));
 
-const oldestOpenQuestion = (own: Fact[]): string | undefined => {
-  let oldest: string | undefined;
+// A question that nobody passed up still reaches the user after 30 minutes.
+const questionTimeoutSeconds = 1800;
 
-  for (const fact of own) {
-    if (fact.kind !== 'log') {
-      continue;
+const questionNeedsOf = <Ticket extends InstructionTicket>(
+  ticket: Ticket,
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const passedUp = selectPassedUp(own);
+
+  return selectOpenQuestions(own).flatMap(({ item, at }) => {
+    const ageSeconds = ageSecondsOf(at, now);
+    const isPassedUp = passedUp.has(item);
+
+    if (!isPassedUp && ageSeconds < questionTimeoutSeconds) {
+      return [];
     }
 
-    if (fact.type === 'answer') {
-      oldest = undefined;
-    }
-
-    if (fact.type === 'question') {
-      oldest ??= fact.at;
-    }
-  }
-
-  return oldest;
+    return [
+      {
+        ticket,
+        reason: 'question' as const,
+        since: at,
+        ageSeconds,
+        item,
+        passedUp: isPassedUp,
+      },
+    ];
+  });
 };
 
-const submittedSince = (own: Fact[]): string | undefined =>
-  own.findLast((fact) => fact.kind === 'log' && fact.type === 'submitted')?.at;
+const submissionNeedsOf = <Ticket extends InstructionTicket>(
+  ticket: Ticket,
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const submission = latestSubmission(own);
+
+  if (submission === undefined || !selectPassedUp(own).has(submission.item)) {
+    return [];
+  }
+
+  const { item, at } = submission;
+
+  return [
+    {
+      ticket,
+      reason: 'submitted',
+      since: at,
+      ageSeconds: ageSecondsOf(at, now),
+      item,
+      passedUp: true,
+    },
+  ];
+};
 
 const staleClaimOf = (own: Fact[], now: Date): { holder: string; since: string } | undefined => {
-  const holderFact = own.findLast((fact) => fact.kind === 'claim' || fact.kind === 'release');
+  const holderFact = selectLastClaim(own);
 
-  if (holderFact?.kind !== 'claim' || new Date(holderFact.leaseEnd) > now) {
+  if (holderFact === undefined || new Date(holderFact.leaseEnd) > now) {
     return undefined;
   }
 
@@ -71,27 +106,10 @@ const needsOf = <Ticket extends InstructionTicket>(
     return [];
   }
 
-  const items: NeedItem<Ticket>[] = [];
-  const questionSince = oldestOpenQuestion(own);
+  const items = questionNeedsOf(ticket, own, now);
 
-  if (questionSince !== undefined) {
-    items.push({
-      ticket,
-      reason: 'question',
-      since: questionSince,
-      ageSeconds: ageSecondsOf(questionSince, now),
-    });
-  }
-
-  const submitted = state === 'submitted' ? submittedSince(own) : undefined;
-
-  if (submitted !== undefined) {
-    items.push({
-      ticket,
-      reason: 'submitted',
-      since: submitted,
-      ageSeconds: ageSecondsOf(submitted, now),
-    });
+  if (state === 'submitted') {
+    items.push(...submissionNeedsOf(ticket, own, now));
   }
 
   const stale = state === 'open' ? staleClaimOf(own, now) : undefined;
@@ -169,7 +187,12 @@ const sliceNeedsOf = <Ticket extends InstructionTicket>(
   const ageSeconds = ageSecondsOf(since, now);
 
   if (derived.state === 'mergedUnverified') {
-    items.push({ ticket: slice, reason: 'mergedUnverified', since, ageSeconds });
+    items.push({
+      ticket: slice,
+      reason: 'mergedUnverified',
+      since,
+      ageSeconds,
+    });
   }
 
   const { openInstructions, openTasks } = derived;

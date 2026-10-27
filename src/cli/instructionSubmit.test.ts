@@ -12,6 +12,8 @@ import {
   parentOnly,
   parentSlice,
   blockedOnly,
+  submissionItem,
+  itemOf,
 } from './instructionHarness.ts';
 import type { Command } from './instructionHarness.ts';
 import { instructionAccept, instructionSubmit } from './instructionSubmit.ts';
@@ -23,10 +25,19 @@ it('submits an instruction held by the same holder', async () => {
     { facts: [claimBy('agent')] },
   );
 
+  const item = itemOf(result);
+
   expect(successOf(result).json).toMatchObject({ state: 'submitted' });
+  expect(item).toMatch(/^[0-9a-f]{12}$/);
 
   expect(fakeSession.appends.map(({ fact }) => fact)).toMatchObject([
-    { kind: 'log', type: 'submitted', text: 'Ready for review', holder: 'agent' },
+    {
+      kind: 'log',
+      type: 'submitted',
+      text: 'Ready for review',
+      holder: 'agent',
+      item,
+    },
   ]);
 });
 
@@ -45,7 +56,10 @@ it('accepts a submitted instruction', async () => {
   });
 
   expect(successOf(result).json).toMatchObject({ state: 'done' });
-  expect(fakeSession.appends.map(({ fact }) => fact.kind)).toEqual(['accept']);
+
+  expect(fakeSession.appends.map(({ fact }) => fact)).toMatchObject([
+    { kind: 'accept', item: submissionItem },
+  ]);
 });
 
 it('refuses to accept an instruction that is not submitted and writes nothing', async () => {

@@ -45,23 +45,37 @@ afterEach(async () => {
   await fixture?.cleanup();
 });
 
-it('lists a question until an answer is logged', async () => {
+it('lists a passed-up question until an answer to it is logged', async () => {
   const id = await createInstruction('Asked instruction');
 
-  await cli().runJson(['log', id, '--type', 'question', '--text', 'Which one?']);
+  const { item } = await cli().runJson<{ item: string }>([
+    'log',
+    id,
+    '--type',
+    'question',
+    '--text',
+    'Which one?',
+  ]);
+
+  expect(await reasonsOf(id)).toEqual([]);
+
+  await cli().runJson(['pass-up', id, '--item', item]);
 
   expect(await reasonsOf(id)).toEqual(['question']);
 
-  await cli().runJson(['log', id, '--type', 'answer', '--text', 'This one']);
+  await cli().runJson(['log', id, '--type', 'answer', '--text', 'This one', '--item', item]);
 
   expect(await reasonsOf(id)).toEqual([]);
 });
 
-it('lists a submitted instruction until it is accepted', async () => {
+it('lists a passed-up submission until it is accepted', async () => {
   const id = await createInstruction('Submitted instruction');
 
   await cli().runJson(['claim', id, '--holder', 'agent']);
-  await cli().runJson(['submit', id, '--holder', 'agent']);
+
+  const { item } = await cli().runJson<{ item: string }>(['submit', id, '--holder', 'agent']);
+
+  await cli().runJson(['pass-up', id, '--item', item]);
 
   expect(await reasonsOf(id)).toEqual(['submitted']);
 

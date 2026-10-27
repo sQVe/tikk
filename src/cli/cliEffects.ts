@@ -142,6 +142,8 @@ export interface CliEffects {
   resolveMachine: () => Promise<Result<string, CliMessage>>;
   runGh: (args: string[], signal: AbortSignal) => Promise<Result<string, CliMessage>>;
   now: () => Date;
+  // A new ID for a question or a submission: 12 lower-case hex characters.
+  newItemId: () => string;
 }
 
 export interface CommandInput {
