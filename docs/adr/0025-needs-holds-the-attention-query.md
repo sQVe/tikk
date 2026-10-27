@@ -19,13 +19,13 @@ as closing or accepting it, through the same code as the CLI command. `e` opens 
 The "needs you" view lists only what is on the user. Each item comes from `tikk needs --json` and
 has one reason:
 
-- `question`: an open question that a worker passed up, or that is 30 minutes old with no pass-up.
-  The item carries the question text.
-- `submitted`: a submission that a worker passed up.
+- `question`: an open question that the manager passed up with `tikk pass-up`, or that is 30 minutes
+  old with no pass-up. The item carries the question text.
+- `submitted`: the latest submission, once the manager passed it up.
 - `staleClaim`: a claim whose lease ended.
 - `blockingTask`: an open task that an unfinished ticket lists in `blockedBy`.
-- `newTask`: a loose open task that `tikk new` created and that a later move, rank, done, or cancel
-  has not cleared.
+- `newTask`: a loose open task that `tikk new --json` created and that a later move, rank, done, or
+  cancel has not cleared.
 - `draftPlan`: a draft plan whose latest `waiting` fact is true. `tikk wait <id> --text <text>` sets
   it, and `tikk wait <id> --done` clears it.
 - `flagged`: a merged slice with open instructions or tasks under it.
