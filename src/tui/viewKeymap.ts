@@ -9,6 +9,6 @@ export const viewCommands: readonly ViewCommand[] = [
   { intent: 'quit', keys: ['q', 'ctrl+c'] },
   { intent: 'moveUp', keys: ['up', 'k'] },
   { intent: 'moveDown', keys: ['down', 'j'] },
-  { intent: 'switchView', keys: ['tab'] },
+  { intent: 'switchView', keys: ['s'] },
   { intent: 'edit', keys: ['e'] },
 ];

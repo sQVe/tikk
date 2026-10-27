@@ -10,6 +10,7 @@ import { ticketEditor } from './ticketEditor.ts';
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
+  loadErrors: () => Promise<{ path: string; message: string }[]>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
@@ -93,6 +94,7 @@ export const openNeedsSession = async (
 
   const load = () => track(read);
   const loadTree = () => track(readTree);
+  const loadErrors = () => track(() => Promise.resolve(session.listErrors()));
   const editTicket = (rawId: string) => track(() => edit(rawId));
 
   const finishClose: NeedsSession['close'] = async () => {
@@ -111,5 +113,5 @@ export const openNeedsSession = async (
     return closingResult;
   };
 
-  return { ok: true, value: { load, loadTree, edit: editTicket, close } };
+  return { ok: true, value: { load, loadTree, loadErrors, edit: editTicket, close } };
 };

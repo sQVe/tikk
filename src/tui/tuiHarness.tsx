@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 
 import type { NeedView, TreeGroup } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
-import { App } from './tui.tsx';
-import type { AppProps } from './tui.tsx';
+import { App, createTuiSession } from './tui.tsx';
+import type { AppProps, TuiEffects } from './tui.tsx';
 
 type Setup = Awaited<ReturnType<typeof testRender>>;
 
@@ -110,7 +110,7 @@ export const createTuiFixture = async (
   size: { width: number; height: number },
   problems: string[] = [],
   groups: TreeGroup[] = [],
-  overrides: Partial<AppProps['effects']> = {},
+  overrides: Partial<TuiEffects> = {},
 ): Promise<TuiFixture> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
@@ -128,7 +128,7 @@ export const createTuiFixture = async (
     message,
   }));
 
-  const effects: AppProps['effects'] = {
+  const effects: TuiEffects = {
     load: () => {
       const loaded = Promise.resolve({
         ok: true as const,
@@ -150,6 +150,7 @@ export const createTuiFixture = async (
         return result;
       });
     },
+    loadErrors: () => Promise.resolve([]),
     edit: (rawId) => {
       edited.push(rawId);
 
@@ -164,13 +165,16 @@ export const createTuiFixture = async (
     ...overrides,
   };
 
+  const session = createTuiSession(effects);
+
   const setup = await act(() =>
-    testRender(<WithKeymap effects={effects} onQuit={() => undefined} probe={probe} />, size),
+    testRender(<WithKeymap session={session} onQuit={() => undefined} probe={probe} />, size),
   );
 
   probe.setup = setup;
 
   const cleanup = (): void => {
+    session.stop();
     changeListeners.clear();
     probe.keysAtCommit.splice(0);
 
@@ -199,8 +203,6 @@ export const createTuiFixture = async (
     await act(async () => {
       if (key === 'up' || key === 'down') {
         setup.mockInput.pressArrow(key);
-      } else if (key === 'tab') {
-        setup.mockInput.pressTab();
       } else {
         setup.mockInput.pressKey(key);
       }

@@ -234,7 +234,7 @@ it('lends the terminal to $EDITOR on e, shows the typed title in the tree, and e
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen(`> ${plan.id}  aaaa  draft`);
 
     const beforeEdit = tikk.terminal.output.length;
@@ -244,7 +244,7 @@ it('lends the terminal to $EDITOR on e, shows the typed title in the tree, and e
     tikk.type(`${typedTitle}\r`);
     await tikk.waitForScreen(`> ${plan.id}  ${typedTitle}  draft`);
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('Nothing needs you.');
 
     expect(tikk.shows(typedTitle)).toBe(false);
@@ -271,7 +271,7 @@ it.skipIf(Bun.which('nvim') === null)(
     try {
       await tikk.waitForScreen('Nothing needs you.');
 
-      tikk.type('\t');
+      tikk.type('s');
       await tikk.waitForScreen(`> ${plan.id}  aaaa  draft`);
 
       const beforeEdit = tikk.terminal.output.length;
@@ -307,7 +307,7 @@ it('stops a non-exec editor wrapper and its descendant before restoring the term
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('aaaa  draft');
 
     const beforeEdit = tikk.terminal.output.length;
@@ -555,7 +555,7 @@ it.each(['process list failure', 'signal refusal'])(
     try {
       await tikk.waitForScreen('Nothing needs you.');
 
-      tikk.type('\t');
+      tikk.type('s');
       await tikk.waitForScreen('aaaa  draft');
 
       const beforeEdit = tikk.terminal.output.length;
@@ -608,7 +608,7 @@ it('keeps handling delayed SIGTERM during editor cleanup and restores the termin
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('aaaa  draft');
 
     const beforeEdit = tikk.terminal.output.length;
@@ -658,7 +658,7 @@ it('stops an editor that ignores SIGTERM at shutdown, restores the terminal, and
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('aaaa  draft');
 
     const beforeEdit = tikk.terminal.output.length;

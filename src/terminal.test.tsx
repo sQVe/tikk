@@ -3,12 +3,13 @@ import { afterEach, expect, it } from 'bun:test';
 import { createTestRenderer } from '@opentui/core/testing';
 import { createDefaultOpenTuiKeymap } from '@opentui/keymap/opentui';
 import { createRoot } from '@opentui/react';
-import { act, isValidElement } from 'react';
+import { act } from 'react';
 
 import type { NeedView, NeedsSession } from './cli/cli.ts';
 import { startTerminal } from './terminal.tsx';
 import type { TerminalEffects } from './terminal.tsx';
-import type { AppProps } from './tui/tui.tsx';
+import { createTuiSession } from './tui/tui.tsx';
+import type { TuiEffects } from './tui/tui.tsx';
 
 type Handler = (reason?: unknown) => void;
 type Setup = Awaited<ReturnType<typeof createTestRenderer>>;
@@ -45,7 +46,7 @@ const start = async (options: StartOptions = {}) => {
   const calls = { unmount: 0, destroy: 0, dispose: 0 };
   const watcher = { onChange: (): void => undefined, stops: 0, loads: 0 };
   const lending: string[] = [];
-  const app: { effects?: AppProps['effects'] } = {};
+  const app: { effects?: TuiEffects } = {};
   const exitCodes: number[] = [];
   const printed: unknown[] = [];
   const destroyedAtPrint: number[] = [];
@@ -76,10 +77,6 @@ const start = async (options: StartOptions = {}) => {
         },
         root: {
           render: (node) => {
-            if (isValidElement<AppProps>(node)) {
-              app.effects = node.props.effects;
-            }
-
             root.render(node);
           },
           unmount: () => {
@@ -105,6 +102,11 @@ const start = async (options: StartOptions = {}) => {
       printed.push(error);
       destroyedAtPrint.push(calls.destroy);
     },
+    createSession: (tuiEffects) => {
+      app.effects = tuiEffects;
+
+      return createTuiSession(tuiEffects);
+    },
   };
 
   const closing: { gate: Promise<unknown> } = { gate: Promise.resolve() };
@@ -116,6 +118,7 @@ const start = async (options: StartOptions = {}) => {
       return Promise.resolve({ ok: true, value: { items: [needView], reconcileProblems: [] } });
     },
     loadTree: () => Promise.resolve({ ok: true, value: [] }),
+    loadErrors: () => Promise.resolve([]),
     edit:
       options.edit ??
       (() => {

@@ -11,8 +11,8 @@ import { openNeedsSession } from '../src/cli/cli.ts';
 import type { NeedsSession } from '../src/cli/cli.ts';
 import { createEffects } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
-import { App } from '../src/tui/tui.tsx';
-import type { AppProps } from '../src/tui/tui.tsx';
+import { App, createTuiSession } from '../src/tui/tui.tsx';
+import type { AppProps, TuiSession } from '../src/tui/tui.tsx';
 import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 
@@ -27,6 +27,7 @@ const loadTimeoutMilliseconds = 10_000;
 let fixture: CliFixture | undefined;
 let parentSlice = '';
 let needs: NeedsSession | undefined;
+let tui: TuiSession | undefined;
 let mounted: Awaited<ReturnType<typeof testRender>> | undefined;
 
 const cli = (): CliFixture => {
@@ -42,11 +43,12 @@ const WithKeymap = (props: Omit<AppProps, 'keymap'>): ReactNode => {
   return <App {...props} keymap={keymap} />;
 };
 
-const tuiEffects = (session: NeedsSession): AppProps['effects'] => ({
-  ...session,
-  lend: async (run) => ({ ok: true, value: await run() }),
-  onChange: () => () => undefined,
-});
+const openTui = (session: NeedsSession): TuiSession =>
+  createTuiSession({
+    ...session,
+    lend: async (run) => ({ ok: true, value: await run() }),
+    onChange: () => () => undefined,
+  });
 
 const createInstruction = async (title: string): Promise<string> => {
   const created = await cli().runJson<{ id: string }>([
@@ -67,8 +69,12 @@ const openHome = async () => {
   invariant(opened.ok, 'The needs session should open.');
   needs = opened.value;
 
+  const session = openTui(opened.value);
+
+  tui = session;
+
   const setup = await act(() =>
-    testRender(<WithKeymap effects={tuiEffects(opened.value)} onQuit={() => undefined} />, {
+    testRender(<WithKeymap session={session} onQuit={() => undefined} />, {
       width: 100,
       height: 20,
     }),
@@ -104,6 +110,8 @@ afterEach(async () => {
   });
 
   mounted = undefined;
+  tui?.stop();
+  tui = undefined;
   await needs?.close();
   needs = undefined;
   await fixture?.cleanup();
