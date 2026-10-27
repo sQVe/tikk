@@ -96,7 +96,6 @@ export const openNeedsSession = async (
   const load = () => track(read);
   const loadTree = () => track(readTree);
 
-  // A broken file keeps its last good ticket state, so its path still names the ticket it belongs to.
   const readErrors = () => {
     const tickets = session.listTickets({ includeArchived: true });
 

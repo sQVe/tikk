@@ -2,7 +2,6 @@ import type { ListRow } from './rowList.tsx';
 
 export interface TicketFileError {
   path: string;
-  // The ticket whose file has this exact path, or null when no ticket has it.
   id: string | null;
   message: string;
 }

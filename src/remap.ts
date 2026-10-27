@@ -34,7 +34,6 @@ export interface ConfigLoad {
 
 const ctrlC = 'ctrl+c';
 
-// An unreadable key has no strokes, so no check treats it as a valid key.
 const strokesIn = (keymap: ConfigKeymap, key: string): string[] => {
   try {
     return keymap.parseKeySequence(key).map((part) => stringifyKeySequence([part]));
@@ -69,7 +68,6 @@ const relatedStrokes = (first: readonly string[], second: readonly string[]): bo
 
 const commandIdsText = (): string => [...new Set(catalog.map((command) => command.id))].join(', ');
 
-// A stroke can hold a sequence, such as "ctrl+c x", so each space-separated token is compared.
 const usesCtrlC = (strokes: readonly string[]): boolean =>
   strokes.some((stroke) => stroke.split(' ').includes(ctrlC));
 
@@ -112,7 +110,6 @@ const checkEntries = (keys: ConfigKeys, strokesOf: StrokesOf, path: string): str
   return undefined;
 };
 
-// Quit always keeps Ctrl+C, so a remap of quit can never take it away.
 const choicesOf = (keys: ConfigKeys, command: Command, strokesOf: StrokesOf): KeyChoice[] => {
   const configured = keys[command.id];
 
@@ -122,7 +119,6 @@ const choicesOf = (keys: ConfigKeys, command: Command, strokesOf: StrokesOf): Ke
 
   const uniqueKeys = [...new Set(configured)];
 
-  // Only a command that exits a pending sequence by default may do so with a remapped key.
   const exitsSequence = command.keysDuringSequence !== undefined;
 
   const choices: KeyChoice[] = uniqueKeys.map((key) => ({
@@ -153,7 +149,6 @@ const clashMessage = (
 const noticeOf = (winner: Binding, loser: Binding, scope: CommandScope): string =>
   `Key "${winner.key}" of ${winner.command.id} replaces the default "${readableKeyOf(loser.key)}" of ${loser.command.id} in the ${scope} layer.`;
 
-// A user key that starts or equals a default key displaces that default in the same scope only.
 const resolveScope = (
   scope: CommandScope,
   bindings: readonly Binding[],

@@ -3,8 +3,6 @@ import { join } from 'node:path';
 
 const root = join(import.meta.dir, '..');
 
-// Loads the settings reader and the project resolver in a fresh process, and lists every module
-// the process loaded.
 const loadedModulesOf = async (): Promise<string[]> => {
   const script = [
     `await import(${JSON.stringify(join(root, 'src/config.ts'))});`,

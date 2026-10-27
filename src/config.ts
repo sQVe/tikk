@@ -20,7 +20,6 @@ export interface ConfigSettings {
   keys: Record<string, string[]>;
 }
 
-// Other top-level fields are ignored, so a file can hold settings this module does not read.
 const configSchema = z.object({
   projects: z.record(z.string(), z.string()).optional(),
   machine: z.string().optional(),
@@ -77,7 +76,6 @@ const parseSettings = (text: string, path: string): Result<ConfigSettings, strin
   };
 };
 
-// The one reader of the config file. A missing file means no settings.
 export const readSettings = (
   homeDirectory: string,
   effects: ConfigEffects = defaultEffects,

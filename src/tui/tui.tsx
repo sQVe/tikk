@@ -117,8 +117,6 @@ const overlayMaximumTop = (
   return helpWindowOf(bindings, snapshot, height, width).maximumTop;
 };
 
-// The scope comes from the live session, because keys in one burst arrive before React renders
-// what the first key changed.
 const KeyLayer = ({ scope, run, session, bindings }: LayerProps): null => {
   useBindings(() => {
     const scoped = bindings[scope];
@@ -168,9 +166,6 @@ const commandDuringSequence = (
   return undefined;
 };
 
-// The keymap gives a pending sequence the next key before any binding, so an exit key would end
-// the sequence as a miss. A key that misses a pending sequence is dropped, so it never runs as a
-// single key.
 const PendingSequence = ({ run, session, bindings }: Omit<LayerProps, 'scope'>): null => {
   const keymap = useKeymap();
 
@@ -207,7 +202,6 @@ const PendingSequence = ({ run, session, bindings }: Omit<LayerProps, 'scope'>):
   return null;
 };
 
-// The list and the detail pane already sit side by side, so Enter has nothing to open.
 const isRedundantDetail = (intent: TuiIntent, sideLayout: boolean): boolean =>
   sideLayout && intent.kind === 'openDetail';
 
@@ -254,7 +248,6 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
     [session, onQuit, bindings, width, height, sideLayout],
   );
 
-  // A resize from narrow to side by side ends the full-screen detail, so no list key stays blocked.
   useEffect(() => {
     if (sideLayout && snapshot.detailOpen) {
       session.send({ kind: 'closeDetail' });

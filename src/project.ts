@@ -10,7 +10,6 @@ export type GitOutcome =
 
 export interface ProjectEffects {
   runGit: (args: string[]) => Promise<GitOutcome>;
-  // Reads the settings of the config file. A failure names the file.
   readSettings: () => Result<ConfigSettings, string>;
   hostName: string;
 }

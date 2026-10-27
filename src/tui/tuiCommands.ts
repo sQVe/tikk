@@ -24,20 +24,13 @@ export interface Command {
   scope: CommandScope;
   section: HelpSection;
   hiddenFromHelp?: true;
-  // Default keys. A config remap replaces them in the binding table.
   keys: readonly string[];
-  // Keys that still run this command while a key sequence is pending, instead of ending it as a
-  // miss.
   keysDuringSequence?: readonly string[];
-  // The help and messages layers also bind this command's keys, and run this move on the open
-  // overlay.
   overlayMove?: OverlayMove;
   disabledReason: (snapshot: TuiSnapshot) => string | undefined;
   intent: CommandIntent;
 }
 
-// One key of one action in one scope. An overlay copy runs the action's movement on the open
-// overlay instead of the action itself.
 export interface Binding {
   command: Command;
   scope: CommandScope;
@@ -50,8 +43,6 @@ export interface Binding {
 export interface KeyChoice {
   key: string;
   user: boolean;
-  // Whether a pending sequence hands this key to the command. A user key is one only when it is a
-  // single stroke, since the matcher takes one stroke.
   sequenceExit: boolean;
 }
 
@@ -59,7 +50,6 @@ type KeyChoices = (command: Command) => readonly KeyChoice[];
 
 export type BindingTable = Readonly<Record<CommandScope, readonly Binding[]>>;
 
-// Every scope in the order the layers are resolved.
 export const commandScopes: readonly CommandScope[] = [
   'global',
   'list',
@@ -75,7 +65,6 @@ const overlayScopes: readonly OverlayScope[] = ['help', 'messages'];
 
 export const helpSections: readonly HelpSection[] = ['app', 'moving', 'tickets', 'overlays'];
 
-// A higher number wins a key shared by active scopes, as the keymap sorts layers.
 export const scopePriority: Record<CommandScope, number> = {
   help: 50,
   messages: 50,
@@ -265,7 +254,6 @@ export const defaultChoiceOf = (command: Command, key: string): KeyChoice => ({
 const defaultChoicesOf: KeyChoices = (command) =>
   command.keys.map((key) => defaultChoiceOf(command, key));
 
-// Own bindings come before the overlay copies of a scope, so the first match is the own action.
 export const expandBindings = (choicesOf: KeyChoices): BindingTable => {
   const planned = catalog.map((command) => ({ command, choices: choicesOf(command) }));
   const table = emptyBindingTable();

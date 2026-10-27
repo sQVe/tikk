@@ -15,7 +15,6 @@ export interface TuiEffects {
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
   onChange: (listener: () => void) => () => void;
-  // Messages the session starts with, such as config problems.
   notices: readonly string[];
 }
 
@@ -70,7 +69,6 @@ export type TuiIntent =
   | { kind: 'closeDetail' }
   | OverlayIntent;
 
-// Intents that only change the snapshot, with no load or effect.
 type LocalIntent = Exclude<TuiIntent, { kind: 'switchView' } | { kind: 'edit' }>;
 
 export interface TuiSession {
@@ -257,7 +255,6 @@ const readView = async (effects: TuiEffects, name: ViewName): Promise<LoadOutcom
   }
 };
 
-// The views report their own load failures, so a failed listing keeps the previous errors.
 const readFileErrors = async (effects: TuiEffects): Promise<TicketFileError[] | undefined> => {
   try {
     return await effects.loadErrors();
@@ -287,15 +284,12 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     }
   };
 
-  // A failed action must not stop the actions queued after it. Shutdown closes the effects after
-  // stop, so no queued action may start then.
   const enqueue = (action: () => Promise<void>) => {
     const running = queue.then(() => (stopped ? undefined : action()));
 
     queue = running.catch(() => undefined);
   };
 
-  // Keys of the stray errors already sent to the messages, kept for the whole session.
   const reportedErrors = new Set<string>();
 
   const messagesWith = (current: readonly TuiMessage[], texts: readonly string[]): TuiMessage[] => {
@@ -308,8 +302,6 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     return [...added.toReversed(), ...current].slice(0, messageLimit);
   };
 
-  // An error for a file with no ticket row has no place in the list, so it goes to the messages.
-  // Each error goes there once, the first time it has no row.
   const withFileErrors = (
     next: TuiSnapshot,
     fileErrors: readonly TicketFileError[],
@@ -329,7 +321,6 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     return { ...next, fileErrors, messages: messagesWith(next.messages, texts) };
   };
 
-  // One request is one action, so its views change in a single transition.
   const requestLoad = (names: readonly ViewName[]) => {
     const requests = names.map((name) => {
       latestLoad[name] += 1;
