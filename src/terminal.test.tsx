@@ -15,6 +15,7 @@ type Handler = (reason?: unknown) => void;
 type Setup = Awaited<ReturnType<typeof createTestRenderer>>;
 
 interface StartOptions {
+  width?: number;
   edit?: NeedsSession['edit'];
   resume?: () => void;
   closeFailure?: { kind: 'cleanup'; message: string };
@@ -41,7 +42,7 @@ const settle = (): Promise<void> =>
   });
 
 const start = async (options: StartOptions = {}) => {
-  const setup = await createTestRenderer({ width: 40, height: 10 });
+  const setup = await createTestRenderer({ width: options.width ?? 40, height: 10 });
   const handlers = new Map<string, Handler>();
   const calls = { unmount: 0, destroy: 0, dispose: 0 };
   const watcher = { onChange: (): void => undefined, stops: 0, loads: 0 };
@@ -450,6 +451,7 @@ it('suspends the renderer while e runs the editor, and reloads once after resume
 
 it('shows the editor failure in the status line and stays open', async () => {
   const { setup, exitCodes } = await start({
+    width: 60,
     edit: () =>
       Promise.resolve({
         ok: false,

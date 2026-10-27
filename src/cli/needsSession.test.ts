@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import type { TicketId } from '../ticket/ticket.ts';
 import {
   makeEffects,
   makeFact,
@@ -249,7 +250,7 @@ it('lists the ticket files that failed to parse once the pending load settles', 
   }
 
   const loading = opened.value.load();
-  let listed: { path: string; message: string }[] | undefined;
+  let listed: { path: string; message: string; id: string | null }[] | undefined;
 
   const listing = (async () => {
     listed = await opened.value.loadErrors();
@@ -264,7 +265,39 @@ it('lists the ticket files that failed to parse once the pending load settles', 
   await Promise.all([loading, listing]);
   await opened.value.close();
 
-  expect(listed).toEqual(errors);
+  expect(listed).toEqual([
+    { path: 'tickets/demo-3467.md', message: 'Front matter is invalid.', id: null },
+  ]);
+});
+
+it('tags each file error with the ID of the ticket at its exact path, or null when none has that path', async () => {
+  const exactPath = '/store/demo/demo-3467-slug.md';
+  const prefixPath = '/store/demo/demo-3467-abcd-broken.md';
+
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    errors: [
+      { path: exactPath, message: 'Front matter is invalid.' },
+      { path: prefixPath, message: 'Front matter is invalid.' },
+    ],
+  });
+
+  const opened = await openNeedsSession(makeEffects({ session: fakeSession }).effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const listed = await opened.value.loadErrors();
+
+  await opened.value.close();
+
+  expect(listed).toEqual([
+    { path: exactPath, message: 'Front matter is invalid.', id: 'demo-3467' as TicketId },
+    { path: prefixPath, message: 'Front matter is invalid.', id: null },
+  ]);
 });
 
 it('opens the editor on the ticket file and waits for it before it closes', async () => {

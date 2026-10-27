@@ -5,15 +5,18 @@ import { useTerminalDimensions } from '@opentui/react';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 
+import { DetailPane } from './DetailPane.tsx';
+import { strayErrorsOf } from './fileErrors.ts';
 import { HelpOverlay } from './HelpOverlay.tsx';
 import { helpWindowOf } from './helpWindow.ts';
 import { MessageOverlay } from './MessageOverlay.tsx';
 import { messageWindowOf } from './messageWindow.ts';
 import { palette } from './palette.ts';
-import { RowList, singleLine } from './rowList.tsx';
-import { catalog, commandsOfLayer, scopePriority } from './tuiCommands.ts';
+import { RowList } from './rowList.tsx';
+import { StatusLine } from './StatusLine.tsx';
+import { catalog, commandsOfLayer, keyNamesOf, scopePriority } from './tuiCommands.ts';
 import type { Command, CommandScope } from './tuiCommands.ts';
-import type { TuiSession, TuiSnapshot } from './tuiSession.ts';
+import type { TuiIntent, TuiSession, TuiSnapshot } from './tuiSession.ts';
 
 export { createTuiSession } from './tuiSession.ts';
 export type { TuiEffects, TuiSession } from './tuiSession.ts';
@@ -30,7 +33,7 @@ interface LayerProps {
   session: TuiSession;
 }
 
-const statusOf = (snapshot: TuiSnapshot): string => {
+const primaryStatusOf = (snapshot: TuiSnapshot): string => {
   const view = snapshot.views[snapshot.view];
 
   if (snapshot.notice !== '') {
@@ -44,21 +47,44 @@ const statusOf = (snapshot: TuiSnapshot): string => {
   return view.loaded ? view.problems.join('; ') : 'Loading...';
 };
 
+const fileErrorStatusOf = (count: number): string => {
+  if (count === 0) {
+    return '';
+  }
+
+  const noun = count === 1 ? 'error' : 'errors';
+
+  return `${count} file ${noun}`;
+};
+
+const statusOf = (snapshot: TuiSnapshot, strayCount: number): string =>
+  [primaryStatusOf(snapshot), fileErrorStatusOf(strayCount)]
+    .filter((part) => part !== '')
+    .join('; ');
+
+const viewLabels: Record<TuiSnapshot['view'], string> = { home: 'Home', tree: 'Tree' };
+
+const sideLayoutMinimumWidth = 90;
+const detailMaximumWidth = 44;
+const detailShare = 0.36;
+
 const statusRows = 1;
 
 // oxlint-disable-next-line typescript/no-unsafe-type-assertion -- scopePriority is a Record over CommandScope
 const scopes = Object.keys(scopePriority) as CommandScope[];
 
-const isScopeActive = (scope: CommandScope, overlay: TuiSnapshot['overlay']['kind']): boolean => {
+const isScopeActive = (scope: CommandScope, snapshot: TuiSnapshot): boolean => {
+  const { kind } = snapshot.overlay;
+
   const active: Record<CommandScope, boolean> = {
     global: true,
-    list: overlay === 'none',
-    detail: false,
+    list: kind === 'none' && !snapshot.detailOpen,
+    detail: snapshot.detailOpen,
     input: false,
     rank: false,
     visual: false,
-    help: overlay === 'help',
-    messages: overlay === 'messages',
+    help: kind === 'help',
+    messages: kind === 'messages',
   };
 
   return active[scope];
@@ -83,7 +109,7 @@ const KeyLayer = ({ scope, run, session }: LayerProps): null => {
 
     return {
       priority: scopePriority[scope],
-      enabled: () => isScopeActive(scope, session.getSnapshot().overlay.kind),
+      enabled: () => isScopeActive(scope, session.getSnapshot()),
       bindings: keys.map((key) => ({
         key,
         cmd: (context: CommandContext) => {
@@ -104,11 +130,11 @@ const KeyLayer = ({ scope, run, session }: LayerProps): null => {
 };
 
 const commandDuringSequence = (
-  overlay: TuiSnapshot['overlay']['kind'],
+  snapshot: TuiSnapshot,
   matches: (key: string) => boolean,
 ): Command | undefined => {
   const active = scopes
-    .filter((scope) => isScopeActive(scope, overlay))
+    .filter((scope) => isScopeActive(scope, snapshot))
     .toSorted((first, second) => scopePriority[second] - scopePriority[first]);
 
   for (const scope of active) {
@@ -138,7 +164,7 @@ const PendingSequence = ({ run, session }: Omit<LayerProps, 'scope'>): null => {
       }
 
       const matches = (key: string) => keymap.createKeyMatcher(key)(context.event);
-      const command = commandDuringSequence(session.getSnapshot().overlay.kind, matches);
+      const command = commandDuringSequence(session.getSnapshot(), matches);
 
       if (command === undefined) {
         return;
@@ -164,10 +190,24 @@ const PendingSequence = ({ run, session }: Omit<LayerProps, 'scope'>): null => {
   return null;
 };
 
+// The list and the detail pane already sit side by side, so Enter has nothing to open.
+const isRedundantDetail = (intent: TuiIntent, sideLayout: boolean): boolean =>
+  sideLayout && intent.kind === 'openDetail';
+
 const Screen = ({ session, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { width, height } = useTerminalDimensions();
   const view = snapshot.views[snapshot.view];
+  const sideLayout = width >= sideLayoutMinimumWidth;
+  const fullDetail = snapshot.detailOpen && !sideLayout;
+  const showsPane = sideLayout || fullDetail;
+  const detailWidth = Math.min(detailMaximumWidth, Math.floor(width * detailShare));
+  const paneWidth = sideLayout ? detailWidth : width;
+  const listWidth = sideLayout ? width - detailWidth : width;
+  const selectedRow = view.rows[view.selection.index];
+  const rows = [...snapshot.views.home.rows, ...snapshot.views.tree.rows];
+  const strayCount = strayErrorsOf(snapshot.fileErrors, rows).length;
+  const helpKeys = keyNamesOf(catalog, 'help').join('/');
 
   const run = useCallback(
     (command: Command) => {
@@ -182,15 +222,24 @@ const Screen = ({ session, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
       if (intent.kind === 'quit') {
         onQuit();
       } else if (intent.kind === 'session') {
-        session.send(intent.intent);
+        if (!isRedundantDetail(intent.intent, sideLayout)) {
+          session.send(intent.intent);
+        }
       } else {
         const maximumTop = overlayMaximumTop(current, width, height);
 
         session.send({ kind: 'scrollOverlay', move: intent.move, maximumTop });
       }
     },
-    [session, onQuit, width, height],
+    [session, onQuit, width, height, sideLayout],
   );
+
+  // A resize from narrow to side by side ends the full-screen detail, so no list key stays blocked.
+  useEffect(() => {
+    if (sideLayout && snapshot.detailOpen) {
+      session.send({ kind: 'closeDetail' });
+    }
+  }, [session, sideLayout, snapshot.detailOpen]);
 
   const listHeight = Math.max(1, height - statusRows);
 
@@ -201,16 +250,35 @@ const Screen = ({ session, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
         <KeyLayer key={scope} scope={scope} run={run} session={session} />
       ))}
       {view.loaded ? (
-        <RowList
-          rows={view.rows}
-          selected={view.selection.index}
-          height={listHeight}
-          emptyMessage={snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'}
-        />
+        <box flexDirection="row">
+          {fullDetail ? null : (
+            <box width={listWidth} flexShrink={0}>
+              <RowList
+                rows={view.rows}
+                selected={view.selection.index}
+                height={listHeight}
+                emptyMessage={
+                  snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
+                }
+              />
+            </box>
+          )}
+          {showsPane ? (
+            <DetailPane
+              row={selectedRow}
+              errors={snapshot.fileErrors}
+              palette={palette}
+              width={paneWidth}
+            />
+          ) : null}
+        </box>
       ) : null}
-      <text wrapMode="none" truncate height={1}>
-        {singleLine(statusOf(snapshot))}
-      </text>
+      <StatusLine
+        view={viewLabels[snapshot.view]}
+        text={statusOf(snapshot, strayCount)}
+        helpKeys={helpKeys}
+        palette={palette}
+      />
       {snapshot.overlay.kind === 'help' ? (
         <HelpOverlay
           catalog={catalog}

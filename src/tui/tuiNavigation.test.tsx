@@ -229,5 +229,5 @@ it('shows the error of an editor that throws, and clears it after an edit that w
   const [row, status] = setup.captureCharFrame().split('\n');
 
   expect(row).toContain('First');
-  expect(status?.trim()).toBe('');
+  expect(status).not.toContain('The editor crashed.');
 });

@@ -1,15 +1,12 @@
 import type { CliFailure, NeedsReading, TreeGroup } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
+import { strayErrorsOf } from './fileErrors.ts';
+import type { TicketFileError } from './fileErrors.ts';
 import { homeRowsOf } from './homeView.tsx';
 import { topAfter } from './overlayScroll.ts';
 import type { OverlayMove } from './overlayScroll.ts';
 import type { ListRow } from './rowList.tsx';
 import { treeRowsOf } from './treeView.tsx';
-
-interface TicketFileError {
-  path: string;
-  message: string;
-}
 
 export interface TuiEffects {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
@@ -50,6 +47,7 @@ export interface TuiSnapshot {
   notice: string;
   messages: readonly TuiMessage[];
   overlay: Overlay;
+  detailOpen: boolean;
   fileErrors: readonly TicketFileError[];
 }
 
@@ -66,6 +64,8 @@ export type TuiIntent =
   | { kind: 'moveLast' }
   | { kind: 'switchView' }
   | { kind: 'edit' }
+  | { kind: 'openDetail' }
+  | { kind: 'closeDetail' }
   | OverlayIntent;
 
 // Intents that only change the snapshot, with no load or effect.
@@ -97,10 +97,13 @@ const initialSnapshot: TuiSnapshot = {
   notice: '',
   messages: [],
   overlay: { kind: 'none' },
+  detailOpen: false,
   fileErrors: [],
 };
 
 const messageLimit = 100;
+
+const errorKeyOf = (error: TicketFileError): string => JSON.stringify([error.path, error.message]);
 
 const errorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
@@ -203,6 +206,10 @@ const snapshotAfter = (snapshot: TuiSnapshot, intent: LocalIntent): TuiSnapshot 
     return selectRow(snapshot, snapshot.views[snapshot.view].rows.length - 1);
   }
 
+  if (intent.kind === 'openDetail' || intent.kind === 'closeDetail') {
+    return { ...snapshot, detailOpen: intent.kind === 'openDetail' };
+  }
+
   return { ...snapshot, overlay: overlayAfter(snapshot.overlay, intent) };
 };
 
@@ -286,6 +293,40 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     queue = running.catch(() => undefined);
   };
 
+  // Keys of the stray errors already sent to the messages, kept for the whole session.
+  const reportedErrors = new Set<string>();
+
+  const messagesWith = (current: readonly TuiMessage[], texts: readonly string[]): TuiMessage[] => {
+    const added = texts.map((text) => {
+      lastMessageId += 1;
+
+      return { id: lastMessageId, text };
+    });
+
+    return [...added.toReversed(), ...current].slice(0, messageLimit);
+  };
+
+  // An error for a file with no ticket row has no place in the list, so it goes to the messages.
+  // Each error goes there once, the first time it has no row.
+  const withFileErrors = (
+    next: TuiSnapshot,
+    fileErrors: readonly TicketFileError[],
+  ): TuiSnapshot => {
+    const rows = [...next.views.home.rows, ...next.views.tree.rows];
+
+    const strays = strayErrorsOf(fileErrors, rows).filter(
+      (error) => !reportedErrors.has(errorKeyOf(error)),
+    );
+
+    for (const error of strays) {
+      reportedErrors.add(errorKeyOf(error));
+    }
+
+    const texts = strays.map((error) => `${error.path}: ${error.message}`);
+
+    return { ...next, fileErrors, messages: messagesWith(next.messages, texts) };
+  };
+
   // One request is one action, so its views change in a single transition.
   const requestLoad = (names: readonly ViewName[]) => {
     const requests = names.map((name) => {
@@ -322,7 +363,7 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
       const isLatest = reload === latestReload;
       const publishesErrors = isLatest && fileErrors !== undefined;
 
-      update(publishesErrors ? { ...next, fileErrors } : next);
+      update(publishesErrors ? withFileErrors(next, fileErrors) : next);
     });
   };
 
@@ -339,11 +380,7 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
       return;
     }
 
-    lastMessageId += 1;
-
-    const messages = [{ id: lastMessageId, text: notice }, ...snapshot.messages];
-
-    update({ ...snapshot, notice, messages: messages.slice(0, messageLimit) });
+    update({ ...snapshot, notice, messages: messagesWith(snapshot.messages, [notice]) });
   };
 
   const edit = () => {

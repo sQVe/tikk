@@ -12,7 +12,7 @@ interface FakeTui {
   session: TuiSession;
   items: NeedView[];
   groups: TreeGroup[];
-  fileErrors: { path: string; message: string }[];
+  fileErrors: { path: string; id: string | null; message: string }[];
   edited: string[];
   changeListeners: Set<() => void>;
   setHomeFailure: (message: string | undefined) => void;
@@ -32,7 +32,7 @@ const createFake = async (
 ): Promise<FakeTui> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
-  const fileErrors: { path: string; message: string }[] = [];
+  const fileErrors: { path: string; id: string | null; message: string }[] = [];
   let homeFailure: string | undefined;
 
   const effects: TuiEffects = {
@@ -213,8 +213,8 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
   const gates: PromiseWithResolvers<Reading>[] = [];
 
   const listings = [
-    [{ path: 'tickets/demo-3400.md', message: 'Old error.' }],
-    [{ path: 'tickets/demo-3401.md', message: 'New error.' }],
+    [{ path: 'tickets/demo-3400.md', id: null, message: 'Old error.' }],
+    [{ path: 'tickets/demo-3401.md', id: null, message: 'New error.' }],
   ];
 
   let started = 0;
@@ -253,7 +253,7 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
   expect(fake.session.getSnapshot().views.home.rows.map((row) => row.id)).toEqual(['demo-3401']);
 
   expect(fake.session.getSnapshot().fileErrors).toEqual([
-    { path: 'tickets/demo-3401.md', message: 'New error.' },
+    { path: 'tickets/demo-3401.md', id: null, message: 'New error.' },
   ]);
 
   expect(notified).toBe(1);
@@ -289,11 +289,16 @@ it('holds the ticket files that failed to parse after each reload', async () => 
 
   expect(fake.session.getSnapshot().fileErrors).toEqual([]);
 
-  fake.fileErrors.push({ path: 'tickets/demo-3400.md', message: 'Front matter is invalid.' });
+  fake.fileErrors.push({
+    path: 'tickets/demo-3400.md',
+    id: null,
+    message: 'Front matter is invalid.',
+  });
+
   await storeChanged(fake);
 
   expect(fake.session.getSnapshot().fileErrors).toEqual([
-    { path: 'tickets/demo-3400.md', message: 'Front matter is invalid.' },
+    { path: 'tickets/demo-3400.md', id: null, message: 'Front matter is invalid.' },
   ]);
 });
 
@@ -380,7 +385,7 @@ it('stores the error of a load that throws', async () => {
 });
 
 it('keeps the previous ticket file errors when listing them fails', async () => {
-  const fileError = { path: 'tickets/demo-3400.md', message: 'Front matter is invalid.' };
+  const fileError = { path: 'tickets/demo-3400.md', id: null, message: 'Front matter is invalid.' };
   let listings = 0;
 
   const fake = await createFake([], [], {

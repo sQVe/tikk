@@ -79,6 +79,9 @@ export const commandsOfLayer = (commands: readonly Command[], scope: CommandScop
 
 const enabled = (): undefined => undefined;
 
+const selectedRowReason = (snapshot: TuiSnapshot): string | undefined =>
+  snapshot.views[snapshot.view].rows.length === 0 ? 'No row is selected.' : undefined;
+
 const selectedTicketReason = (snapshot: TuiSnapshot): string | undefined => {
   const { id } = snapshot.views[snapshot.view].selection;
 
@@ -177,6 +180,24 @@ export const catalog: readonly Command[] = [
     keys: ['e'],
     disabledReason: selectedTicketReason,
     intent: session({ kind: 'edit' }),
+  },
+  {
+    id: 'openDetail',
+    label: 'Show the selected row in detail',
+    scope: 'list',
+    section: 'tickets',
+    keys: ['return'],
+    disabledReason: selectedRowReason,
+    intent: session({ kind: 'openDetail' }),
+  },
+  {
+    id: 'closeDetail',
+    label: 'Close the detail',
+    scope: 'detail',
+    section: 'overlays',
+    keys: ['escape'],
+    disabledReason: enabled,
+    intent: session({ kind: 'closeDetail' }),
   },
   {
     id: 'closeHelp',

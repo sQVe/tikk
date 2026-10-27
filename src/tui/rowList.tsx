@@ -1,9 +1,15 @@
 import type { ReactNode } from 'react';
 
+export interface DetailFact {
+  label: string;
+  value: string;
+}
+
 export interface ListRow {
   key: string;
   id: string | null;
   text: string;
+  facts: readonly DetailFact[];
 }
 
 export interface RowListProps {

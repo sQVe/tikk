@@ -1,6 +1,7 @@
 import { buildPlanTree } from '../fact/fact.ts';
 import type { TreeGroup } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
+import type { TicketId } from '../ticket/ticket.ts';
 import type { CliEffects, CliFailure, EditorCleanupFailure } from './cliEffects.ts';
 import { readNeeds } from './needsCommand.ts';
 import type { NeedsReading } from './needsCommand.ts';
@@ -10,7 +11,7 @@ import { ticketEditor } from './ticketEditor.ts';
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
-  loadErrors: () => Promise<{ path: string; message: string }[]>;
+  loadErrors: () => Promise<{ path: string; message: string; id: TicketId | null }[]>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
@@ -94,7 +95,19 @@ export const openNeedsSession = async (
 
   const load = () => track(read);
   const loadTree = () => track(readTree);
-  const loadErrors = () => track(() => Promise.resolve(session.listErrors()));
+
+  // A broken file keeps its last good ticket state, so its path still names the ticket it belongs to.
+  const readErrors = () => {
+    const tickets = session.listTickets({ includeArchived: true });
+
+    return session.listErrors().map((error) => {
+      const owner = tickets.find((ticket) => ticket.path === error.path);
+
+      return { path: error.path, message: error.message, id: owner?.id ?? null };
+    });
+  };
+
+  const loadErrors = () => track(() => Promise.resolve(readErrors()));
   const editTicket = (rawId: string) => track(() => edit(rawId));
 
   const finishClose: NeedsSession['close'] = async () => {
