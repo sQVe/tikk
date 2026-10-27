@@ -136,7 +136,16 @@ it('keeps a slice active when an archived accepted instruction is its only start
 
   const fakeSession = makeSession({
     tickets: [slice, archived, open],
-    facts: [makeFact({ kind: 'accept', ticket: 'demo-3468' })],
+    facts: [
+      makeFact({
+        kind: 'log',
+        type: 'submitted',
+        text: '',
+        item: '5ab0000000a1',
+        ticket: 'demo-3468',
+      }),
+      makeFact({ kind: 'accept', item: '5ab0000000a1', ticket: 'demo-3468' }),
+    ],
   });
 
   const opened = await openNeedsSession(makeEffects({ session: fakeSession }).effects);

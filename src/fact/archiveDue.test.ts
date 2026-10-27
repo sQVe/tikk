@@ -108,7 +108,12 @@ it('never archives an open plan or a stand-alone instruction that was not accept
   ];
 
   const facts = [
-    factOf('demo-4789', fifteenDaysAgo, { kind: 'log', type: 'submitted', text: 'Done' }),
+    factOf('demo-4789', fifteenDaysAgo, {
+      kind: 'log',
+      type: 'submitted',
+      item: '5ab0000000a1',
+      text: 'Done',
+    }),
   ];
 
   expect(dueOf(tickets, facts)).toEqual({
@@ -116,6 +121,22 @@ it('never archives an open plan or a stand-alone instruction that was not accept
     archive: [],
     statusFacts: [],
   });
+});
+
+it('never archives an instruction whose accept names an earlier submission', () => {
+  const tickets = [ticketOf('demo-4789', { kind: 'instruction', status: 'open' })];
+
+  const submittedOf = (item: string): Fact =>
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'log', type: 'submitted', item, text: 'Done' });
+
+  const facts = [
+    submittedOf('5ab0000000a1'),
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'reject', item: '5ab0000000a1', reason: 'No.' }),
+    submittedOf('5ab0000000b1'),
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'accept', item: '5ab0000000a1' }),
+  ];
+
+  expect(dueOf(tickets, facts)).toEqual({ date: '2026-10-20', archive: [], statusFacts: [] });
 });
 
 it('visits each ticket once when hand edits make a parent cycle', () => {
@@ -145,8 +166,8 @@ it('treats an accept fact as a finish only for an open instruction', () => {
   ];
 
   const facts = [
-    factOf('demo-3467', fifteenDaysAgo, { kind: 'accept' }),
-    factOf('demo-4789', fifteenDaysAgo, { kind: 'accept' }),
+    factOf('demo-3467', fifteenDaysAgo, { kind: 'accept', item: '5ab0000000a1' }),
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'accept', item: '5ab0000000a1' }),
   ];
 
   expect(dueOf(tickets, facts)).toEqual({ date: '2026-10-20', archive: [], statusFacts: [] });

@@ -29,6 +29,9 @@ const needView: NeedView = {
   reason: 'question',
   since: '2026-10-20T11:00:00.000Z',
   ageSeconds: 60,
+  item: '0000000000a1',
+  passedUp: true,
+  text: 'Which one?',
 };
 
 const settle = (): Promise<void> =>
@@ -178,7 +181,7 @@ it('shows the home view on the open renderer', async () => {
     await setup.renderOnce();
   });
 
-  expect(setup.captureCharFrame()).toContain('Asked instruction');
+  expect(setup.captureCharFrame()).toContain('Which one?');
 });
 
 it('runs one shutdown when q is pressed', async () => {

@@ -87,6 +87,7 @@ describe('deriveSliceState', () => {
     const submitted = makeFact('3478', {
       kind: 'log',
       type: 'submitted',
+      item: '5ab0000000a1',
       text: 'Done.',
       at: '2026-10-20T11:00:00.000Z',
     });
@@ -222,8 +223,16 @@ describe('deriveSliceState', () => {
   });
 
   it('derives done for a merged, audited slice whose instructions are done', () => {
-    const accept = makeFact('3478', { kind: 'accept' });
-    const result = derive(slice, [slice, instruction], [prFact(), auditFact('aaa'), accept], now);
+    const submission = makeFact('3478', {
+      kind: 'log',
+      type: 'submitted',
+      text: '',
+      item: '5ab0000000a1',
+    });
+
+    const accept = makeFact('3478', { kind: 'accept', item: '5ab0000000a1' });
+    const facts = [prFact(), auditFact('aaa'), submission, accept];
+    const result = derive(slice, [slice, instruction], facts, now);
 
     expect(result).toMatchObject({ state: 'done', openInstructions: [] });
   });

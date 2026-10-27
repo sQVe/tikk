@@ -80,8 +80,8 @@ it('succeeds without a write when the instruction is already canceled', async ()
 
 it('refuses to cancel a done instruction and writes nothing', async () => {
   const facts = [
-    makeFact({ kind: 'log', type: 'submitted', text: '' }),
-    makeFact({ kind: 'accept', at: '2026-10-20T11:30:00.000Z' }),
+    makeFact({ kind: 'log', type: 'submitted', item: '5ab0000000a1', text: '' }),
+    makeFact({ kind: 'accept', item: '5ab0000000a1', at: '2026-10-20T11:30:00.000Z' }),
   ];
 
   const { fakeSession, result } = await cancel(['demo-3467'], { facts });
@@ -107,6 +107,22 @@ it('cancels a plan in its file and appends a status fact', async () => {
     machine: 'laptop',
     fact: { kind: 'status', ticket: 'demo-3467', status: 'canceled' },
   });
+});
+
+it('cancels a draft plan in its own file and keeps the file and its body', async () => {
+  const plan = makeKindTicket('demo-3467', 'plan', 'draft');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [plan] });
+  const [write] = fakeSession.writes;
+  const written = parseTicketFile(write?.text ?? '');
+
+  successOf(result);
+  expect(write?.path).toBe(plan.path);
+  expect(written.ok && written.value.frontMatter.status).toBe('canceled');
+  expect(written.ok && written.value.body).toBe(plan.body);
+
+  expect(fakeSession.appends).toMatchObject([
+    { fact: { kind: 'status', ticket: 'demo-3467', status: 'canceled' } },
+  ]);
 });
 
 it('appends a status fact when it cancels an instruction', async () => {

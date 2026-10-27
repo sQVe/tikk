@@ -266,7 +266,10 @@ it('fails with locked and writes nothing when the store lock is held', async () 
 
 it('prints the derived state of a done instruction in the text after an edit', async () => {
   const { result } = edit(['demo-3467', '--hash', 'hash-demo-3467', '--title', 'New'], false, {
-    facts: [makeFact({ kind: 'accept' })],
+    facts: [
+      makeFact({ kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' }),
+      makeFact({ kind: 'accept', item: '5ab0000000a1' }),
+    ],
   });
 
   const output = successOf(await result);

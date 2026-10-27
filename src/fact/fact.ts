@@ -9,7 +9,7 @@ export type { Fact } from './factLine.ts';
 export { parseReviewFindings } from './reviewFindings.ts';
 export type { ReviewFinding } from './reviewFindings.ts';
 export { selectNeeds } from './needsQuery.ts';
-export type { NeedItem } from './needsQuery.ts';
+export type { NeedDetail, NeedItem } from './needsQuery.ts';
 export { buildPlanTree } from './planTree.ts';
 export type { TreeGroup } from './planTree.ts';
 export { selectReady } from './readyQueue.ts';
@@ -19,8 +19,13 @@ export { derivePlanState } from './planState.ts';
 export type { SliceIndex, SliceState } from './sliceState.ts';
 export { deriveInstructionState } from './instructionState.ts';
 
+export { latestSubmission, selectOpenQuestions, selectPassedUp } from './instructionItems.ts';
+export type { InstructionItem } from './instructionItems.ts';
+
 export type {
   InstructionClaim,
+  InstructionRejection,
+  InstructionState,
   InstructionStateName,
   InstructionTicket,
 } from './instructionState.ts';

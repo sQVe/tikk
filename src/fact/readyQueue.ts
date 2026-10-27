@@ -1,15 +1,10 @@
 import type { Fact } from './factLine.ts';
-import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
-import type {
-  InstructionClaim,
-  InstructionStateName,
-  InstructionTicket,
-} from './instructionState.ts';
-import { derivePlanState } from './planState.ts';
-import type { PlanStateName } from './planState.ts';
+import type { InstructionClaim, InstructionTicket } from './instructionState.ts';
 import { compareRank } from './rankOrder.ts';
-import { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
-import type { SliceIndex, SliceStateName } from './sliceState.ts';
+import { buildSliceIndex, selectSlicePr } from './sliceState.ts';
+import type { SliceIndex } from './sliceState.ts';
+import { blockerState, clearingStates, deriveStates } from './ticketStates.ts';
+import type { Consideration, ReadyStateName } from './ticketStates.ts';
 
 export interface ReadyScope {
   kind?: 'instruction' | 'slice';
@@ -34,13 +29,6 @@ interface ResolvedBlockers {
   stackParents: StackParent[];
 }
 
-type ReadyStateName = InstructionStateName | SliceStateName | PlanStateName;
-
-interface Consideration {
-  state: ReadyStateName;
-  claim: InstructionClaim | null;
-}
-
 interface ReadyCandidate<Ticket extends InstructionTicket> {
   ticket: Ticket;
   state: ReadyStateName;
@@ -60,7 +48,6 @@ export interface ReadySelection<Ticket extends InstructionTicket> {
 }
 
 const consideredStates = new Set<ReadyStateName>(['open', 'active', 'submitted', 'planned']);
-const clearingStates = new Set(['done', 'canceled']);
 
 const inScope = (ticket: InstructionTicket, scope: ReadyScope): boolean => {
   const { frontMatter } = ticket;
@@ -75,49 +62,6 @@ const inScope = (ticket: InstructionTicket, scope: ReadyScope): boolean => {
 const isCandidateKind = (ticket: InstructionTicket, scope: ReadyScope): boolean =>
   ticket.frontMatter.kind === (scope.kind ?? 'instruction') &&
   ticket.frontMatter.archived === undefined;
-
-const deriveStates = (
-  tickets: InstructionTicket[],
-  index: SliceIndex,
-  now: Date,
-): Map<string, Consideration> => {
-  const states = new Map<string, Consideration>();
-
-  for (const ticket of tickets) {
-    const { kind, status } = ticket.frontMatter;
-
-    if (kind === 'instruction') {
-      states.set(
-        ticket.id,
-        deriveInstructionStateFromOwnFacts(ticket, index.factsByTicket.get(ticket.id) ?? [], now),
-      );
-    }
-
-    if (kind === 'slice' && status === 'open') {
-      states.set(ticket.id, {
-        state: deriveSliceState(ticket, index, now).state,
-        claim: null,
-      });
-    }
-
-    if (kind === 'plan') {
-      states.set(ticket.id, { state: derivePlanState(ticket, index, now), claim: null });
-    }
-  }
-
-  return states;
-};
-
-const blockerState = (
-  target: InstructionTicket | undefined,
-  states: Map<string, Consideration>,
-): string => {
-  if (target === undefined) {
-    return 'missing';
-  }
-
-  return states.get(target.id)?.state ?? target.frontMatter.status;
-};
 
 const parentOf = (
   ticket: InstructionTicket,

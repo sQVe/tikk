@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 
-import { failureOf, makeTicket, successOf } from './cliHarness.ts';
+import { failureOf, makeFact, makeTicket, successOf } from './cliHarness.ts';
 import {
   claimBy,
   submittedBy,
@@ -9,6 +9,7 @@ import {
   noSideEffects,
   sideEffectsOf,
   orphan,
+  itemOf,
 } from './instructionHarness.ts';
 import { instructionLog } from './instructionLog.ts';
 
@@ -92,4 +93,81 @@ it('still appends a log to an instruction whose parent does not exist', async ()
 
   successOf(result);
   expect(fakeSession.appends).toHaveLength(1);
+});
+
+const question = makeFact({ kind: 'log', type: 'question', text: 'Why?', item: '0000000000a1' });
+
+it('gives a question a new item and prints it', async () => {
+  const { fakeSession, result } = await run(instructionLog, [
+    'demo-3467',
+    '--type',
+    'question',
+    '--text',
+    'Which one?',
+  ]);
+
+  const item = itemOf(result);
+
+  expect(item).toMatch(/^[0-9a-f]{12}$/);
+  expect(fakeSession.appends.map(({ fact }) => fact)).toMatchObject([{ type: 'question', item }]);
+});
+
+it('records an answer to an open question with its item', async () => {
+  const { fakeSession, result } = await run(
+    instructionLog,
+    ['demo-3467', '--type', 'answer', '--text', 'That one', '--item', '0000000000a1'],
+    { facts: [question] },
+  );
+
+  successOf(result);
+
+  expect(fakeSession.appends.map(({ fact }) => fact)).toMatchObject([
+    { type: 'answer', item: '0000000000a1' },
+  ]);
+});
+
+it('refuses an answer without an item and writes nothing', async () => {
+  const { fakeSession, result } = await run(
+    instructionLog,
+    ['demo-3467', '--type', 'answer', '--text', 'That one'],
+    { facts: [question] },
+  );
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
+});
+
+it('refuses an answer to an unknown or answered item and writes nothing', async () => {
+  const answered = makeFact({ kind: 'log', type: 'answer', text: 'So.', item: '0000000000a1' });
+
+  const cases = [
+    { item: '0000000000c1', facts: [question] },
+    { item: '0000000000a1', facts: [question, answered] },
+  ];
+
+  for (const { item, facts } of cases) {
+    const { fakeSession, result } = await run(
+      instructionLog,
+      ['demo-3467', '--type', 'answer', '--text', 'That one', '--item', item],
+      { facts },
+    );
+
+    expect(failureOf(result).code).toBe('conflict');
+    expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
+  }
+});
+
+it('refuses an item on a log that is not an answer and writes nothing', async () => {
+  const { fakeSession, result } = await run(instructionLog, [
+    'demo-3467',
+    '--type',
+    'progress',
+    '--text',
+    'A note',
+    '--item',
+    '0000000000a1',
+  ]);
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(sideEffectsOf(fakeSession)).toEqual(noSideEffects);
 });

@@ -1,5 +1,5 @@
 import { selectNeeds } from '../fact/fact.ts';
-import type { NeedItem } from '../fact/fact.ts';
+import type { NeedDetail, NeedItem } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
@@ -10,18 +10,12 @@ import type { ReconcileProblem } from './prReconcile.ts';
 interface NeedViewBase {
   id: TicketId;
   title: string;
-  since: string;
-  ageSeconds: number;
+  since: string | null;
+  ageSeconds: number | null;
   parseError?: string;
 }
 
-export type NeedView = NeedViewBase &
-  (
-    | { reason: 'question' | 'submitted' | 'mergedUnverified' }
-    | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
-    | { reason: 'staleClaim'; holder: string }
-    | { reason: 'blockedFinding'; fingerprint: string; claim: string }
-  );
+export type NeedView = NeedViewBase & NeedDetail;
 
 export interface NeedsReading {
   items: NeedView[];
@@ -32,7 +26,11 @@ const secondsPerMinute = 60;
 const secondsPerHour = 3600;
 const secondsPerDay = 86_400;
 
-const shortAge = (ageSeconds: number): string => {
+const shortAge = (ageSeconds: number | null): string => {
+  if (ageSeconds === null) {
+    return '-';
+  }
+
   if (ageSeconds < secondsPerMinute) {
     return `${ageSeconds}s`;
   }
@@ -49,61 +47,49 @@ const shortAge = (ageSeconds: number): string => {
 };
 
 const itemView = (item: NeedItem<CliTicket>): NeedView => {
-  const { id, frontMatter } = item.ticket;
-  const { title } = frontMatter;
-  const { since, ageSeconds } = item;
-  const parseError = item.ticket.error === null ? {} : { parseError: item.ticket.path };
+  const { ticket, ...detail } = item;
+  const parseError = ticket.error === null ? {} : { parseError: ticket.path };
 
-  if (item.reason === 'staleClaim') {
-    return {
-      id,
-      title,
-      reason: item.reason,
-      since,
-      ageSeconds,
-      holder: item.holder,
-      ...parseError,
-    };
-  }
-
-  if (item.reason === 'flagged') {
-    const { openInstructions, openTasks } = item;
-
-    return {
-      id,
-      title,
-      reason: item.reason,
-      since,
-      ageSeconds,
-      openInstructions,
-      openTasks,
-      ...parseError,
-    };
-  }
-
-  if (item.reason === 'blockedFinding') {
-    const { fingerprint, claim } = item;
-
-    return { id, title, reason: item.reason, since, ageSeconds, fingerprint, claim, ...parseError };
-  }
-
-  return { id, title, reason: item.reason, since, ageSeconds, ...parseError };
+  return { id: ticket.id, title: ticket.frontMatter.title, ...detail, ...parseError };
 };
 
-export const itemSubject = (view: NeedView): string =>
-  view.reason === 'blockedFinding' ? `${view.fingerprint}  ${view.claim}` : view.title;
+export const itemSubject = (view: NeedView): string => {
+  if (view.reason === 'blockedFinding') {
+    return `${view.fingerprint}  ${view.claim}`;
+  }
+
+  return view.reason === 'question' ? view.text : view.title;
+};
+
+const lineBreaks = /\s*[\r\n\u2028\u2029]+\s*/g;
 
 const openWorkOf = (view: Extract<NeedView, { reason: 'flagged' }>): TicketId[] => [
   ...view.openInstructions,
   ...view.openTasks,
 ];
 
+const linkedIdsOf = (view: NeedView): TicketId[] => {
+  if (view.reason === 'flagged') {
+    return openWorkOf(view);
+  }
+
+  return view.reason === 'blockingTask' ? view.blocks : [];
+};
+
+const itemIdOf = (view: NeedView): string =>
+  view.reason === 'question' || view.reason === 'submitted' ? `  ${view.item}` : '';
+
+const textOf = (view: NeedView): string =>
+  view.reason === 'draftPlan' && view.text !== undefined ? `  ${view.text}` : '';
+
 const itemLine = (view: NeedView): string => {
-  const line = `${view.id}  ${view.reason}  ${shortAge(view.ageSeconds)}  ${itemSubject(view)}`;
-  const openWork = view.reason === 'flagged' ? `  ${openWorkOf(view).join(' ')}` : '';
+  const age = shortAge(view.ageSeconds);
+  const line = `${view.id}  ${view.reason}  ${age}${itemIdOf(view)}  ${itemSubject(view).replaceAll(lineBreaks, ' ')}${textOf(view)}`;
+  const linkedIds = linkedIdsOf(view);
+  const linked = linkedIds.length === 0 ? '' : `  ${linkedIds.join(' ')}`;
   const suffix = view.parseError === undefined ? '' : `  parseError ${view.parseError}`;
 
-  return `${line}${openWork}${suffix}\n`;
+  return `${line}${linked}${suffix}\n`;
 };
 
 export const readNeeds = async (

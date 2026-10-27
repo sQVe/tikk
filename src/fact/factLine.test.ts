@@ -33,9 +33,53 @@ describe('parseFactLine', () => {
 
     const release = parseFactLine(line({ kind: 'release', holder: 'a' }));
     const log = parseFactLine(line({ kind: 'log', type: 'progress', text: 'hi' }));
-    const accept = parseFactLine(line({ kind: 'accept' }));
+    const accept = parseFactLine(line({ kind: 'accept', item: '5ab0000000a1' }));
 
     expect([claim.ok, release.ok, log.ok, accept.ok]).toEqual([true, true, true, true]);
+  });
+
+  it('needs an item on a question, answer, submission, accept, pass-up, and reject', () => {
+    const withItem = [
+      { kind: 'log', type: 'question', text: 'q' },
+      { kind: 'log', type: 'answer', text: 'a' },
+      { kind: 'log', type: 'submitted', text: '' },
+      { kind: 'accept' },
+      { kind: 'passUp' },
+      { kind: 'reject', reason: 'r' },
+    ];
+
+    const parsedWith = withItem.map((extra) =>
+      parseFactLine(line({ ...extra, item: 'abc123def456' })),
+    );
+
+    const parsedWithout = withItem.map((extra) => parseFactLine(line(extra)));
+
+    expect(parsedWith.map((parsed) => parsed.ok)).toEqual(withItem.map(() => true));
+    expect(parsedWithout.map((parsed) => parsed.ok)).toEqual(withItem.map(() => false));
+  });
+
+  it('parses a waiting fact with or without text, and refuses an empty text', () => {
+    const waiting = parseFactLine(line({ kind: 'waiting', waiting: true, text: 'Pick a name' }));
+    const resumed = parseFactLine(line({ kind: 'waiting', waiting: false }));
+    const empty = parseFactLine(line({ kind: 'waiting', waiting: true, text: '' }));
+
+    expect([waiting.ok, resumed.ok, empty.ok]).toEqual([true, true, false]);
+  });
+
+  it('refuses an item that is not 12 lower-case hex characters, or on a progress log', () => {
+    for (const item of ['ABC123DEF456', 'abc123', 'abc123def4567']) {
+      expect(parseFactLine(line({ kind: 'passUp', item })).ok).toBe(false);
+    }
+
+    const progress = line({ kind: 'log', type: 'progress', text: 'hi', item: 'abc123def456' });
+
+    expect(parseFactLine(progress).ok).toBe(false);
+  });
+
+  it('refuses a reject with an empty reason', () => {
+    expect(parseFactLine(line({ kind: 'reject', item: 'abc123def456', reason: '' })).ok).toBe(
+      false,
+    );
   });
 
   it('round-trips an alias fact and rejects one with no from', () => {
@@ -95,13 +139,15 @@ describe('parseFactLine', () => {
   });
 
   it('returns a failure for a version other than 1', () => {
-    const result = parseFactLine(line({ kind: 'accept' }, { version: 2 }));
+    const result = parseFactLine(line({ kind: 'accept', item: '5ab0000000a1' }, { version: 2 }));
 
     expect(result.ok).toBe(false);
   });
 
   it('returns a failure for an invalid machine name', () => {
-    const result = parseFactLine(line({ kind: 'accept' }, { machine: 'Bad Name' }));
+    const result = parseFactLine(
+      line({ kind: 'accept', item: '5ab0000000a1' }, { machine: 'Bad Name' }),
+    );
 
     expect(result.ok).toBe(false);
   });
@@ -115,7 +161,9 @@ describe('parseFactLine', () => {
 
 describe('serializeFactLine', () => {
   it('writes one JSON line that parses back to the same fact', () => {
-    const parsed = parseFactLine(line({ kind: 'log', type: 'answer', text: 'yes', holder: 'a' }));
+    const parsed = parseFactLine(
+      line({ kind: 'log', type: 'answer', item: '0000000000a1', text: 'yes', holder: 'a' }),
+    );
 
     if (!parsed.ok) {
       throw new Error(parsed.reason.message);

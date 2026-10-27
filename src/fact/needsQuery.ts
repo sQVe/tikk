@@ -1,59 +1,96 @@
 import type { TicketId } from '../ticket/ticket.ts';
+import { ageSecondsOf } from './ageSeconds.ts';
 import type { Fact } from './factLine.ts';
 import { selectFindings } from './findingStatus.ts';
-import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
+import { latestSubmission, selectOpenQuestions, selectPassedUp } from './instructionItems.ts';
+import { deriveInstructionStateFromOwnFacts, selectLastClaim } from './instructionState.ts';
 import type { InstructionTicket } from './instructionState.ts';
+import { selectDraftPlanNeeds, selectTaskNeeds } from './needTaskPlan.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
+import { deriveStates } from './ticketStates.ts';
 
 interface NeedBase<Ticket extends InstructionTicket> {
   ticket: Ticket;
-  since: string;
-  ageSeconds: number;
+  since: string | null;
+  ageSeconds: number | null;
 }
 
-type NeedDetail =
-  | { reason: 'question' | 'submitted' | 'mergedUnverified' }
+export type NeedDetail =
+  | { reason: 'question'; item: string; passedUp: boolean; text: string }
+  | { reason: 'submitted'; item: string; passedUp: boolean }
+  | { reason: 'mergedUnverified' }
   | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
   | { reason: 'staleClaim'; holder: string }
-  | { reason: 'blockedFinding'; fingerprint: string; claim: string };
+  | { reason: 'blockedFinding'; fingerprint: string; claim: string }
+  | { reason: 'blockingTask'; blocks: TicketId[] }
+  | { reason: 'newTask' }
+  | { reason: 'draftPlan'; text?: string };
 
 export type NeedItem<Ticket extends InstructionTicket> = NeedBase<Ticket> & NeedDetail;
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
 
-const millisecondsPerSecond = 1000;
+const questionTimeoutSeconds = 1800;
 
-const ageSecondsOf = (since: string, now: Date): number =>
-  Math.max(0, Math.floor((now.getTime() - new Date(since).getTime()) / millisecondsPerSecond));
+const questionNeedsOf = <Ticket extends InstructionTicket>(
+  ticket: Ticket,
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const passedUp = selectPassedUp(own);
 
-const oldestOpenQuestion = (own: Fact[]): string | undefined => {
-  let oldest: string | undefined;
+  return selectOpenQuestions(own).flatMap(({ item, at, text }) => {
+    const ageSeconds = ageSecondsOf(at, now);
+    const isPassedUp = passedUp.has(item);
 
-  for (const fact of own) {
-    if (fact.kind !== 'log') {
-      continue;
+    if (!isPassedUp && ageSeconds < questionTimeoutSeconds) {
+      return [];
     }
 
-    if (fact.type === 'answer') {
-      oldest = undefined;
-    }
-
-    if (fact.type === 'question') {
-      oldest ??= fact.at;
-    }
-  }
-
-  return oldest;
+    return [
+      {
+        ticket,
+        reason: 'question' as const,
+        since: at,
+        ageSeconds,
+        item,
+        passedUp: isPassedUp,
+        text,
+      },
+    ];
+  });
 };
 
-const submittedSince = (own: Fact[]): string | undefined =>
-  own.findLast((fact) => fact.kind === 'log' && fact.type === 'submitted')?.at;
+const submissionNeedsOf = <Ticket extends InstructionTicket>(
+  ticket: Ticket,
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const submission = latestSubmission(own);
+
+  if (submission === undefined || !selectPassedUp(own).has(submission.item)) {
+    return [];
+  }
+
+  const { item, at } = submission;
+
+  return [
+    {
+      ticket,
+      reason: 'submitted',
+      since: at,
+      ageSeconds: ageSecondsOf(at, now),
+      item,
+      passedUp: true,
+    },
+  ];
+};
 
 const staleClaimOf = (own: Fact[], now: Date): { holder: string; since: string } | undefined => {
-  const holderFact = own.findLast((fact) => fact.kind === 'claim' || fact.kind === 'release');
+  const holderFact = selectLastClaim(own);
 
-  if (holderFact?.kind !== 'claim' || new Date(holderFact.leaseEnd) > now) {
+  if (holderFact === undefined || new Date(holderFact.leaseEnd) > now) {
     return undefined;
   }
 
@@ -71,27 +108,10 @@ const needsOf = <Ticket extends InstructionTicket>(
     return [];
   }
 
-  const items: NeedItem<Ticket>[] = [];
-  const questionSince = oldestOpenQuestion(own);
+  const items = questionNeedsOf(ticket, own, now);
 
-  if (questionSince !== undefined) {
-    items.push({
-      ticket,
-      reason: 'question',
-      since: questionSince,
-      ageSeconds: ageSecondsOf(questionSince, now),
-    });
-  }
-
-  const submitted = state === 'submitted' ? submittedSince(own) : undefined;
-
-  if (submitted !== undefined) {
-    items.push({
-      ticket,
-      reason: 'submitted',
-      since: submitted,
-      ageSeconds: ageSecondsOf(submitted, now),
-    });
+  if (state === 'submitted') {
+    items.push(...submissionNeedsOf(ticket, own, now));
   }
 
   const stale = state === 'open' ? staleClaimOf(own, now) : undefined;
@@ -169,7 +189,12 @@ const sliceNeedsOf = <Ticket extends InstructionTicket>(
   const ageSeconds = ageSecondsOf(since, now);
 
   if (derived.state === 'mergedUnverified') {
-    items.push({ ticket: slice, reason: 'mergedUnverified', since, ageSeconds });
+    items.push({
+      ticket: slice,
+      reason: 'mergedUnverified',
+      since,
+      ageSeconds,
+    });
   }
 
   const { openInstructions, openTasks } = derived;
@@ -189,11 +214,19 @@ const sliceNeedsOf = <Ticket extends InstructionTicket>(
   return items;
 };
 
+const compareSince = (a: string | null, b: string | null): number => {
+  if (a === null || b === null) {
+    return Number(a === null) - Number(b === null);
+  }
+
+  return new Date(a).getTime() - new Date(b).getTime();
+};
+
 const byOldest = <Ticket extends InstructionTicket>(
   a: NeedItem<Ticket>,
   b: NeedItem<Ticket>,
 ): number => {
-  const bySince = new Date(a.since).getTime() - new Date(b.since).getTime();
+  const bySince = compareSince(a.since, b.since);
 
   if (bySince !== 0) {
     return bySince;
@@ -222,5 +255,13 @@ export const selectNeeds = <Ticket extends InstructionTicket>(
     .filter((ticket) => ticket.frontMatter.archived === undefined)
     .flatMap((ticket) => blockedFindingsOf(ticket, factsByTicket.get(ticket.id) ?? [], now));
 
-  return [...instructionItems, ...sliceItems, ...findingItems].toSorted(byOldest);
+  const states = deriveStates(tickets, index, now);
+
+  const taskItems = selectTaskNeeds(tickets, factsByTicket, states, now);
+
+  const planItems = selectDraftPlanNeeds(tickets, factsByTicket, now);
+
+  return [...instructionItems, ...sliceItems, ...findingItems, ...taskItems, ...planItems].toSorted(
+    byOldest,
+  );
 };

@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { selectNeeds } from './fact.ts';
-import { makeFact, makeTicket, now, instructionId } from './factHarness.ts';
-
-const reasonsOf = (items: ReturnType<typeof selectNeeds>) =>
-  items.map((item) => [item.ticket.id, item.reason]);
+import { instructionId, makeFact, makeTicket, now, reasonsOf } from './factHarness.ts';
 
 const reviewOf = (id: string, fingerprints: string[]) =>
   makeFact(id, {
@@ -23,75 +20,120 @@ const reviewOf = (id: string, fingerprints: string[]) =>
 const statusOf = (id: string, fingerprint: string, status: string, at: string) =>
   makeFact(id, { kind: 'finding', fingerprint, status, actor: 'a', reason: 'r', at });
 
+const ask = (item: string, at: string) =>
+  makeFact('3467', { kind: 'log', type: 'question', text: item, item, at });
+
+const submit = (item: string) =>
+  makeFact('3467', { kind: 'log', type: 'submitted', text: '', item });
+
 describe('selectNeeds', () => {
-  it('lists an unanswered question and drops it after an answer', () => {
+  it('lists a question that was not passed up only after 30 minutes', () => {
     const ticket = makeTicket('3467');
-    const question = makeFact('3467', { kind: 'log', type: 'question', text: 'Which one?' });
+
+    const question = makeFact('3467', {
+      kind: 'log',
+      type: 'question',
+      text: 'Which one?',
+      item: '0123456789ab',
+      at: '2026-10-20T11:00:00.000Z',
+    });
+
+    const at29 = new Date('2026-10-20T11:29:59.000Z');
+    const at30 = new Date('2026-10-20T11:30:00.000Z');
+    const at31 = new Date('2026-10-20T11:31:00.000Z');
+
+    expect(selectNeeds([ticket], [question], at29)).toEqual([]);
+    expect(selectNeeds([ticket], [question], at30)).toHaveLength(1);
+
+    expect(selectNeeds([ticket], [question], at31)).toMatchObject([
+      { reason: 'question', item: '0123456789ab', passedUp: false },
+    ]);
+  });
+
+  it('lists a passed-up question at once and drops it after its answer', () => {
+    const ticket = makeTicket('3467');
+
+    const question = makeFact('3467', {
+      kind: 'log',
+      type: 'question',
+      text: 'Which one?',
+      item: '0000000000a1',
+      at: '2026-10-20T11:59:00.000Z',
+    });
+
+    const passUp = makeFact('3467', { kind: 'passUp', item: '0000000000a1' });
 
     const answer = makeFact('3467', {
       kind: 'log',
       type: 'answer',
-      text: 'This one',
-      at: '2026-10-20T11:00:00.000Z',
+      text: 'This',
+      item: '0000000000a1',
     });
 
-    expect(reasonsOf(selectNeeds([ticket], [question], now))).toEqual([
-      [instructionId('3467'), 'question'],
+    expect(selectNeeds([ticket], [question, passUp], now)).toMatchObject([
+      { reason: 'question', item: '0000000000a1', passedUp: true, ageSeconds: 60 },
     ]);
 
-    expect(selectNeeds([ticket], [question, answer], now)).toEqual([]);
+    expect(selectNeeds([ticket], [question, passUp, answer], now)).toEqual([]);
   });
 
-  it('dates a question from the oldest one without an answer after it', () => {
+  it('lists each open question of an instruction, and not one whose answer names it', () => {
     const ticket = makeTicket('3467');
 
     const facts = [
-      makeFact('3467', {
-        kind: 'log',
-        type: 'question',
-        text: 'a',
-        at: '2026-10-20T08:00:00.000Z',
-      }),
-      makeFact('3467', { kind: 'log', type: 'answer', text: 'b', at: '2026-10-20T09:00:00.000Z' }),
-      makeFact('3467', {
-        kind: 'log',
-        type: 'question',
-        text: 'c',
-        at: '2026-10-20T10:00:00.000Z',
-      }),
-      makeFact('3467', {
-        kind: 'log',
-        type: 'question',
-        text: 'd',
-        at: '2026-10-20T11:00:00.000Z',
-      }),
+      ask('0000000000a1', '2026-10-20T08:00:00.000Z'),
+      ask('0000000000a2', '2026-10-20T09:00:00.000Z'),
+      ask('0000000000a3', '2026-10-20T10:00:00.000Z'),
+      makeFact('3467', { kind: 'log', type: 'answer', text: 'b', item: '0000000000a2' }),
     ];
 
-    const [item] = selectNeeds([ticket], facts, now);
-
-    expect(item?.since).toBe('2026-10-20T10:00:00.000Z');
-    expect(item?.ageSeconds).toBe(7200);
+    expect(selectNeeds([ticket], facts, now).map((item) => [item.since, item.ageSeconds])).toEqual([
+      ['2026-10-20T08:00:00.000Z', 14_400],
+      ['2026-10-20T10:00:00.000Z', 7200],
+    ]);
   });
 
-  it('lists a submitted instruction from its submit time until it is accepted', () => {
+  it('lists a submission only after its pass-up, from its submit time, until it is accepted', () => {
     const ticket = makeTicket('3467');
 
     const submitted = makeFact('3467', {
       kind: 'log',
       type: 'submitted',
       text: '',
+      item: '5ab0000000a1',
       at: '2026-10-20T11:30:00.000Z',
     });
 
-    const [item] = selectNeeds([ticket], [submitted], now);
+    const passUp = makeFact('3467', { kind: 'passUp', item: '5ab0000000a1' });
 
-    expect(item?.reason).toBe('submitted');
-    expect(item?.since).toBe('2026-10-20T11:30:00.000Z');
-    expect(item?.ageSeconds).toBe(1800);
+    expect(selectNeeds([ticket], [submitted], now)).toEqual([]);
 
-    const accept = makeFact('3467', { kind: 'accept' });
+    expect(selectNeeds([ticket], [submitted, passUp], now)).toMatchObject([
+      {
+        reason: 'submitted',
+        item: '5ab0000000a1',
+        passedUp: true,
+        since: '2026-10-20T11:30:00.000Z',
+        ageSeconds: 1800,
+      },
+    ]);
 
-    expect(selectNeeds([ticket], [submitted, accept], now)).toEqual([]);
+    const accept = makeFact('3467', { kind: 'accept', item: '5ab0000000a1' });
+
+    expect(selectNeeds([ticket], [submitted, passUp, accept], now)).toEqual([]);
+  });
+
+  it('does not list a new submission because an earlier one was passed up', () => {
+    const ticket = makeTicket('3467');
+
+    const facts = [
+      submit('5ab0000000a1'),
+      makeFact('3467', { kind: 'passUp', item: '5ab0000000a1' }),
+      makeFact('3467', { kind: 'reject', item: '5ab0000000a1', reason: 'No.' }),
+      submit('5ab0000000b1'),
+    ];
+
+    expect(selectNeeds([ticket], facts, now)).toEqual([]);
   });
 
   it('lists a claim whose lease ended, from the lease end, with its holder', () => {
@@ -129,7 +171,8 @@ describe('selectNeeds', () => {
       makeFact('3468', ended),
       makeFact('3468', { kind: 'release', holder: 'a' }),
       makeFact('3469', ended),
-      makeFact('3469', { kind: 'log', type: 'submitted', text: '' }),
+      makeFact('3469', { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' }),
+      makeFact('3469', { kind: 'passUp', item: '5ab0000000a1' }),
     ];
 
     expect(reasonsOf(selectNeeds(tickets, facts, now))).toEqual([
@@ -140,17 +183,20 @@ describe('selectNeeds', () => {
   it('orders items oldest first, then by ticket ID, and allows several items per instruction', () => {
     const tickets = [makeTicket('3478'), makeTicket('3468'), makeTicket('3469')];
     const at = '2026-10-20T10:00:00.000Z';
+    const question = { kind: 'log', type: 'question', text: '', item: '0000000000a1' };
 
     const facts = [
-      makeFact('3478', { kind: 'log', type: 'question', text: '', at }),
-      makeFact('3469', { kind: 'log', type: 'question', text: '', at }),
-      makeFact('3468', { kind: 'log', type: 'question', text: '', at: '2026-10-20T11:00:00.000Z' }),
+      makeFact('3478', { ...question, at }),
+      makeFact('3469', { ...question, at }),
+      makeFact('3468', { ...question, at: '2026-10-20T11:00:00.000Z' }),
       makeFact('3478', {
         kind: 'log',
         type: 'submitted',
         text: '',
+        item: '5ab0000000a1',
         at: '2026-10-20T09:00:00.000Z',
       }),
+      makeFact('3478', { kind: 'passUp', item: '5ab0000000a1' }),
     ];
 
     expect(reasonsOf(selectNeeds(tickets, facts, now))).toEqual([
@@ -166,10 +212,13 @@ describe('selectNeeds', () => {
       kind: 'log',
       type: 'question',
       text: '',
+      item: '0000000000a1',
       at: '2026-10-20T13:00:00.000Z',
     });
 
-    expect(selectNeeds([makeTicket('3467')], [future], now)[0]?.ageSeconds).toBe(0);
+    const passUp = makeFact('3467', { kind: 'passUp', item: '0000000000a1' });
+
+    expect(selectNeeds([makeTicket('3467')], [future, passUp], now)[0]?.ageSeconds).toBe(0);
   });
 
   it('lists nothing for archived, canceled, draft, done, and task tickets', () => {
@@ -181,11 +230,12 @@ describe('selectNeeds', () => {
       makeTicket('3479', { kind: 'task' }),
     ];
 
-    const question = { kind: 'log', type: 'question', text: '' };
+    const question = { kind: 'log', type: 'question', text: '', item: '0000000000a1' };
 
     const facts = [
       ...['3467', '3468', '3469', '3478', '3479'].map((id) => makeFact(id, question)),
-      makeFact('3478', { kind: 'accept' }),
+      makeFact('3478', { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' }),
+      makeFact('3478', { kind: 'accept', item: '5ab0000000a1' }),
     ];
 
     expect(selectNeeds(tickets, facts, now)).toEqual([]);

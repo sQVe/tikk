@@ -19,10 +19,26 @@ interface StatusTicket {
   frontMatter: Pick<TicketFrontMatter, 'status'>;
 }
 
+export interface InstructionRejection {
+  item: string;
+  reason: string;
+  at: string;
+}
+
 export interface InstructionState {
   state: InstructionStateName;
   claim: InstructionClaim | null;
+  rejection: InstructionRejection | null;
 }
+
+type ClaimFact = Extract<Fact, { kind: 'claim' }>;
+
+type DecisionFact = Extract<Fact, { kind: 'reject' | 'accept' }>;
+
+type SubmittedFact = Extract<Fact, { kind: 'log'; item: string }> & { type: 'submitted' };
+
+const isSubmittedLog = (fact: Fact): fact is SubmittedFact =>
+  fact.kind === 'log' && fact.type === 'submitted';
 
 const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number => {
   for (let index = facts.length - 1; index >= 0; index -= 1) {
@@ -36,42 +52,76 @@ const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number
   return -1;
 };
 
-const stateOnly = (state: InstructionStateName): InstructionState => ({ state, claim: null });
+const stateOnly = (
+  state: InstructionStateName,
+  rejection: InstructionRejection | null,
+): InstructionState => ({ state, claim: null, rejection });
+
+const isDecision = (fact: Fact): fact is DecisionFact =>
+  fact.kind === 'reject' || fact.kind === 'accept';
+
+export const dropStaleDecisions = (own: Fact[]): Fact[] => {
+  const latestItem = own.findLast(isSubmittedLog)?.item;
+
+  return own.filter((fact) => !isDecision(fact) || fact.item === latestItem);
+};
+
+const endsClaim = (fact: Fact): boolean => fact.kind === 'release' || fact.kind === 'reject';
+
+// A reject comes from another machine, whose clock may sort it before the claim it ends. The
+// submission comes from the claim's own machine, so it orders the claim reliably.
+const rejectedAfter = (kept: Fact[], claimIndex: number): boolean =>
+  kept.some((fact) => fact.kind === 'reject') && lastIndexWhere(kept, isSubmittedLog) > claimIndex;
+
+export const selectLastClaim = (own: Fact[]): ClaimFact | undefined => {
+  const kept = dropStaleDecisions(own);
+  const holderIndex = lastIndexWhere(kept, (fact) => fact.kind === 'claim' || endsClaim(fact));
+  const holderFact = kept[holderIndex];
+
+  if (holderFact?.kind !== 'claim' || rejectedAfter(kept, holderIndex)) {
+    return undefined;
+  }
+
+  return holderFact;
+};
+
+const rejectionOf = (own: Fact[]): InstructionRejection | null => {
+  const reject = own.findLast((fact) => fact.kind === 'reject');
+
+  if (reject?.kind !== 'reject') {
+    return null;
+  }
+
+  return { item: reject.item, reason: reject.reason, at: reject.at };
+};
 
 export const deriveInstructionStateFromOwnFacts = (
   ticket: StatusTicket,
-  own: Fact[],
+  ownFacts: Fact[],
   now: Date,
 ): InstructionState => {
+  const own = dropStaleDecisions(ownFacts);
   const { status } = ticket.frontMatter;
+  const rejection = rejectionOf(own);
 
   if (status === 'canceled' || status === 'draft') {
-    return stateOnly(status);
+    return stateOnly(status, rejection);
   }
 
   if (own.some((fact) => fact.kind === 'accept')) {
-    return stateOnly('done');
+    return stateOnly('done', rejection);
   }
 
   const claimIndex = lastIndexWhere(own, (fact) => fact.kind === 'claim');
+  const submittedIndex = lastIndexWhere(own, isSubmittedLog);
 
-  const submittedIndex = lastIndexWhere(
-    own,
-    (fact) => fact.kind === 'log' && fact.type === 'submitted',
-  );
-
-  if (submittedIndex > claimIndex) {
-    return stateOnly('submitted');
+  if (submittedIndex > claimIndex && rejection === null) {
+    return stateOnly('submitted', rejection);
   }
 
-  const holderIndex = lastIndexWhere(
-    own,
-    (fact) => fact.kind === 'claim' || fact.kind === 'release',
-  );
+  const holderFact = selectLastClaim(own);
 
-  const holderFact = own[holderIndex];
-
-  if (holderFact?.kind === 'claim' && new Date(holderFact.leaseEnd) > now) {
+  if (holderFact !== undefined && new Date(holderFact.leaseEnd) > now) {
     return {
       state: 'active',
       claim: {
@@ -80,10 +130,11 @@ export const deriveInstructionStateFromOwnFacts = (
         session: holderFact.session ?? null,
         sessionLog: holderFact.sessionLog ?? null,
       },
+      rejection,
     };
   }
 
-  return stateOnly('open');
+  return stateOnly('open', rejection);
 };
 
 export const deriveInstructionState = (

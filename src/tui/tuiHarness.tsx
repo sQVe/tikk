@@ -80,6 +80,8 @@ export const needView = (index: number, title: string): NeedView => ({
   reason: 'submitted',
   since: '2026-10-20T11:00:00.000Z',
   ageSeconds: 60,
+  item: 'abc123def456',
+  passedUp: true,
 });
 
 export const treeGroups = (): TreeGroup[] => {

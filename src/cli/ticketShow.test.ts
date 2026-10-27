@@ -105,8 +105,12 @@ it('shows no state for a task', async () => {
 });
 
 it('prints the derived state of an instruction in text, not the front matter status', async () => {
-  const accept = makeFact({ kind: 'accept' });
-  const output = successOf(await show(['demo-3467'], [makeTicket('demo-3467')], [accept]));
+  const submission = makeFact({ kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' });
+  const accept = makeFact({ kind: 'accept', item: '5ab0000000a1' });
+
+  const output = successOf(
+    await show(['demo-3467'], [makeTicket('demo-3467')], [submission, accept]),
+  );
 
   expect(output.text).toContain('demo-3467  done  A title');
   expect(output.text).not.toContain('demo-3467  open');

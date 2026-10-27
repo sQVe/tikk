@@ -36,7 +36,12 @@ describe('selectReady', () => {
     const accepted = makeTicket('3469');
     const task = makeTicket('3478', { kind: 'task', status: 'done' });
     const instruction = makeTicket('3479', { blockedBy: ['3469', '3478'] });
-    const facts = [makeFact('3469', { kind: 'accept' })];
+
+    const facts = [
+      makeFact('3469', { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' }),
+      makeFact('3469', { kind: 'accept', item: '5ab0000000a1' }),
+    ];
+
     const result = selectReady([accepted, task, instruction], facts, now, noScope);
 
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([instruction.id]);
@@ -78,7 +83,11 @@ describe('selectReady', () => {
     const submitted = makeTicket('3469', { rank: 1 });
     const free = makeTicket('3478', { rank: 2 });
     const later = makeTicket('3479', { rank: 3, blockedBy: ['3469'] });
-    const facts = [makeFact('3469', { kind: 'log', type: 'submitted', text: 'done' })];
+
+    const facts = [
+      makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000a1', text: 'done' }),
+    ];
+
     const result = selectReady([submitted, free, later], facts, now, noScope);
 
     expect(result.skipped.map((entry) => entry.reason)).toEqual(['submitted']);
@@ -88,7 +97,11 @@ describe('selectReady', () => {
   it('lists every considered instruction as skipped when there is no candidate', () => {
     const submitted = makeTicket('3469');
     const blocked = makeTicket('3478', { blockedBy: ['3469'] });
-    const facts = [makeFact('3469', { kind: 'log', type: 'submitted', text: 'done' })];
+
+    const facts = [
+      makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000a1', text: 'done' }),
+    ];
+
     const result = selectReady([submitted, blocked], facts, now, noScope);
 
     expect(result.candidates).toEqual([]);

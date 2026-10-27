@@ -120,22 +120,48 @@ it('answers yes for a finished root with no status fact for its current status',
 
 const instruction = { id: 'tikk-3a4b', kind: 'instruction', status: 'open' };
 
-const acceptedAt = (at: string): StoreFact => ({
-  ticket: instruction.id,
-  at,
-  fields: { kind: 'accept' },
-});
+const acceptedAt = (at: string): StoreFact[] => [
+  {
+    ticket: instruction.id,
+    at,
+    fields: { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' },
+  },
+  { ticket: instruction.id, at, fields: { kind: 'accept', item: '5ab0000000a1' } },
+];
 
 it('answers no for a stand-alone instruction accepted 10 days ago', async () => {
-  const answers = await answersFor([instruction], [acceptedAt(tenDaysAgo)]);
+  const answers = await answersFor([instruction], acceptedAt(tenDaysAgo));
 
   expect(answers).toEqual({ precheck: false, rules: false });
 });
 
 it('answers yes for a stand-alone instruction accepted 15 days ago', async () => {
-  const answers = await answersFor([instruction], [acceptedAt(fifteenDaysAgo)]);
+  const answers = await answersFor([instruction], acceptedAt(fifteenDaysAgo));
 
   expect(answers).toEqual({ precheck: true, rules: true });
+});
+
+it('answers yes when a later stale accept names an earlier submission', async () => {
+  const submitted = (at: string, item: string): StoreFact => ({
+    ticket: instruction.id,
+    at,
+    fields: { kind: 'log', type: 'submitted', text: '', item },
+  });
+
+  const accepted = (at: string, item: string): StoreFact => ({
+    ticket: instruction.id,
+    at,
+    fields: { kind: 'accept', item },
+  });
+
+  const facts = [
+    submitted('2026-10-01T12:00:00.000Z', '5ab0000000a1'),
+    submitted('2026-10-04T12:00:00.000Z', '5ab0000000a2'),
+    accepted(fifteenDaysAgo, '5ab0000000a2'),
+    accepted(tenDaysAgo, '5ab0000000a1'),
+  ];
+
+  expect(await answersFor([instruction], facts)).toEqual({ precheck: true, rules: true });
 });
 
 it('answers no for a due root whose tree is archived', async () => {

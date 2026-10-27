@@ -142,6 +142,7 @@ export interface CliEffects {
   resolveMachine: () => Promise<Result<string, CliMessage>>;
   runGh: (args: string[], signal: AbortSignal) => Promise<Result<string, CliMessage>>;
   now: () => Date;
+  newItemId: () => string;
 }
 
 export interface CommandInput {

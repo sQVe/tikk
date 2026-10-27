@@ -1,4 +1,5 @@
 import type { Fact } from '../fact/fact.ts';
+import { invariant } from '../invariant.ts';
 import type { CliEffects, CliSession, CommandInput, CommandResult } from './cliEffects.ts';
 import {
   makeEffects,
@@ -6,6 +7,7 @@ import {
   makeKindTicket,
   makeSession,
   makeTicket,
+  successOf,
   ticketIdOf,
 } from './cliHarness.ts';
 import type { FakeSession } from './cliHarness.ts';
@@ -26,6 +28,11 @@ interface SideEffects {
   lockHeld: boolean;
 }
 
+export interface Flow {
+  fakeSession: FakeSession;
+  step: (command: Command, args: string[]) => Promise<CommandResult>;
+}
+
 export const parentSlice = makeKindTicket('demo-4789', 'slice');
 
 export const instruction = makeTicket('demo-3467', {
@@ -37,10 +44,23 @@ const activeLease = '2026-10-20T13:00:00.000Z';
 export const claimBy = (holder: string): Fact =>
   makeFact({ kind: 'claim', holder, leaseEnd: activeLease });
 
-export const submittedBy = (holder: string): Fact =>
-  makeFact({ kind: 'log', type: 'submitted', text: '', holder, at: '2026-10-20T11:30:00.000Z' });
+export const submissionItem = '5ab0000000a1';
 
-export const accepted = makeFact({ kind: 'accept', at: '2026-10-20T11:45:00.000Z' });
+export const submittedBy = (holder: string): Fact =>
+  makeFact({
+    kind: 'log',
+    type: 'submitted',
+    text: '',
+    holder,
+    item: submissionItem,
+    at: '2026-10-20T11:30:00.000Z',
+  });
+
+export const accepted = makeFact({
+  kind: 'accept',
+  item: submissionItem,
+  at: '2026-10-20T11:45:00.000Z',
+});
 
 // A refusal that comes before the lock reports its own error, not `locked`.
 export const lockRefused: Partial<CliSession> = {
@@ -70,6 +90,36 @@ export const run = async (
   const result = await command({ args, json: true, effects, session: fakeSession.session });
 
   return { fakeSession, result };
+};
+
+export const openFlow = (options: RunOptions = {}): Flow => {
+  const fakeSession = makeSession({
+    tickets: options.tickets ?? [parentSlice, instruction],
+    facts: options.facts ?? [],
+    ...options.session,
+  });
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    ...(options.effects === undefined ? {} : { overrides: options.effects }),
+  });
+
+  const step = async (command: Command, args: string[]): Promise<CommandResult> => {
+    await fakeSession.session.refresh();
+
+    return command({ args, json: true, effects, session: fakeSession.session });
+  };
+
+  return { fakeSession, step };
+};
+
+export const itemOf = (result: CommandResult): string => {
+  const { json } = successOf(result);
+
+  invariant(typeof json === 'object' && json !== null && 'item' in json, 'Expected an item.');
+  invariant(typeof json.item === 'string', 'Expected a string item.');
+
+  return json.item;
 };
 
 // What a refused command must leave behind.

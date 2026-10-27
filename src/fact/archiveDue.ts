@@ -1,6 +1,7 @@
 import { collectTicketTree, groupTicketChildren } from '../ticket/ticket.ts';
 import type { TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
+import { dropStaleDecisions } from './instructionState.ts';
 
 export interface ArchiveTicket {
   id: TicketId;
@@ -58,7 +59,7 @@ const finishOf = (root: ArchiveTicket, own: Fact[]): Finish | undefined => {
     return undefined;
   }
 
-  const accepted = newestTime(own, (fact) => fact.kind === 'accept');
+  const accepted = newestTime(dropStaleDecisions(own), (fact) => fact.kind === 'accept');
 
   return accepted === undefined ? undefined : { kind: 'dated', at: accepted };
 };
