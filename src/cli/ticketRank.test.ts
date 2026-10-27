@@ -9,6 +9,7 @@ import {
   makeSession,
   makeTicket,
   successOf,
+  ticketIdOf,
 } from './cliHarness.ts';
 import { ticketRank } from './ticketRank.ts';
 
@@ -81,6 +82,35 @@ it('refuses a sibling ID that does not exist and writes nothing', async () => {
 
   expect(failureOf(result).code).toBe('invalidArguments');
   expect(fakeSession.writes).toEqual([]);
+});
+
+const sharedParent = ticketIdOf('demo-347a');
+
+it('refuses to place a ticket next to one of another kind and writes nothing', async () => {
+  const tickets = [
+    ticketOf('demo-3467', 'instruction', { parent: sharedParent }),
+    ticketOf('demo-3468', 'task', { parent: sharedParent }),
+  ];
+
+  const { fakeSession, result } = await run(['demo-3467', '--before', 'demo-3468'], tickets);
+
+  expect(failureOf(result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('renumbers only the siblings of the same kind', async () => {
+  const tickets = [
+    ticketOf('demo-3467', 'instruction', { parent: sharedParent, rank: 2, title: 'Ranked' }),
+    ticketOf('demo-3468', 'instruction', { parent: sharedParent, rank: 1, title: 'Moved' }),
+    ticketOf('demo-3469', 'task', { parent: sharedParent, title: 'Task' }),
+  ];
+
+  const { fakeSession, result } = await run(['demo-3467', '--first'], tickets);
+  const ranks = writtenRanks(fakeSession.writes.map((write) => write.text));
+
+  successOf(result);
+
+  expect(ranks).toEqual({ Ranked: 1, Moved: 2 });
 });
 
 it('refuses an archived ticket and writes nothing', async () => {

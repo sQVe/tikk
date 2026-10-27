@@ -102,9 +102,11 @@ const parseRankArguments = (input: CommandInput): Result<RankArguments, CliFailu
   return { ok: true, value: { rawId, placement: placement.value } };
 };
 
+// The tree and `tikk ready` order each kind apart, so a rank only means something within one kind.
 const isSibling = (candidate: CliTicket, ticket: CliTicket): boolean =>
   candidate.frontMatter.project === ticket.frontMatter.project &&
-  candidate.frontMatter.parent === ticket.frontMatter.parent;
+  candidate.frontMatter.parent === ticket.frontMatter.parent &&
+  candidate.frontMatter.kind === ticket.frontMatter.kind;
 
 const siblingsOf = (input: CommandInput, ticket: CliTicket): CliTicket[] =>
   input.session
