@@ -70,3 +70,21 @@ it('refuses a missing ID', async () => {
 
   expect(failureOf(result).code).toBe('invalidArguments');
 });
+
+it('maps an append failure to invalid arguments or a store error by its kind', async () => {
+  const failures = [
+    { reason: { kind: 'invalid' as const, message: 'Fact is wrong.' }, code: 'invalidArguments' },
+    { reason: { kind: 'failed' as const, message: 'Disk is full.' }, code: 'storeError' },
+  ];
+
+  for (const { reason, code } of failures) {
+    const appendFact = () => Promise.resolve({ ok: false as const, reason });
+
+    const { fakeSession, result } = await wait(['demo-3467', '--done'], {
+      overrides: { appendFact },
+    });
+
+    expect(failureOf(result)).toMatchObject({ code, message: reason.message });
+    expect(fakeSession.lockHeld()).toBe(false);
+  }
+});

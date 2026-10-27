@@ -61,7 +61,25 @@ it('prints one line per item with its ID, reason, and age', async () => {
   const question = makeFact({ kind: 'log', type: 'question', text: 'Why?', item: '0000000000a1' });
   const output = successOf(await needs([], [makeTicket('demo-3467')], [question]));
 
-  expect(output.text).toBe('demo-3467  question  1h  0000000000a1  A title\n');
+  expect(output.text).toBe('demo-3467  question  1h  0000000000a1  Why?\n');
+});
+
+it('lists a passed-up question with its text, and prints the text as its subject', async () => {
+  const flow = openFlow();
+  const ask = ['demo-3467', '--type', 'question', '--text', 'Which one?\nA or B'];
+  const item = itemOf(await flow.step(instructionLog, ask));
+
+  successOf(await flow.step(instructionPassUp, ['demo-3467', '--item', item]));
+
+  const output = successOf(await flow.step(needsCommand, []));
+
+  expect(output.json).toMatchObject({
+    items: [
+      { id: 'demo-3467', reason: 'question', item, passedUp: true, text: 'Which one?\nA or B' },
+    ],
+  });
+
+  expect(output.text).toBe(`demo-3467  question  0s  ${item}  Which one? A or B\n`);
 });
 
 it('prints a task with no date as a dash, and the tickets it blocks', async () => {
@@ -71,6 +89,21 @@ it('prints a task with no date as a dash, and the tickets it blocks', async () =
   const output = successOf(await needs([], [task, blocked]));
 
   expect(output.text).toBe('demo-3467  blockingTask  -  A title  demo-3468\n');
+});
+
+it('prints a waiting draft plan with its wait text', async () => {
+  const plan = makeKindTicket('demo-3476', 'plan', 'draft');
+
+  const waiting = makeFact({
+    ticket: 'demo-3476',
+    kind: 'waiting',
+    waiting: true,
+    text: 'Pick a name',
+  });
+
+  const output = successOf(await needs([], [plan], [waiting]));
+
+  expect(output.text).toBe('demo-3476  draftPlan  1h  A title  Pick a name\n');
 });
 
 it('prints nothing when no instruction waits on the user', async () => {
@@ -278,7 +311,7 @@ it('keeps the key order of each reason in the JSON', async () => {
   const questionOutput = successOf(await needs([], [makeTicket('demo-3467')], [question]));
 
   expect(itemsJson(questionOutput)).toBe(
-    '[{"id":"demo-3467","title":"A title","reason":"question","since":"2026-10-20T11:00:00.000Z","ageSeconds":3600,"item":"0000000000a1","passedUp":false}]',
+    '[{"id":"demo-3467","title":"A title","reason":"question","since":"2026-10-20T11:00:00.000Z","ageSeconds":3600,"item":"0000000000a1","passedUp":false,"text":"Why?"}]',
   );
 
   const ended = makeFact({ kind: 'claim', holder: 'agent', leaseEnd: '2026-10-20T11:59:00.000Z' });
@@ -418,6 +451,71 @@ it('lists no stale claim for a rejected submission after the old lease ends', as
   successOf(await flow.step(instructionReject, ['demo-3467', '--reason', 'Tests fail.']));
 
   clock = new Date('2026-10-20T14:00:00.000Z');
+
+  expect(await neededItems(flow)).toEqual([]);
+});
+
+const submitted = (item: string, at: string): Fact =>
+  makeFact({ kind: 'log', type: 'submitted', text: '', holder: 'agent', item, at });
+
+const forkedHistory = (): Fact[] => {
+  return [
+    makeFact({ kind: 'claim', holder: 'agent', leaseEnd: '2026-10-20T13:00:00.000Z' }),
+    submitted('5ab0000000a1', '2026-10-20T11:10:00.000Z'),
+    makeFact({
+      kind: 'reject',
+      item: '5ab0000000a1',
+      reason: 'Tests fail.',
+      at: '2026-10-20T11:20:00.000Z',
+    }),
+    makeFact({
+      kind: 'claim',
+      holder: 'agent',
+      leaseEnd: '2026-10-20T13:00:00.000Z',
+      at: '2026-10-20T11:30:00.000Z',
+    }),
+    submitted('5ab0000000b1', '2026-10-20T11:40:00.000Z'),
+  ];
+};
+
+const staleRejectOfFirst = makeFact({
+  kind: 'reject',
+  item: '5ab0000000a1',
+  reason: 'Old review.',
+  at: '2026-10-20T11:55:00.000Z',
+});
+
+it('keeps a passed-up submission when an earlier submission is rejected again', async () => {
+  const passUp = makeFact({ kind: 'passUp', item: '5ab0000000b1', at: '2026-10-20T11:50:00.000Z' });
+  const facts = [...forkedHistory(), passUp, staleRejectOfFirst];
+  const flow = openFlow({ facts });
+
+  expect(await neededItems(flow)).toEqual([['submitted', '5ab0000000b1']]);
+});
+
+it('passes up and accepts the latest submission after an earlier one is rejected again', async () => {
+  const flow = openFlow({ facts: [...forkedHistory(), staleRejectOfFirst] });
+
+  successOf(await flow.step(instructionPassUp, ['demo-3467', '--item', '5ab0000000b1']));
+  successOf(await flow.step(instructionAccept, ['demo-3467']));
+
+  expect(await neededItems(flow)).toEqual([]);
+});
+
+it('keeps a passed-up submission when an earlier submission is accepted from stale state', async () => {
+  const passUp = makeFact({ kind: 'passUp', item: '5ab0000000b1', at: '2026-10-20T11:50:00.000Z' });
+
+  const staleAccept = makeFact({
+    kind: 'accept',
+    item: '5ab0000000a1',
+    at: '2026-10-20T11:55:00.000Z',
+  });
+
+  const flow = openFlow({ facts: [...forkedHistory(), passUp, staleAccept] });
+
+  expect(await neededItems(flow)).toEqual([['submitted', '5ab0000000b1']]);
+
+  successOf(await flow.step(instructionAccept, ['demo-3467']));
 
   expect(await neededItems(flow)).toEqual([]);
 });

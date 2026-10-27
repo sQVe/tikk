@@ -137,6 +137,75 @@ describe('deriveInstructionState', () => {
     });
   });
 
+  it('ignores a later rejection of an earlier submission', () => {
+    const facts = [
+      makeFact('3469', liveClaim),
+      makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000a1', text: 'ready' }),
+      makeFact('3469', { kind: 'reject', item: '5ab0000000a1', reason: 'Tests fail.' }),
+      makeFact('3469', liveClaim),
+      makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000b1', text: 'again' }),
+      makeFact('3469', { kind: 'passUp', item: '5ab0000000b1' }),
+      makeFact('3469', { kind: 'reject', item: '5ab0000000a1', reason: 'Old review.' }),
+    ];
+
+    expect(deriveInstructionState(ticket, facts, now)).toEqual({
+      state: 'submitted',
+      claim: null,
+      rejection: null,
+    });
+  });
+
+  it('ignores a later accept of an earlier submission, and is done after an accept of the latest', () => {
+    const forked = [
+      makeFact('3469', liveClaim),
+      makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000a1', text: 'ready' }),
+      makeFact('3469', { kind: 'reject', item: '5ab0000000a1', reason: 'Tests fail.' }),
+      makeFact('3469', liveClaim),
+      makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000b1', text: 'again' }),
+      makeFact('3469', { kind: 'passUp', item: '5ab0000000b1' }),
+    ];
+
+    const staleAccept = makeFact('3469', { kind: 'accept', item: '5ab0000000a1' });
+
+    expect(deriveInstructionState(ticket, [...forked, staleAccept], now)).toEqual({
+      state: 'submitted',
+      claim: null,
+      rejection: null,
+    });
+
+    const latestAccept = makeFact('3469', { kind: 'accept', item: '5ab0000000b1' });
+
+    expect(deriveInstructionState(ticket, [...forked, staleAccept, latestAccept], now).state).toBe(
+      'done',
+    );
+  });
+
+  it('counts a decision on the latest submission even when clock skew sorts it first', () => {
+    const submission = makeFact('3469', {
+      kind: 'log',
+      type: 'submitted',
+      item: '5ab0000000a1',
+      text: 'ready',
+      at: '2026-10-20T11:10:00.000Z',
+    });
+
+    const decided = (fields: Record<string, unknown>) => [
+      makeFact('3469', { ...liveClaim, at: '2026-10-20T11:00:00.000Z' }),
+      makeFact('3469', { item: '5ab0000000a1', at: '2026-10-20T11:05:00.000Z', ...fields }),
+      submission,
+    ];
+
+    expect(deriveInstructionState(ticket, decided({ kind: 'accept' }), now).state).toBe('done');
+
+    expect(
+      deriveInstructionState(ticket, decided({ kind: 'reject', reason: 'Tests fail.' }), now),
+    ).toEqual({
+      state: 'open',
+      claim: null,
+      rejection: { item: '5ab0000000a1', reason: 'Tests fail.', at: '2026-10-20T11:05:00.000Z' },
+    });
+  });
+
   it('is done after an accept', () => {
     const facts = [
       makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000a1', text: 'ready' }),

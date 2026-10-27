@@ -54,8 +54,16 @@ const itemView = (item: NeedItem<CliTicket>): NeedView => {
   return { id: ticket.id, title: ticket.frontMatter.title, ...detail, ...parseError };
 };
 
-export const itemSubject = (view: NeedView): string =>
-  view.reason === 'blockedFinding' ? `${view.fingerprint}  ${view.claim}` : view.title;
+export const itemSubject = (view: NeedView): string => {
+  if (view.reason === 'blockedFinding') {
+    return `${view.fingerprint}  ${view.claim}`;
+  }
+
+  return view.reason === 'question' ? view.text : view.title;
+};
+
+// A question can span lines, and the text output keeps one line per item.
+const lineBreaks = /\s*[\r\n\u2028\u2029]+\s*/g;
 
 const openWorkOf = (view: Extract<NeedView, { reason: 'flagged' }>): TicketId[] => [
   ...view.openInstructions,
@@ -78,7 +86,7 @@ const textOf = (view: NeedView): string =>
 
 const itemLine = (view: NeedView): string => {
   const age = shortAge(view.ageSeconds);
-  const line = `${view.id}  ${view.reason}  ${age}${itemIdOf(view)}  ${itemSubject(view)}${textOf(view)}`;
+  const line = `${view.id}  ${view.reason}  ${age}${itemIdOf(view)}  ${itemSubject(view).replaceAll(lineBreaks, ' ')}${textOf(view)}`;
   const linkedIds = linkedIdsOf(view);
   const linked = linkedIds.length === 0 ? '' : `  ${linkedIds.join(' ')}`;
   const suffix = view.parseError === undefined ? '' : `  parseError ${view.parseError}`;

@@ -8,8 +8,8 @@ it('gives two items of one reason on one ticket their own row keys', () => {
   const ticket = needView(0, 'Asked instruction');
 
   const items: NeedView[] = [
-    { ...ticket, reason: 'question', item: '0000000000a1', passedUp: true },
-    { ...ticket, reason: 'question', item: '0000000000a2', passedUp: true },
+    { ...ticket, reason: 'question', item: '0000000000a1', passedUp: true, text: 'Which one?' },
+    { ...ticket, reason: 'question', item: '0000000000a2', passedUp: true, text: 'How many?' },
     { ...ticket, reason: 'submitted', item: '5ab0000000a1', passedUp: true },
   ];
 

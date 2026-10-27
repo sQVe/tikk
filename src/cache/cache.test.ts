@@ -295,13 +295,17 @@ it('lists status and unarchive facts as state facts', async () => {
   ]);
 });
 
-it('lists only the facts that date a finish or an unarchive as archive facts', async () => {
+it('lists only the facts that date a finish or an unarchive, and submissions, as archive facts', async () => {
   const fake = createFakeFiles();
   const claim = { kind: 'claim', holder: 'agent', leaseEnd: '2099-01-01T00:00:00.000Z' };
+  const progress = { kind: 'log', type: 'progress', text: 'Halfway' };
+  const submitted = { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' };
 
   fake.setFactFile(
     factPath(),
     factText('tikk-3a4b', claim, '2026-10-20T10:00:00.000Z') +
+      factText('tikk-3a4b', progress, '2026-10-20T10:00:20.000Z') +
+      factText('tikk-3a4b', submitted, '2026-10-20T10:00:40.000Z') +
       factText('tikk-3a4b', { kind: 'accept', item: '5ab0000000a1' }, '2026-10-20T10:01:00.000Z') +
       factText('tikk-3a4b', { kind: 'status', status: 'done' }, '2026-10-20T10:02:00.000Z') +
       factText('tikk-3a4c', { kind: 'unarchive' }, '2026-10-20T10:03:00.000Z'),
@@ -315,7 +319,7 @@ it('lists only the facts that date a finish or an unarchive as archive facts', a
 
   expect(
     archiveFacts.ok && archiveFacts.value.map((fact) => `${fact.ticket} ${fact.kind}`),
-  ).toEqual(['tikk-3a4b accept', 'tikk-3a4b status', 'tikk-3a4c unarchive']);
+  ).toEqual(['tikk-3a4b log', 'tikk-3a4b accept', 'tikk-3a4b status', 'tikk-3a4c unarchive']);
 });
 
 it('lists a release with the claim it ends, so the instruction is open again', async () => {

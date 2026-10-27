@@ -123,6 +123,22 @@ it('never archives an open plan or a stand-alone instruction that was not accept
   });
 });
 
+it('never archives an instruction whose accept names an earlier submission', () => {
+  const tickets = [ticketOf('demo-4789', { kind: 'instruction', status: 'open' })];
+
+  const submittedOf = (item: string): Fact =>
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'log', type: 'submitted', item, text: 'Done' });
+
+  const facts = [
+    submittedOf('5ab0000000a1'),
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'reject', item: '5ab0000000a1', reason: 'No.' }),
+    submittedOf('5ab0000000b1'),
+    factOf('demo-4789', fifteenDaysAgo, { kind: 'accept', item: '5ab0000000a1' }),
+  ];
+
+  expect(dueOf(tickets, facts)).toEqual({ date: '2026-10-20', archive: [], statusFacts: [] });
+});
+
 it('visits each ticket once when hand edits make a parent cycle', () => {
   const tickets = [
     ticketOf('demo-3467', { parent: idOf('demo-4789') }),

@@ -113,7 +113,16 @@ it('archives a stand-alone instruction 14 days after it was accepted', async () 
 
   const fakeSession = makeSession({
     tickets: [done],
-    facts: [makeFact({ kind: 'accept', item: '5ab0000000a1', at: '2026-10-06T12:00:00.000Z' })],
+    facts: [
+      makeFact({
+        kind: 'log',
+        type: 'submitted',
+        text: '',
+        item: '5ab0000000a1',
+        at: '2026-10-06T11:00:00.000Z',
+      }),
+      makeFact({ kind: 'accept', item: '5ab0000000a1', at: '2026-10-06T12:00:00.000Z' }),
+    ],
   });
 
   await runLs(fakeSession);

@@ -20,6 +20,7 @@ The "needs you" view lists only what is on the user. Each item comes from `tikk 
 has one reason:
 
 - `question`: an open question that a worker passed up, or that is 30 minutes old with no pass-up.
+  The item carries the question text.
 - `submitted`: a submission that a worker passed up.
 - `staleClaim`: a claim whose lease ended.
 - `blockingTask`: an open task that an unfinished ticket lists in `blockedBy`.

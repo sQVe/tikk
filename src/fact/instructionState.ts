@@ -33,7 +33,12 @@ export interface InstructionState {
 
 type ClaimFact = Extract<Fact, { kind: 'claim' }>;
 
-const isSubmittedLog = (fact: Fact): boolean => fact.kind === 'log' && fact.type === 'submitted';
+type DecisionFact = Extract<Fact, { kind: 'reject' | 'accept' }>;
+
+type SubmittedFact = Extract<Fact, { kind: 'log'; item: string }> & { type: 'submitted' };
+
+const isSubmittedLog = (fact: Fact): fact is SubmittedFact =>
+  fact.kind === 'log' && fact.type === 'submitted';
 
 const lastIndexWhere = (facts: Fact[], matches: (fact: Fact) => boolean): number => {
   for (let index = facts.length - 1; index >= 0; index -= 1) {
@@ -52,23 +57,35 @@ const stateOnly = (
   rejection: InstructionRejection | null,
 ): InstructionState => ({ state, claim: null, rejection });
 
+const isDecision = (fact: Fact): fact is DecisionFact =>
+  fact.kind === 'reject' || fact.kind === 'accept';
+
+// A reject or an accept counts only when it names the latest submission of the whole history.
+// Merged facts from another machine can decide an earlier submission after a newer one, and clock
+// skew can sort a decision before the submission it names.
+export const dropStaleDecisions = (own: Fact[]): Fact[] => {
+  const latestItem = own.findLast(isSubmittedLog)?.item;
+
+  return own.filter((fact) => !isDecision(fact) || fact.item === latestItem);
+};
+
 // A release or a reject ends the claim before it, so a worker claims again after a reject.
 const endsClaim = (fact: Fact): boolean => fact.kind === 'release' || fact.kind === 'reject';
 
 // The last claim, unless a later fact ended it. Its lease may have run out.
 export const selectLastClaim = (own: Fact[]): ClaimFact | undefined => {
-  const holderFact = own.findLast((fact) => fact.kind === 'claim' || endsClaim(fact));
+  const holderFact = dropStaleDecisions(own).findLast(
+    (fact) => fact.kind === 'claim' || endsClaim(fact),
+  );
 
   return holderFact?.kind === 'claim' ? holderFact : undefined;
 };
 
-// A rejection shows until the next submission replaces it.
+// Only a rejection of the latest submission is left, so a new submission replaces it.
 const rejectionOf = (own: Fact[]): InstructionRejection | null => {
-  const rejectIndex = lastIndexWhere(own, (fact) => fact.kind === 'reject');
-  const submittedIndex = lastIndexWhere(own, isSubmittedLog);
-  const reject = own[rejectIndex];
+  const reject = own.findLast((fact) => fact.kind === 'reject');
 
-  if (reject?.kind !== 'reject' || rejectIndex < submittedIndex) {
+  if (reject?.kind !== 'reject') {
     return null;
   }
 
@@ -77,9 +94,10 @@ const rejectionOf = (own: Fact[]): InstructionRejection | null => {
 
 export const deriveInstructionStateFromOwnFacts = (
   ticket: StatusTicket,
-  own: Fact[],
+  ownFacts: Fact[],
   now: Date,
 ): InstructionState => {
+  const own = dropStaleDecisions(ownFacts);
   const { status } = ticket.frontMatter;
   const rejection = rejectionOf(own);
 

@@ -5,6 +5,10 @@ export interface InstructionItem {
   at: string;
 }
 
+export interface OpenQuestion extends InstructionItem {
+  text: string;
+}
+
 type SubmittedFact = Extract<Fact, { kind: 'log'; item: string }> & { type: 'submitted' };
 
 const answeredItems = (own: Fact[]): Set<string> =>
@@ -12,13 +16,15 @@ const answeredItems = (own: Fact[]): Set<string> =>
     own.flatMap((fact) => (fact.kind === 'log' && fact.type === 'answer' ? [fact.item] : [])),
   );
 
-export const selectOpenQuestions = (own: Fact[]): InstructionItem[] => {
+export const selectOpenQuestions = (own: Fact[]): OpenQuestion[] => {
   const answered = answeredItems(own);
 
   return own.flatMap((fact) => {
     const isQuestion = fact.kind === 'log' && fact.type === 'question';
 
-    return isQuestion && !answered.has(fact.item) ? [{ item: fact.item, at: fact.at }] : [];
+    return isQuestion && !answered.has(fact.item)
+      ? [{ item: fact.item, at: fact.at, text: fact.text }]
+      : [];
   });
 };
 

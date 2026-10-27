@@ -18,7 +18,8 @@ interface NeedBase<Ticket extends InstructionTicket> {
 }
 
 export type NeedDetail =
-  | { reason: 'question' | 'submitted'; item: string; passedUp: boolean }
+  | { reason: 'question'; item: string; passedUp: boolean; text: string }
+  | { reason: 'submitted'; item: string; passedUp: boolean }
   | { reason: 'mergedUnverified' }
   | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
   | { reason: 'staleClaim'; holder: string }
@@ -41,7 +42,7 @@ const questionNeedsOf = <Ticket extends InstructionTicket>(
 ): NeedItem<Ticket>[] => {
   const passedUp = selectPassedUp(own);
 
-  return selectOpenQuestions(own).flatMap(({ item, at }) => {
+  return selectOpenQuestions(own).flatMap(({ item, at, text }) => {
     const ageSeconds = ageSecondsOf(at, now);
     const isPassedUp = passedUp.has(item);
 
@@ -57,6 +58,7 @@ const questionNeedsOf = <Ticket extends InstructionTicket>(
         ageSeconds,
         item,
         passedUp: isPassedUp,
+        text,
       },
     ];
   });

@@ -49,17 +49,33 @@ describe('selectNeeds for tasks and draft plans', () => {
 
   it('does not list a task that only an accepted instruction blocks', () => {
     const accepted = makeTicket('3466', { blockedBy: ['3464'] });
+
+    const submission = makeFact('3466', {
+      kind: 'log',
+      type: 'submitted',
+      text: '',
+      item: '5ab0000000a1',
+    });
+
     const accept = makeFact('3466', { kind: 'accept', item: '5ab0000000a1' });
 
-    expect(selectNeeds([blocker, accepted], [accept], now)).toEqual([]);
+    expect(selectNeeds([blocker, accepted], [submission, accept], now)).toEqual([]);
   });
 
   it('names only the open instruction in blocks when another instruction is accepted', () => {
     const accepted = makeTicket('3466', { blockedBy: ['3464'] });
     const open = makeTicket('3468', { blockedBy: ['3464'] });
+
+    const submission = makeFact('3466', {
+      kind: 'log',
+      type: 'submitted',
+      text: '',
+      item: '5ab0000000a1',
+    });
+
     const accept = makeFact('3466', { kind: 'accept', item: '5ab0000000a1' });
 
-    expect(selectNeeds([blocker, accepted, open], [accept], now)).toMatchObject([
+    expect(selectNeeds([blocker, accepted, open], [submission, accept], now)).toMatchObject([
       { ticket: { id: instructionId('3464') }, reason: 'blockingTask', blocks: [open.id] },
     ]);
   });

@@ -28,8 +28,13 @@ const dueTreesSql = `tree(id, finish) AS (
   WHERE child.title IS NOT NULL AND child.error IS NULL
 )`;
 
+// The finish of an instruction is the accept that names its latest submission, which SQL cannot
+// pick, so several accepts mean "maybe".
 const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
   SELECT 1 FROM finished WHERE final AND finish IS NULL
+  UNION ALL
+  SELECT 1 FROM tickets t WHERE t.kind = 'instruction' AND t.archived IS NULL
+    AND (SELECT count(*) FROM facts f WHERE f.ticket = t.id AND f.kind = 'accept') > 1
   UNION ALL
   SELECT 1 FROM tree JOIN tickets t ON t.id = tree.id AND t.title IS NOT NULL AND t.error IS NULL
   WHERE t.archived IS NULL AND NOT EXISTS (
@@ -40,7 +45,8 @@ const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
 const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'done'))
   OR EXISTS (SELECT 1 FROM facts WHERE kind = 'accept')`;
 
-// False only when no root is due and every finished root has a fact that dates its finish. True
+// False only when no root is due, every finished root has a fact that dates its finish, and no
+// unarchived instruction has several accepts. True
 // means the sweep must load the tickets and facts to decide.
 export const mayHaveArchiveWork = (database: Database, now: Date): boolean => {
   if (database.query(finishedSql).get() === null) {

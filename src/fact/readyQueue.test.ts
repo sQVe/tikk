@@ -36,7 +36,12 @@ describe('selectReady', () => {
     const accepted = makeTicket('3469');
     const task = makeTicket('3478', { kind: 'task', status: 'done' });
     const instruction = makeTicket('3479', { blockedBy: ['3469', '3478'] });
-    const facts = [makeFact('3469', { kind: 'accept', item: '5ab0000000a1' })];
+
+    const facts = [
+      makeFact('3469', { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' }),
+      makeFact('3469', { kind: 'accept', item: '5ab0000000a1' }),
+    ];
+
     const result = selectReady([accepted, task, instruction], facts, now, noScope);
 
     expect(result.candidates.map((entry) => entry.ticket.id)).toEqual([instruction.id]);

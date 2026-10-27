@@ -234,6 +234,7 @@ describe('selectNeeds', () => {
 
     const facts = [
       ...['3467', '3468', '3469', '3478', '3479'].map((id) => makeFact(id, question)),
+      makeFact('3478', { kind: 'log', type: 'submitted', text: '', item: '5ab0000000a1' }),
       makeFact('3478', { kind: 'accept', item: '5ab0000000a1' }),
     ];
 
