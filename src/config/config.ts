@@ -5,29 +5,39 @@ import { createTestKeymap } from '@opentui/keymap/testing';
 import { z } from 'zod';
 
 import type { Result } from '../result.ts';
-import type { Command } from '../tui/tui.tsx';
-import { catalog } from '../tui/tui.tsx';
-import { remapCatalog } from './remap.ts';
-import type { ConfigFile } from './remap.ts';
+import type { BindingTable } from '../tui/tui.tsx';
+import { defaultBindings } from '../tui/tui.tsx';
+import { remapBindings } from './remap.ts';
+import type { ConfigKeys } from './remap.ts';
 
-type FileRead =
+export type ConfigFileRead =
   | { kind: 'missing' }
   | { kind: 'text'; text: string }
-  | { kind: 'failed'; reason: string };
+  | { kind: 'failed' };
 
 export interface ConfigEffects {
-  readFile: (path: string) => FileRead;
+  readFile: (path: string) => ConfigFileRead;
+}
+
+export interface ConfigSettings {
+  projects: Record<string, string>;
+  machine: string | undefined;
+  keys: ConfigKeys;
 }
 
 export interface ConfigLoad {
-  catalog: readonly Command[];
+  bindings: BindingTable;
   messages: string[];
 }
 
-const configSchema = z.strictObject({
-  version: z.literal(1),
+// Other top-level fields are ignored, so a file can hold settings this module does not read.
+const configSchema = z.object({
+  projects: z.record(z.string(), z.string()).optional(),
+  machine: z.string().optional(),
   keys: z.record(z.string(), z.array(z.string())).optional(),
 });
+
+const defaultSettings: ConfigSettings = { projects: {}, machine: undefined, keys: {} };
 
 const isMissingFile = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -41,68 +51,69 @@ const defaultEffects: ConfigEffects = {
         return { kind: 'missing' };
       }
 
-      return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) };
+      return { kind: 'failed' };
     }
   },
 };
 
-const configPathOf = (environment: Record<string, string | undefined>): string | undefined => {
-  const configHome = environment['XDG_CONFIG_HOME'];
+const configPathOf = (homeDirectory: string): string =>
+  join(homeDirectory, '.config', 'tikk', 'config.json');
 
-  if (configHome !== undefined && configHome !== '') {
-    return join(configHome, 'tikk', 'config.json');
-  }
+const shapeMessageOf = (path: string): string =>
+  `${path} must be {"projects": {"<owner>/<name>": "<project>"}, "machine": "<name>", "keys": {"<command id>": ["<key>"]}}.`;
 
-  const home = environment['HOME'];
-
-  if (home !== undefined && home !== '') {
-    return join(home, '.config', 'tikk', 'config.json');
-  }
-
-  return undefined;
-};
-
-const shapeMessageOf = (error: z.ZodError, path: string): string => {
-  const [issue] = error.issues;
-
-  if (issue === undefined) {
-    return `${path}: The file is not a valid config.`;
-  }
-
-  const where = issue.path.length === 0 ? 'the top level' : issue.path.map(String).join('.');
-
-  return `${path}: ${where} is not valid. ${issue.message}`;
-};
-
-const parseConfigText = (text: string, path: string): Result<ConfigFile, string> => {
-  let value: unknown;
+const parseSettings = (text: string, path: string): Result<ConfigSettings, string> => {
+  let json: unknown;
 
   try {
-    value = JSON.parse(text);
+    json = JSON.parse(text);
   } catch {
-    return { ok: false, reason: `${path}: The file is not valid JSON.` };
+    return { ok: false, reason: `${path} is not valid JSON.` };
   }
 
-  const shape = configSchema.safeParse(value);
+  const parsed = configSchema.safeParse(json);
 
-  if (!shape.success) {
-    return { ok: false, reason: shapeMessageOf(shape.error, path) };
+  if (!parsed.success) {
+    return { ok: false, reason: shapeMessageOf(path) };
   }
 
-  return { ok: true, value: { keys: shape.data.keys ?? {} } };
+  return {
+    ok: true,
+    value: {
+      projects: parsed.data.projects ?? {},
+      machine: parsed.data.machine,
+      keys: parsed.data.keys ?? {},
+    },
+  };
 };
 
-const defaultsWith = (message: string): ConfigLoad => ({ catalog, messages: [message] });
+// The one reader of the config file. A missing file means no settings.
+export const readSettings = (
+  homeDirectory: string,
+  effects: ConfigEffects = defaultEffects,
+): Result<ConfigSettings, string> => {
+  const path = configPathOf(homeDirectory);
+  const read = effects.readFile(path);
 
-const loadText = (text: string, path: string): ConfigLoad => {
-  const file = parseConfigText(text, path);
-
-  if (!file.ok) {
-    return defaultsWith(file.reason);
+  if (read.kind === 'missing') {
+    return { ok: true, value: defaultSettings };
   }
 
+  if (read.kind === 'failed') {
+    return { ok: false, reason: `Cannot read ${path}.` };
+  }
+
+  return parseSettings(read.text, path);
+};
+
+const defaultsWith = (message: string): ConfigLoad => ({
+  bindings: defaultBindings,
+  messages: [message],
+});
+
+const loadKeys = (keys: ConfigKeys, path: string): ConfigLoad => {
   const harness = createTestKeymap({ defaultKeys: true });
-  const remapped = remapCatalog(file.value, path, harness.keymap);
+  const remapped = remapBindings(keys, path, harness.keymap);
 
   harness.cleanup();
 
@@ -110,28 +121,18 @@ const loadText = (text: string, path: string): ConfigLoad => {
     return defaultsWith(remapped.reason);
   }
 
-  return { catalog: remapped.value.catalog, messages: remapped.value.notices };
+  return { bindings: remapped.value.bindings, messages: remapped.value.notices };
 };
 
 export const loadConfig = (
-  environment: Record<string, string | undefined>,
+  homeDirectory: string,
   effects: ConfigEffects = defaultEffects,
 ): ConfigLoad => {
-  const path = configPathOf(environment);
+  const settings = readSettings(homeDirectory, effects);
 
-  if (path === undefined) {
-    return { catalog, messages: [] };
+  if (!settings.ok) {
+    return defaultsWith(settings.reason);
   }
 
-  const read = effects.readFile(path);
-
-  if (read.kind === 'missing') {
-    return { catalog, messages: [] };
-  }
-
-  if (read.kind === 'failed') {
-    return defaultsWith(`${path}: The file cannot be read (${read.reason}).`);
-  }
-
-  return loadText(read.text, path);
+  return loadKeys(settings.value.keys, configPathOf(homeDirectory));
 };

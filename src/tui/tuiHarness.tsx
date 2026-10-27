@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 
 import type { NeedView, TreeGroup } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
-import { App, catalog, createTuiSession } from './tui.tsx';
-import type { AppProps, Command, TuiEffects } from './tui.tsx';
+import { App, createTuiSession, defaultBindings } from './tui.tsx';
+import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
 
 type Setup = Awaited<ReturnType<typeof testRender>>;
 
@@ -112,7 +112,7 @@ export const createTuiFixture = async (
   problems: string[] = [],
   groups: TreeGroup[] = [],
   overrides: Partial<TuiEffects> = {},
-  commands: readonly Command[] = catalog,
+  bindings: BindingTable = defaultBindings,
   notices: string[] = [],
 ): Promise<TuiFixture> => {
   const changeListeners = new Set<() => void>();
@@ -176,7 +176,7 @@ export const createTuiFixture = async (
     testRender(
       <WithKeymap
         session={session}
-        catalog={commands}
+        bindings={bindings}
         onQuit={() => {
           quitCount += 1;
         }}

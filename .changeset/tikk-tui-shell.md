@@ -10,7 +10,7 @@ Press `?` to open help. Help lists the key for each action. An action that canno
 reason, such as "No ticket is selected." Press `gm` to see recent messages, such as a failed editor
 run or a problem in a ticket file.
 
-Change keys in `$XDG_CONFIG_HOME/tikk/config.json`, or in `~/.config/tikk/config.json` when
-`XDG_CONFIG_HOME` is not set. Each key names a command by its ID. For example,
-`{ "version": 1, "keys": { "help": ["h"] } }` moves help from `?` to `h`. Ctrl+C always quits. When
-the file has an error, tikk keeps the default keys and the messages name the file and the problem.
+Change keys in `~/.config/tikk/config.json`. The same file holds the `projects` and `machine`
+settings. Each key names a command by its ID. For example, `{ "keys": { "help": ["h"] } }` moves
+help from `?` to `h`. Ctrl+C always quits. When the file has an error, the terminal UI keeps the
+default keys, and its messages name the file and the problem.

@@ -50,7 +50,6 @@ export const cliEnvironment = (home: string, storePath: string): Record<string, 
   ...Bun.env,
   HOME: home,
   TIKK_HOME: storePath,
-  XDG_CONFIG_HOME: join(home, '.config'),
   GIT_CONFIG_NOSYSTEM: '1',
 });
 

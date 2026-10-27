@@ -1,6 +1,6 @@
 import { fitText } from './textLayout.ts';
-import { commandsOfLayer, helpSections, keyNamesOf, readableKeyOf } from './tuiCommands.ts';
-import type { Command } from './tuiCommands.ts';
+import { catalog, helpSections, keysOfAction } from './tuiCommands.ts';
+import type { BindingTable, Command } from './tuiCommands.ts';
 import type { TuiSnapshot } from './tuiSession.ts';
 
 export type HelpLine =
@@ -34,23 +34,24 @@ const sectionTitles: Record<Command['section'], string> = {
   overlays: 'Overlays',
 };
 
-const keysTextOf = (command: Command): string =>
-  command.keys.map((key) => readableKeyOf(key)).join('/');
+const keysTextOf = (bindings: BindingTable, command: Command): string =>
+  keysOfAction(bindings, command.scope, command.id).join('/');
 
-const rowOf = (command: Command, innerWidth: number): HelpLine => {
-  const keys = fitText(keysTextOf(command), innerWidth);
+const rowOf = (bindings: BindingTable, command: Command, innerWidth: number): HelpLine => {
+  const keys = fitText(keysTextOf(bindings, command), innerWidth);
   const labelWidth = keys === '' ? innerWidth : innerWidth - keys.length - 1;
 
   return { kind: 'row', keys, label: fitText(command.label, labelWidth) };
 };
 
 const commandLinesOf = (
+  bindings: BindingTable,
   command: Command,
   snapshot: TuiSnapshot,
   innerWidth: number,
 ): HelpLine[] => {
   const reason = command.disabledReason(snapshot);
-  const row = rowOf(command, innerWidth);
+  const row = rowOf(bindings, command, innerWidth);
 
   if (reason === undefined) {
     return [row];
@@ -59,11 +60,7 @@ const commandLinesOf = (
   return [row, { kind: 'reason', text: fitText(`${reasonIndent}${reason}`, innerWidth) }];
 };
 
-const linesOf = (
-  catalog: readonly Command[],
-  snapshot: TuiSnapshot,
-  innerWidth: number,
-): HelpLine[] => {
+const linesOf = (bindings: BindingTable, snapshot: TuiSnapshot, innerWidth: number): HelpLine[] => {
   const listed = catalog.filter((command) => command.hiddenFromHelp !== true);
   const lines: HelpLine[] = [];
 
@@ -81,26 +78,20 @@ const linesOf = (
     lines.push({ kind: 'heading', text: fitText(sectionTitles[section], innerWidth) });
 
     for (const command of commands) {
-      lines.push(...commandLinesOf(command, snapshot, innerWidth));
+      lines.push(...commandLinesOf(bindings, command, snapshot, innerWidth));
     }
   }
 
   return lines;
 };
 
-export const footerOf = (
-  catalog: readonly Command[],
-  position: string,
-  innerWidth: number,
-): string => {
-  const helpCommands = commandsOfLayer(catalog, 'help');
-
+export const footerOf = (bindings: BindingTable, position: string, innerWidth: number): string => {
   const scrollKeys = [
-    ...keyNamesOf(helpCommands, 'selectNext').slice(0, 1),
-    ...keyNamesOf(helpCommands, 'selectPrevious').slice(0, 1),
+    ...keysOfAction(bindings, 'help', 'selectNext').slice(0, 1),
+    ...keysOfAction(bindings, 'help', 'selectPrevious').slice(0, 1),
   ];
 
-  const closeKey = keyNamesOf(helpCommands, 'closeHelp')[0];
+  const closeKey = keysOfAction(bindings, 'help', 'closeHelp')[0];
   const parts = [position];
 
   if (scrollKeys.length > 0) {
@@ -119,13 +110,13 @@ export const footerOf = (
 };
 
 export const helpWindowOf = (
-  catalog: readonly Command[],
+  bindings: BindingTable,
   snapshot: TuiSnapshot,
   height: number,
   width: number,
 ): HelpWindow => {
   const boxWidth = Math.max(minimumBoxWidth, Math.min(width - terminalMargin, maximumBoxWidth));
-  const lines = linesOf(catalog, snapshot, boxWidth - boxChromeColumns);
+  const lines = linesOf(bindings, snapshot, boxWidth - boxChromeColumns);
   const availableRows = Math.max(1, height - statusRows - 1);
   const overflows = lines.length + borderRows > availableRows;
 

@@ -1,10 +1,7 @@
 import type { OverlayMove } from './overlayScroll.ts';
 import type { TuiIntent, TuiSnapshot } from './tuiSession.ts';
 
-type CommandIntent =
-  | { kind: 'session'; intent: TuiIntent }
-  | { kind: 'scrollOverlay'; move: OverlayMove }
-  | { kind: 'quit' };
+type CommandIntent = { kind: 'session'; intent: TuiIntent } | { kind: 'quit' };
 
 export type CommandScope =
   | 'global'
@@ -16,7 +13,7 @@ export type CommandScope =
   | 'help'
   | 'messages';
 
-export type OverlayScope = Extract<CommandScope, 'help' | 'messages'>;
+type OverlayScope = Extract<CommandScope, 'help' | 'messages'>;
 
 type HelpSection = 'app' | 'moving' | 'tickets' | 'overlays';
 
@@ -27,6 +24,7 @@ export interface Command {
   scope: CommandScope;
   section: HelpSection;
   hiddenFromHelp?: true;
+  // Default keys. A config remap replaces them in the binding table.
   keys: readonly string[];
   // Keys that still run this command while a key sequence is pending, instead of ending it as a
   // miss.
@@ -34,11 +32,43 @@ export interface Command {
   // The help and messages layers also bind this command's keys, and run this move on the open
   // overlay.
   overlayMove?: OverlayMove;
-  // Keys of the overlay copies, when a config changes them for one overlay.
-  overlayKeys?: Partial<Record<OverlayScope, readonly string[]>>;
   disabledReason: (snapshot: TuiSnapshot) => string | undefined;
   intent: CommandIntent;
 }
+
+// One key of one action in one scope. An overlay copy runs the action's movement on the open
+// overlay instead of the action itself.
+export interface Binding {
+  command: Command;
+  scope: CommandScope;
+  key: string;
+  user: boolean;
+  duringSequence: boolean;
+  overlayMove?: OverlayMove;
+}
+
+export interface KeyChoice {
+  key: string;
+  user: boolean;
+}
+
+type KeyChoices = (command: Command) => readonly KeyChoice[];
+
+export type BindingTable = Readonly<Record<CommandScope, readonly Binding[]>>;
+
+// Every scope in the order the layers are resolved.
+export const commandScopes: readonly CommandScope[] = [
+  'global',
+  'list',
+  'detail',
+  'input',
+  'rank',
+  'visual',
+  'help',
+  'messages',
+];
+
+const overlayScopes: readonly OverlayScope[] = ['help', 'messages'];
 
 export const helpSections: readonly HelpSection[] = ['app', 'moving', 'tickets', 'overlays'];
 
@@ -52,32 +82,6 @@ export const scopePriority: Record<CommandScope, number> = {
   detail: 25,
   list: 20,
   global: 10,
-};
-
-const isOverlayScope = (scope: CommandScope): scope is OverlayScope =>
-  scope === 'help' || scope === 'messages';
-
-const scrollCopyOf = (command: Command, scope: OverlayScope, move: OverlayMove): Command => ({
-  ...command,
-  scope,
-  keys: command.overlayKeys?.[scope] ?? command.keys,
-  disabledReason: () => undefined,
-  intent: { kind: 'scrollOverlay', move },
-});
-
-export const commandsOfLayer = (commands: readonly Command[], scope: CommandScope): Command[] => {
-  const own = commands.filter((command) => command.scope === scope);
-  const copies: Command[] = [];
-
-  if (isOverlayScope(scope)) {
-    for (const command of commands) {
-      if (command.overlayMove !== undefined) {
-        copies.push(scrollCopyOf(command, scope, command.overlayMove));
-      }
-    }
-  }
-
-  return [...own, ...copies];
 };
 
 const enabled = (): undefined => undefined;
@@ -224,6 +228,71 @@ export const catalog: readonly Command[] = [
   },
 ];
 
+export const emptyBindingTable = (): Record<CommandScope, Binding[]> => ({
+  global: [],
+  list: [],
+  detail: [],
+  input: [],
+  rank: [],
+  visual: [],
+  help: [],
+  messages: [],
+});
+
+const isSequenceExit = (command: Command, choice: KeyChoice): boolean => {
+  if (command.keysDuringSequence === undefined) {
+    return false;
+  }
+
+  return choice.user || command.keysDuringSequence.includes(choice.key);
+};
+
+const bindingOf = (
+  command: Command,
+  scope: CommandScope,
+  choice: KeyChoice,
+  overlayMove: OverlayMove | undefined,
+): Binding => ({
+  command,
+  scope,
+  key: choice.key,
+  user: choice.user,
+  duringSequence: isSequenceExit(command, choice),
+  ...(overlayMove === undefined ? {} : { overlayMove }),
+});
+
+const defaultChoicesOf: KeyChoices = (command) => command.keys.map((key) => ({ key, user: false }));
+
+// Own bindings come before the overlay copies of a scope, so the first match is the own action.
+export const expandBindings = (choicesOf: KeyChoices): BindingTable => {
+  const planned = catalog.map((command) => ({ command, choices: choicesOf(command) }));
+  const table = emptyBindingTable();
+
+  for (const { command, choices } of planned) {
+    for (const choice of choices) {
+      table[command.scope].push(bindingOf(command, command.scope, choice, undefined));
+    }
+  }
+
+  for (const { command, choices } of planned) {
+    const { overlayMove } = command;
+
+    if (overlayMove === undefined) {
+      continue;
+    }
+
+    for (const scope of overlayScopes) {
+      for (const choice of choices) {
+        table[scope].push(bindingOf(command, scope, choice, overlayMove));
+      }
+    }
+  }
+
+  return table;
+};
+
+export const defaultBindings: BindingTable = expandBindings(defaultChoicesOf);
+
 const readableKeyNames = new Map(
   Object.entries({
     escape: 'Esc',
@@ -254,8 +323,7 @@ export const readableKeyOf = (key: string): string => {
   return readableKeyNames.get(key) ?? key;
 };
 
-export const keyNamesOf = (commands: readonly Command[], id: string): string[] => {
-  const keys = commands.find((command) => command.id === id)?.keys ?? [];
-
-  return keys.map((key) => readableKeyOf(key));
-};
+export const keysOfAction = (bindings: BindingTable, scope: CommandScope, id: string): string[] =>
+  bindings[scope]
+    .filter((binding) => binding.command.id === id)
+    .map((binding) => readableKeyOf(binding.key));

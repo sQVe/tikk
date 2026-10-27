@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { boxChromeColumns, footerOf } from './helpWindow.ts';
 import type { HelpLine, HelpWindow } from './helpWindow.ts';
 import type { Palette } from './palette.ts';
-import type { Command } from './tuiCommands.ts';
+import type { BindingTable } from './tuiCommands.ts';
 
 const lineOf = (line: HelpLine, index: number, palette: Palette): ReactNode => {
   if (line.kind === 'heading') {
@@ -31,20 +31,20 @@ const lineOf = (line: HelpLine, index: number, palette: Palette): ReactNode => {
 };
 
 export const HelpOverlay = (props: {
-  catalog: readonly Command[];
+  bindings: BindingTable;
   palette: Palette;
   height: number;
   helpWindow: HelpWindow;
   top: number;
 }): ReactNode => {
-  const { palette, catalog } = props;
+  const { palette, bindings } = props;
 
   const { lines, viewportRows, maximumTop, overflows, boxWidth, boxHeight } = props.helpWindow;
 
   const top = Math.min(props.top, maximumTop);
   const visible = lines.slice(top, top + viewportRows);
   const position = `${top + 1}-${top + visible.length} of ${lines.length}`;
-  const footer = footerOf(catalog, position, boxWidth - boxChromeColumns);
+  const footer = footerOf(bindings, position, boxWidth - boxChromeColumns);
 
   return (
     <box

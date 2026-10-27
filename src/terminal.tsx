@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 
 import type { NeedsSession } from './cli/cli.ts';
 import { App, createTuiSession } from './tui/tui.tsx';
-import type { AppProps, Command, TuiEffects, TuiSession } from './tui/tui.tsx';
+import type { AppProps, BindingTable, TuiEffects, TuiSession } from './tui/tui.tsx';
 
 type ProcessEvent = 'SIGINT' | 'SIGTERM' | 'uncaughtException' | 'unhandledRejection';
 
@@ -37,7 +37,7 @@ type StoreWatch = (onChange: () => void) => () => void;
 export interface TerminalDependencies {
   needs: NeedsSession;
   watch: StoreWatch;
-  catalog: readonly Command[];
+  bindings: BindingTable;
   notices: readonly string[];
 }
 
@@ -316,7 +316,7 @@ export const startTerminal = async (
     });
 
     root.render(
-      <App session={session} keymap={keymap} catalog={dependencies.catalog} onQuit={quit} />,
+      <App session={session} keymap={keymap} bindings={dependencies.bindings} onQuit={quit} />,
     );
   } catch (error) {
     fail(error);

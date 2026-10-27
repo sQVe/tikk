@@ -8,7 +8,7 @@ import { act } from 'react';
 import type { NeedView, NeedsSession } from './cli/cli.ts';
 import { startTerminal } from './terminal.tsx';
 import type { TerminalEffects } from './terminal.tsx';
-import { catalog, createTuiSession } from './tui/tui.tsx';
+import { createTuiSession, defaultBindings } from './tui/tui.tsx';
 import type { TuiEffects } from './tui/tui.tsx';
 
 type Handler = (reason?: unknown) => void;
@@ -148,7 +148,7 @@ const start = async (options: StartOptions = {}) => {
             watcher.stops += 1;
           };
         },
-        catalog,
+        bindings: defaultBindings,
         notices: [],
       },
       effects,

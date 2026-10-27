@@ -11,7 +11,7 @@ import { openNeedsSession } from '../src/cli/cli.ts';
 import type { NeedsSession } from '../src/cli/cli.ts';
 import { createEffects } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
-import { App, catalog, createTuiSession } from '../src/tui/tui.tsx';
+import { App, createTuiSession, defaultBindings } from '../src/tui/tui.tsx';
 import type { AppProps, TuiSession } from '../src/tui/tui.tsx';
 import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
@@ -75,10 +75,13 @@ const openHome = async () => {
   tui = session;
 
   const setup = await act(() =>
-    testRender(<WithKeymap session={session} catalog={catalog} onQuit={() => undefined} />, {
-      width: 100,
-      height: 20,
-    }),
+    testRender(
+      <WithKeymap session={session} bindings={defaultBindings} onQuit={() => undefined} />,
+      {
+        width: 100,
+        height: 20,
+      },
+    ),
   );
 
   const deadline = Date.now() + loadTimeoutMilliseconds;

@@ -14,27 +14,37 @@ import { messageWindowOf } from './messageWindow.ts';
 import { palette } from './palette.ts';
 import { RowList } from './rowList.tsx';
 import { StatusLine } from './StatusLine.tsx';
-import { commandsOfLayer, keyNamesOf, scopePriority } from './tuiCommands.ts';
-import type { Command, CommandScope } from './tuiCommands.ts';
+import { commandScopes, keysOfAction, scopePriority } from './tuiCommands.ts';
+import type { Binding, BindingTable, CommandScope } from './tuiCommands.ts';
 import type { TuiIntent, TuiSession, TuiSnapshot } from './tuiSession.ts';
 
-export { catalog, commandsOfLayer, keyNamesOf, readableKeyOf } from './tuiCommands.ts';
-export type { Command, CommandScope, OverlayScope } from './tuiCommands.ts';
+export {
+  catalog,
+  commandScopes,
+  defaultBindings,
+  emptyBindingTable,
+  expandBindings,
+  keysOfAction,
+  readableKeyOf,
+} from './tuiCommands.ts';
+
+export type { Binding, BindingTable, Command, CommandScope, KeyChoice } from './tuiCommands.ts';
+
 export { createTuiSession } from './tuiSession.ts';
 export type { TuiEffects, TuiSession } from './tuiSession.ts';
 
 export interface AppProps {
   session: TuiSession;
   keymap: ReturnType<typeof createDefaultOpenTuiKeymap>;
-  catalog: readonly Command[];
+  bindings: BindingTable;
   onQuit: () => void;
 }
 
 interface LayerProps {
   scope: CommandScope;
-  run: (command: Command) => void;
+  run: (binding: Binding) => void;
   session: TuiSession;
-  catalog: readonly Command[];
+  bindings: BindingTable;
 }
 
 const primaryStatusOf = (snapshot: TuiSnapshot): string => {
@@ -74,9 +84,6 @@ const detailShare = 0.36;
 
 const statusRows = 1;
 
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- scopePriority is a Record over CommandScope
-const scopes = Object.keys(scopePriority) as CommandScope[];
-
 const isScopeActive = (scope: CommandScope, snapshot: TuiSnapshot): boolean => {
   const { kind } = snapshot.overlay;
 
@@ -97,7 +104,7 @@ const isScopeActive = (scope: CommandScope, snapshot: TuiSnapshot): boolean => {
 const messagesHeightOf = (height: number): number => Math.max(1, height - statusRows);
 
 const overlayMaximumTop = (
-  catalog: readonly Command[],
+  bindings: BindingTable,
   snapshot: TuiSnapshot,
   width: number,
   height: number,
@@ -106,15 +113,15 @@ const overlayMaximumTop = (
     return messageWindowOf(snapshot.messages, width, messagesHeightOf(height)).maximumTop;
   }
 
-  return helpWindowOf(catalog, snapshot, height, width).maximumTop;
+  return helpWindowOf(bindings, snapshot, height, width).maximumTop;
 };
 
 // The scope comes from the live session, because keys in one burst arrive before React renders
 // what the first key changed.
-const KeyLayer = ({ scope, run, session, catalog }: LayerProps): null => {
+const KeyLayer = ({ scope, run, session, bindings }: LayerProps): null => {
   useBindings(() => {
-    const scoped = commandsOfLayer(catalog, scope);
-    const keys = [...new Set(scoped.flatMap((command) => command.keys))];
+    const scoped = bindings[scope];
+    const keys = [...new Set(scoped.map((binding) => binding.key))];
 
     return {
       priority: scopePriority[scope],
@@ -122,39 +129,38 @@ const KeyLayer = ({ scope, run, session, catalog }: LayerProps): null => {
       bindings: keys.map((key) => ({
         key,
         cmd: (context: CommandContext) => {
-          const command = scoped.find((candidate) => candidate.keys.includes(key));
+          const binding = scoped.find((candidate) => candidate.key === key);
 
           context.event.preventDefault();
           context.event.stopPropagation();
 
-          if (command !== undefined) {
-            run(command);
+          if (binding !== undefined) {
+            run(binding);
           }
         },
       })),
     };
-  }, [scope, run, session, catalog]);
+  }, [scope, run, session, bindings]);
 
   return null;
 };
 
 const commandDuringSequence = (
-  catalog: readonly Command[],
+  bindings: BindingTable,
   snapshot: TuiSnapshot,
   matches: (key: string) => boolean,
-): Command | undefined => {
-  const active = scopes
+): Binding | undefined => {
+  const active = commandScopes
     .filter((scope) => isScopeActive(scope, snapshot))
     .toSorted((first, second) => scopePriority[second] - scopePriority[first]);
 
   for (const scope of active) {
-    const command = catalog.find(
-      (candidate) =>
-        candidate.scope === scope && (candidate.keysDuringSequence ?? []).some(matches),
+    const binding = bindings[scope].find(
+      (candidate) => candidate.duringSequence && matches(candidate.key),
     );
 
-    if (command !== undefined) {
-      return command;
+    if (binding !== undefined) {
+      return binding;
     }
   }
 
@@ -164,7 +170,7 @@ const commandDuringSequence = (
 // The keymap gives a pending sequence the next key before any binding, so an exit key would end
 // the sequence as a miss. A key that misses a pending sequence is dropped, so it never runs as a
 // single key.
-const PendingSequence = ({ run, session, catalog }: Omit<LayerProps, 'scope'>): null => {
+const PendingSequence = ({ run, session, bindings }: Omit<LayerProps, 'scope'>): null => {
   const keymap = useKeymap();
 
   useEffect(() => {
@@ -174,15 +180,15 @@ const PendingSequence = ({ run, session, catalog }: Omit<LayerProps, 'scope'>): 
       }
 
       const matches = (key: string) => keymap.createKeyMatcher(key)(context.event);
-      const command = commandDuringSequence(catalog, session.getSnapshot(), matches);
+      const binding = commandDuringSequence(bindings, session.getSnapshot(), matches);
 
-      if (command === undefined) {
+      if (binding === undefined) {
         return;
       }
 
       keymap.clearPendingSequence();
       context.consume();
-      run(command);
+      run(binding);
     });
 
     const stopMisses = keymap.intercept('key:after', (context) => {
@@ -195,7 +201,7 @@ const PendingSequence = ({ run, session, catalog }: Omit<LayerProps, 'scope'>): 
       stopExits();
       stopMisses();
     };
-  }, [keymap, run, session, catalog]);
+  }, [keymap, run, session, bindings]);
 
   return null;
 };
@@ -204,7 +210,7 @@ const PendingSequence = ({ run, session, catalog }: Omit<LayerProps, 'scope'>): 
 const isRedundantDetail = (intent: TuiIntent, sideLayout: boolean): boolean =>
   sideLayout && intent.kind === 'openDetail';
 
-const Screen = ({ session, onQuit, catalog }: Omit<AppProps, 'keymap'>): ReactNode => {
+const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactNode => {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { width, height } = useTerminalDimensions();
   const view = snapshot.views[snapshot.view];
@@ -217,13 +223,22 @@ const Screen = ({ session, onQuit, catalog }: Omit<AppProps, 'keymap'>): ReactNo
   const selectedRow = view.rows[view.selection.index];
   const rows = [...snapshot.views.home.rows, ...snapshot.views.tree.rows];
   const strayCount = strayErrorsOf(snapshot.fileErrors, rows).length;
-  const helpKeys = keyNamesOf(catalog, 'help').join('/');
+  const helpKeys = keysOfAction(bindings, 'global', 'help').join('/');
 
   const run = useCallback(
-    (command: Command) => {
+    (binding: Binding) => {
       const current = session.getSnapshot();
+      const { command, overlayMove } = binding;
 
       if (command.disabledReason(current) !== undefined) {
+        return;
+      }
+
+      if (overlayMove !== undefined) {
+        const maximumTop = overlayMaximumTop(bindings, current, width, height);
+
+        session.send({ kind: 'scrollOverlay', move: overlayMove, maximumTop });
+
         return;
       }
 
@@ -231,17 +246,11 @@ const Screen = ({ session, onQuit, catalog }: Omit<AppProps, 'keymap'>): ReactNo
 
       if (intent.kind === 'quit') {
         onQuit();
-      } else if (intent.kind === 'session') {
-        if (!isRedundantDetail(intent.intent, sideLayout)) {
-          session.send(intent.intent);
-        }
-      } else {
-        const maximumTop = overlayMaximumTop(catalog, current, width, height);
-
-        session.send({ kind: 'scrollOverlay', move: intent.move, maximumTop });
+      } else if (!isRedundantDetail(intent.intent, sideLayout)) {
+        session.send(intent.intent);
       }
     },
-    [session, onQuit, catalog, width, height, sideLayout],
+    [session, onQuit, bindings, width, height, sideLayout],
   );
 
   // A resize from narrow to side by side ends the full-screen detail, so no list key stays blocked.
@@ -255,9 +264,9 @@ const Screen = ({ session, onQuit, catalog }: Omit<AppProps, 'keymap'>): ReactNo
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      <PendingSequence run={run} session={session} catalog={catalog} />
-      {scopes.map((scope) => (
-        <KeyLayer key={scope} scope={scope} run={run} session={session} catalog={catalog} />
+      <PendingSequence run={run} session={session} bindings={bindings} />
+      {commandScopes.map((scope) => (
+        <KeyLayer key={scope} scope={scope} run={run} session={session} bindings={bindings} />
       ))}
       {view.loaded ? (
         <box flexDirection="row">
@@ -291,10 +300,10 @@ const Screen = ({ session, onQuit, catalog }: Omit<AppProps, 'keymap'>): ReactNo
       />
       {snapshot.overlay.kind === 'help' ? (
         <HelpOverlay
-          catalog={catalog}
+          bindings={bindings}
           palette={palette}
           height={height}
-          helpWindow={helpWindowOf(catalog, snapshot, height, width)}
+          helpWindow={helpWindowOf(bindings, snapshot, height, width)}
           top={snapshot.overlay.top}
         />
       ) : null}
@@ -310,8 +319,8 @@ const Screen = ({ session, onQuit, catalog }: Omit<AppProps, 'keymap'>): ReactNo
   );
 };
 
-export const App = ({ session, keymap, onQuit, catalog }: AppProps): ReactNode => (
+export const App = ({ session, keymap, onQuit, bindings }: AppProps): ReactNode => (
   <KeymapProvider keymap={keymap}>
-    <Screen session={session} onQuit={onQuit} catalog={catalog} />
+    <Screen session={session} onQuit={onQuit} bindings={bindings} />
   </KeymapProvider>
 );

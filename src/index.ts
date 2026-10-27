@@ -9,9 +9,9 @@ import { z } from 'zod';
 
 import { openNeedsSession, runCli } from './cli/cli.ts';
 import type { CliEffects } from './cli/cli.ts';
-import { loadConfig } from './config/config.ts';
+import { loadConfig, readSettings } from './config/config.ts';
 import { resolveMachine, resolveProject } from './project.ts';
-import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
+import type { GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
 import { createOpenSession } from './sessionEffects.ts';
 import { initStore, resolveStoreRoot } from './store/store.ts';
@@ -49,16 +49,6 @@ const runStoreGit = async (args: string[]): Promise<Result<string, { message: st
 
 const readTextFile = (path: string): Promise<string | undefined> =>
   readFile(path, 'utf8').catch(() => undefined);
-
-const readConfigFile = async (path: string): Promise<ConfigRead> => {
-  try {
-    return { kind: 'text', text: await readFile(path, 'utf8') };
-  } catch (error) {
-    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
-
-    return missing ? { kind: 'missing' } : { kind: 'failed' };
-  }
-};
 
 // GH_PROMPT_DISABLED makes gh fail instead of asking questions, since no one may be at the terminal.
 const runGh: CliEffects['runGh'] = async (args, signal) => {
@@ -279,8 +269,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
 
   const projectEffects: ProjectEffects = {
     runGit: spawnGit,
-    readConfigFile,
-    homeDirectory,
+    readSettings: () => readSettings(homeDirectory),
     hostName: hostname(),
   };
 
@@ -296,7 +285,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
     mergeFetched: syncEffects.mergeFetched,
     openSession: createOpenSession(storeRoot, cachePath),
     resolveProject: () => resolveProject(process.cwd(), projectEffects),
-    resolveMachine: () => resolveMachine(projectEffects),
+    resolveMachine: () => Promise.resolve(resolveMachine(projectEffects)),
     runGh,
     readTextFile,
     runEditor,
@@ -339,12 +328,12 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
   }
 
   const { startTerminal } = await import('./terminal.tsx');
-  const config = loadConfig(Bun.env);
+  const config = loadConfig(homeDirectory);
 
   await startTerminal({
     needs: opened.value,
     watch: watchStore(defaultStoreRoot),
-    catalog: config.catalog,
+    bindings: config.bindings,
     notices: config.messages,
   });
 };

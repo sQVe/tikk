@@ -1,24 +1,30 @@
 import { expect, it } from 'bun:test';
 
+import { readSettings } from './config/config.ts';
+import type { ConfigFileRead } from './config/config.ts';
 import { resolveMachine, resolveProject } from './project.ts';
-import type { ConfigRead, GitOutcome } from './project.ts';
+import type { GitOutcome } from './project.ts';
 
 const configPath = '/home/me/.config/tikk/config.json';
 
-const configRead = (config: string | undefined): ConfigRead =>
+const configRead = (config: string | undefined): ConfigFileRead =>
   config === undefined ? { kind: 'missing' } : { kind: 'text', text: config };
 
-const resolveWith = (git: GitOutcome, config?: string | ConfigRead) =>
-  resolveProject('/work/repo', {
-    runGit: async () => git,
-    readConfigFile: async (path) => {
+const settingsWith = (config?: string | ConfigFileRead) => () =>
+  readSettings('/home/me', {
+    readFile: (path) => {
       if (path !== configPath) {
         return { kind: 'missing' };
       }
 
       return typeof config === 'object' ? config : configRead(config);
     },
-    homeDirectory: '/home/me',
+  });
+
+const resolveWith = (git: GitOutcome, config?: string | ConfigFileRead) =>
+  resolveProject('/work/repo', {
+    runGit: async () => git,
+    readSettings: settingsWith(config),
     hostName: 'Build-Host',
   });
 
@@ -97,8 +103,7 @@ it('asks git for the origin URL of the working folder', async () => {
 
       return { kind: 'failed' };
     },
-    readConfigFile: async () => ({ kind: 'missing' }),
-    homeDirectory: '/home/me',
+    readSettings: settingsWith(),
     hostName: 'host',
   });
 
@@ -114,39 +119,38 @@ it('gives personal for an origin it cannot read as a repository', async () => {
 const machineWith = (config: string | undefined, hostName = 'Build-Host') =>
   resolveMachine({
     runGit: async () => ({ kind: 'failed' }),
-    readConfigFile: async () => configRead(config),
-    homeDirectory: '/home/me',
+    readSettings: settingsWith(config),
     hostName,
   });
 
 it('reads the machine from config', async () => {
   const config = JSON.stringify({ machine: 'Laptop-1' });
 
-  expect(await machineWith(config)).toEqual({ ok: true, value: 'laptop-1' });
+  expect(machineWith(config)).toEqual({ ok: true, value: 'laptop-1' });
 });
 
 it('accepts a config that has only a machine and no projects', async () => {
   const config = JSON.stringify({ machine: 'laptop' });
 
-  expect(await machineWith(config)).toEqual({ ok: true, value: 'laptop' });
+  expect(machineWith(config)).toEqual({ ok: true, value: 'laptop' });
 });
 
 it.each([undefined, '{}', JSON.stringify({ projects: { 'a/b': 'c' } })])(
   'defaults the machine to the lowercased host name for config %j',
   async (config) => {
-    expect(await machineWith(config)).toEqual({ ok: true, value: 'build-host' });
+    expect(machineWith(config)).toEqual({ ok: true, value: 'build-host' });
   },
 );
 
 it.each(['bad name', '-start', '', 'a/b'])('fails on the invalid machine name %j', async (name) => {
-  const result = await machineWith(JSON.stringify({ machine: name }));
+  const result = machineWith(JSON.stringify({ machine: name }));
 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason.message).toContain('machine');
 });
 
 it('fails when the host name is not a valid machine name', async () => {
-  expect(await machineWith(undefined, 'my host')).toMatchObject({ ok: false });
+  expect(machineWith(undefined, 'my host')).toMatchObject({ ok: false });
 });
 
 it('still resolves a project when the config has only a machine', async () => {
