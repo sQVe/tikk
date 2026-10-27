@@ -15,6 +15,8 @@ export interface TuiEffects {
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
   onChange: (listener: () => void) => () => void;
+  // Messages the session starts with, such as config problems.
+  notices: readonly string[];
 }
 
 type ViewName = 'home' | 'tree';
@@ -436,6 +438,8 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     stopped = true;
     stopChanges();
   };
+
+  snapshot = { ...snapshot, messages: messagesWith(snapshot.messages, effects.notices) };
 
   reload();
 

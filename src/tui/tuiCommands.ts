@@ -16,7 +16,7 @@ export type CommandScope =
   | 'help'
   | 'messages';
 
-type OverlayScope = Extract<CommandScope, 'help' | 'messages'>;
+export type OverlayScope = Extract<CommandScope, 'help' | 'messages'>;
 
 type HelpSection = 'app' | 'moving' | 'tickets' | 'overlays';
 
@@ -34,6 +34,8 @@ export interface Command {
   // The help and messages layers also bind this command's keys, and run this move on the open
   // overlay.
   overlayMove?: OverlayMove;
+  // Keys of the overlay copies, when a config changes them for one overlay.
+  overlayKeys?: Partial<Record<OverlayScope, readonly string[]>>;
   disabledReason: (snapshot: TuiSnapshot) => string | undefined;
   intent: CommandIntent;
 }
@@ -58,6 +60,7 @@ const isOverlayScope = (scope: CommandScope): scope is OverlayScope =>
 const scrollCopyOf = (command: Command, scope: OverlayScope, move: OverlayMove): Command => ({
   ...command,
   scope,
+  keys: command.overlayKeys?.[scope] ?? command.keys,
   disabledReason: () => undefined,
   intent: { kind: 'scrollOverlay', move },
 });

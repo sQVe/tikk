@@ -55,6 +55,7 @@ const createFake = async (
         changeListeners.delete(listener);
       };
     },
+    notices: [],
     ...overrides,
   };
 

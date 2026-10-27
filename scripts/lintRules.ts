@@ -21,7 +21,7 @@ type ImportSource =
   | ESTree.ExportNamedDeclaration
   | ESTree.ExportAllDeclaration;
 
-const folderModules = new Set(['ticket', 'fact', 'store', 'cache', 'sync', 'cli', 'tui']);
+const folderModules = new Set(['ticket', 'fact', 'store', 'cache', 'sync', 'cli', 'config', 'tui']);
 
 const flatModules = new Set([
   'invariant',
@@ -46,6 +46,7 @@ const allowedImports = new Map<string, Set<string>>([
   ['project', new Set(['ticket', 'invariant', 'result'])],
   ['github', new Set(['result'])],
   ['cli', new Set(['ticket', 'fact', 'github', 'invariant', 'result'])],
+  ['config', new Set(['tui', 'invariant', 'result'])],
   ['tui', new Set(['cli', 'invariant', 'result'])],
   ['terminal', new Set(['cli', 'tui'])],
   ['storeEffects', new Set(['store'])],
@@ -65,6 +66,13 @@ const packagePolicies = new Map<string, PackagePolicy>([
   ['project', { builtins: true, packages: ['zod'] }],
   ['github', { builtins: false, packages: ['zod'] }],
   ['cli', { builtins: false, packages: ['node:util'] }],
+  [
+    'config',
+    {
+      builtins: true,
+      packages: ['zod', '@opentui/keymap'],
+    },
+  ],
   [
     'tui',
     {

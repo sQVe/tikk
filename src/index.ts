@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { openNeedsSession, runCli } from './cli/cli.ts';
 import type { CliEffects } from './cli/cli.ts';
+import { loadConfig } from './config/config.ts';
 import { resolveMachine, resolveProject } from './project.ts';
 import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
@@ -338,8 +339,14 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
   }
 
   const { startTerminal } = await import('./terminal.tsx');
+  const config = loadConfig(Bun.env);
 
-  await startTerminal({ needs: opened.value, watch: watchStore(defaultStoreRoot) });
+  await startTerminal({
+    needs: opened.value,
+    watch: watchStore(defaultStoreRoot),
+    catalog: config.catalog,
+    notices: config.messages,
+  });
 };
 
 const startsTerminal = (args: string[]): boolean =>
