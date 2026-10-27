@@ -17,6 +17,11 @@ interface TreeTicket {
   frontMatter: { parent?: TicketId | undefined };
 }
 
+interface WaitTicket {
+  id: TicketId;
+  frontMatter: { parent?: TicketId | undefined; blockedBy: TicketId[] };
+}
+
 const allowedParentKinds: Record<TicketKind, TicketKind[]> = {
   plan: [],
   slice: ['plan'],
@@ -154,4 +159,50 @@ export const collectTicketTree = <Ticket extends TreeTicket>(
   }
 
   return tree;
+};
+
+const waitTargets = (ticket: WaitTicket): TicketId[] => {
+  const { parent, blockedBy } = ticket.frontMatter;
+
+  return parent === undefined ? blockedBy : [...blockedBy, parent];
+};
+
+const pathTo = (end: TicketId, previous: Map<TicketId, TicketId>): TicketId[] => {
+  const path = [end];
+
+  for (let step = previous.get(end); step !== undefined; step = previous.get(step)) {
+    path.unshift(step);
+  }
+
+  return path;
+};
+
+export const findWaitCycle = (
+  tickets: WaitTicket[],
+  from: TicketId,
+  to: TicketId,
+): TicketId[] | undefined => {
+  const byId = new Map(tickets.map((ticket) => [ticket.id, ticket]));
+  const previous = new Map<TicketId, TicketId>();
+  const seen = new Set<TicketId>([to]);
+  const pending = [to];
+
+  for (let id = pending.shift(); id !== undefined; id = pending.shift()) {
+    if (id === from) {
+      return [from, ...pathTo(id, previous)];
+    }
+
+    const ticket = byId.get(id);
+    const targets = ticket === undefined ? [] : waitTargets(ticket);
+
+    for (const target of targets) {
+      if (!seen.has(target)) {
+        seen.add(target);
+        previous.set(target, id);
+        pending.push(target);
+      }
+    }
+  }
+
+  return undefined;
 };

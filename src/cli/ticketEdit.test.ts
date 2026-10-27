@@ -293,6 +293,28 @@ it('turns a task into a slice under a plan and keeps its ID and path', async () 
   expect(fakeSession.appends).toEqual([]);
 });
 
+it('refuses to promote a task under a plan it blocks and writes nothing', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
+  const basePlan = makeKindTicket('demo-3468', 'plan');
+
+  const plan = makeTicket('demo-3468', {
+    frontMatter: { ...basePlan.frontMatter, blockedBy: [task.id] },
+  });
+
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--kind', 'slice', '--parent', 'demo-3468', ...criteriaArgs],
+    true,
+    { tickets: [task, plan] },
+    criteriaFiles,
+  );
+
+  const failure = failureOf(await result);
+
+  expect(failure.code).toBe('invalidArguments');
+  expect(failure.message).toContain('demo-3468');
+  expect(fakeSession.writes).toEqual([]);
+});
+
 it('turns a task into a plan', async () => {
   const task = makeKindTicket('demo-3467', 'task');
 
@@ -539,6 +561,108 @@ it('refuses --parent without --kind and writes nothing', async () => {
     {
       tickets: [target, plan],
     },
+  );
+
+  expect(failureOf(await result).code).toBe('invalidArguments');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+const criteriaSlice = makeTicket('demo-3468', {
+  frontMatter: { ...makeTicket('demo-3468').frontMatter, kind: 'slice', criteria: [criterion] },
+});
+
+const criteriaInstruction = makeTicket('demo-3467', {
+  frontMatter: { ...target.frontMatter, parent: criteriaSlice.id },
+});
+
+const criteriaTickets: SessionOptions = { tickets: [criteriaSlice, criteriaInstruction] };
+
+it('refuses a covers name that the parent does not have and writes nothing', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--covers', 'missing'],
+    true,
+    criteriaTickets,
+  );
+
+  const reason = failureOf(await result);
+
+  expect(reason.code).toBe('invalidArguments');
+  expect(reason.message).toContain('missing');
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('writes the covers list of an instruction whose names the parent has', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--covers', 'works'],
+    true,
+    criteriaTickets,
+  );
+
+  successOf(await result);
+
+  expect(fakeSession.writes[0]?.text).toContain('covers:');
+  expect(fakeSession.writes[0]?.text).toContain('works');
+});
+
+const otherCriterion = { id: 'other', check: 'bun test', expected: 'It also passes.' };
+
+const twoCriteriaSlice = makeTicket('demo-3468', {
+  frontMatter: { ...criteriaSlice.frontMatter, criteria: [criterion, otherCriterion] },
+});
+
+const coveringInstruction = makeTicket('demo-3467', {
+  frontMatter: { ...criteriaInstruction.frontMatter, covers: ['works'] },
+});
+
+const coveringTickets: SessionOptions = { tickets: [twoCriteriaSlice, coveringInstruction] };
+
+const writtenCovers = (text: string | undefined): string[] | undefined => {
+  const parsed = parseTicketFile(text ?? '');
+
+  return parsed.ok ? parsed.value.frontMatter.covers : ['unparsed'];
+};
+
+it('replaces a stored covers list with the given one', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--covers', 'other'],
+    true,
+    coveringTickets,
+  );
+
+  successOf(await result);
+
+  expect(writtenCovers(fakeSession.writes[0]?.text)).toEqual(['other']);
+});
+
+it('keeps the stored covers when an edit changes only the title', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--title', 'Renamed'],
+    true,
+    coveringTickets,
+  );
+
+  successOf(await result);
+
+  expect(writtenCovers(fakeSession.writes[0]?.text)).toEqual(['works']);
+});
+
+it('removes the stored covers with --clear-covers', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--clear-covers'],
+    true,
+    coveringTickets,
+  );
+
+  successOf(await result);
+
+  expect(writtenCovers(fakeSession.writes[0]?.text)).toBeUndefined();
+});
+
+it('refuses --covers together with --clear-covers and writes nothing', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--covers', 'works', '--clear-covers'],
+    true,
+    criteriaTickets,
   );
 
   expect(failureOf(await result).code).toBe('invalidArguments');

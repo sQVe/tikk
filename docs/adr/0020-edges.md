@@ -22,6 +22,11 @@ Tickets link to each other with three edges in front matter, besides `parent`:
 Only `blockedBy` is read by the ready queue ([ADR 0022](./0022-claims-leases-and-ready-queue.md)).
 Any ticket, a task too, can be a `blockedBy` target. A done or canceled target no longer blocks.
 
+A ticket waits on its `blockedBy` targets and on its parent, because blockers flow down from a plan
+and a slice to the work under them. A new `blockedBy` edge or a new parent that would let a ticket
+wait on itself, through `blockedBy` or `parent` links, is refused, and the error names the cycle. A
+ticket cannot block itself.
+
 ## Consequences
 
 ### Positive

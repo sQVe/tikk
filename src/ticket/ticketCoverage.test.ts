@@ -3,7 +3,7 @@ import { expect, it } from 'bun:test';
 import { invariant } from '../invariant.ts';
 import { parseProjectName, parseTicketId } from './ticket.ts';
 import type { TicketFrontMatter, TicketId } from './ticket.ts';
-import { findCoverageGaps } from './ticketCoverage.ts';
+import { findCoverageGaps, findUnknownCovers } from './ticketCoverage.ts';
 
 const idOf = (raw: string): TicketId => {
   const parsed = parseTicketId(raw);
@@ -119,4 +119,10 @@ it('counts only slices for a plan and only instructions for a slice', () => {
     { ticket: slice, kind: 'slice', criterion: 'a' },
     { ticket: slice, kind: 'slice', criterion: 'b' },
   ]);
+});
+
+it('names the covers IDs that the parent has no criterion for, in the order given', () => {
+  const unknown = findUnknownCovers(['zzz', 'a', 'yyy'], plan);
+
+  expect(unknown).toEqual(['zzz', 'yyy']);
 });
