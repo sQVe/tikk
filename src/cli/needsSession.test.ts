@@ -474,3 +474,34 @@ it('stops the editor of a pending edit when the session closes', async () => {
   expect((await editing).ok).toBe(false);
   expect(fakeSession.disposed()).toBe(true);
 });
+
+it('tags a file error with the ID of an archived ticket at its path', async () => {
+  const archivedPath = '/store/demo/demo-3468-slug.md';
+  const slice = makeKindTicket('demo-3468', 'slice');
+
+  const archived = {
+    ...slice,
+    frontMatter: { ...slice.frontMatter, archived: '2026-10-01' },
+  };
+
+  const fakeSession = makeSession({
+    tickets: [archived],
+    errors: [{ path: archivedPath, message: 'Front matter is invalid.' }],
+  });
+
+  const opened = await openNeedsSession(makeEffects({ session: fakeSession }).effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const listed = await opened.value.loadErrors();
+
+  await opened.value.close();
+
+  expect(listed).toEqual([
+    { path: archivedPath, message: 'Front matter is invalid.', id: 'demo-3468' as TicketId },
+  ]);
+});

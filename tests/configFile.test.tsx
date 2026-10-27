@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { configPathOf, readSettings } from '../src/config.ts';
 import { resolveMachine, resolveProject } from '../src/project.ts';
 import { loadBindings } from '../src/remap.ts';
-import { createTuiFixture, needView } from '../src/tui/tuiHarness.tsx';
+import { commandLabel, createTuiFixture, needView } from '../src/tui/tuiHarness.tsx';
 import type { TuiFixture } from '../src/tui/tuiHarness.tsx';
 
 const homes: string[] = [];
@@ -48,7 +48,7 @@ it('applies the key remap in the TUI and resolves the machine and project from t
 
   await fixture.press('h');
 
-  expect(fixture.setup.captureCharFrame()).toContain('Close help');
+  expect(fixture.setup.captureCharFrame()).toContain(commandLabel('closeHelp'));
 
   const machine = resolveMachine({
     runGit: async () => ({ kind: 'failed' }),

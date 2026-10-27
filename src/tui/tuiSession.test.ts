@@ -402,3 +402,147 @@ it('keeps the previous ticket file errors when listing them fails', async () => 
   expect(listings).toBe(2);
   expect(fake.session.getSnapshot().fileErrors).toEqual([fileError]);
 });
+
+it('stops growing the message history after many notices', async () => {
+  const fake = await createFake([needView(0, 'First')], [], {
+    edit: async () => ({ ok: false, reason: { code: 'storeError', message: 'Editor failed.' } }),
+  });
+
+  const editOnce = async () => {
+    fake.session.send({ kind: 'edit' });
+    await settle();
+  };
+
+  for (let count = 0; count < 120; count += 1) {
+    await editOnce();
+  }
+
+  const bounded = fake.session.getSnapshot().messages.length;
+
+  for (let count = 0; count < 30; count += 1) {
+    await editOnce();
+  }
+
+  expect(fake.session.getSnapshot().messages).toHaveLength(bounded);
+});
+
+it('keeps only the failure in the history when a later edit succeeds', async () => {
+  const outcomes = [
+    { ok: false as const, reason: { code: 'storeError' as const, message: 'Editor failed.' } },
+    { ok: true as const, value: undefined },
+  ];
+
+  const fake = await createFake([needView(0, 'First')], [], {
+    edit: async () => outcomes.shift() ?? { ok: true, value: undefined },
+  });
+
+  fake.session.send({ kind: 'edit' });
+  await settle();
+  fake.session.send({ kind: 'edit' });
+  await settle();
+
+  expect(fake.session.getSnapshot().messages.map((message) => message.text)).toEqual([
+    'Editor failed.',
+  ]);
+});
+
+it('does not edit when the selected row has no ticket, even if edit is sent', async () => {
+  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
+  const fake = await createFake([], groups);
+
+  fake.session.send({ kind: 'switchView' });
+  await settle();
+  fake.session.send({ kind: 'edit' });
+  await settle();
+
+  expect(fake.session.getSnapshot().view).toBe('tree');
+  expect(fake.edited).toEqual([]);
+});
+
+it('reports a stray file error that appears after an earlier one was already reported', async () => {
+  const fake = await createFake([needView(0, 'First')]);
+
+  const reload = async () => {
+    for (const listener of fake.changeListeners) {
+      listener();
+    }
+
+    await settle();
+  };
+
+  fake.fileErrors.push({ path: 'a.md', id: null, message: 'Broken A' });
+  await reload();
+  fake.fileErrors.push({ path: 'b.md', id: null, message: 'Broken B' });
+  await reload();
+
+  const texts = fake.session.getSnapshot().messages.map((message) => message.text);
+
+  expect(texts.some((text) => text.includes('Broken A'))).toBe(true);
+  expect(texts.some((text) => text.includes('Broken B'))).toBe(true);
+});
+
+it('does not report a file error for a ticket that has a row', async () => {
+  const fake = await createFake([needView(0, 'First')]);
+
+  fake.fileErrors.push({ path: 'first.md', id: 'demo-3400', message: 'Broken' });
+
+  for (const listener of fake.changeListeners) {
+    listener();
+  }
+
+  await settle();
+
+  expect(fake.session.getSnapshot().messages).toEqual([]);
+});
+
+it('shows no problem for a tree that loads without one', async () => {
+  const fake = await createFake([needView(0, 'First')], treeGroups());
+
+  fake.session.send({ kind: 'switchView' });
+  await settle();
+
+  expect(fake.session.getSnapshot().views.tree.problems).toEqual([]);
+});
+
+it('refreshes the rows when listing the file errors fails', async () => {
+  const changes = new Set<() => void>();
+  let title = 'Before';
+  let failListing = false;
+
+  const session = createTuiSession({
+    load: async () => ({ ok: true, value: { items: [needView(0, title)], reconcileProblems: [] } }),
+    loadTree: async () => ({ ok: true, value: [] }),
+    loadErrors: async () => {
+      if (failListing) {
+        throw new Error('Listing failed.');
+      }
+
+      return [];
+    },
+    edit: async () => ({ ok: true, value: undefined }),
+    lend: async (run) => ({ ok: true, value: await run() }),
+    onChange: (listener) => {
+      changes.add(listener);
+
+      return () => changes.delete(listener);
+    },
+    notices: [],
+  });
+
+  await settle();
+
+  title = 'After';
+  failListing = true;
+
+  for (const listener of changes) {
+    listener();
+  }
+
+  await settle();
+
+  const texts = session.getSnapshot().views.home.rows.map((row) => row.text);
+
+  session.stop();
+
+  expect(texts.some((text) => text.includes('After'))).toBe(true);
+});

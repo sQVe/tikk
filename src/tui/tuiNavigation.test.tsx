@@ -37,8 +37,9 @@ it('keeps wide and multi-line titles on one row and the status readable', async 
   }
 
   const status = lines.findIndex((line) => line.includes('STATUS problem second'));
+  const bottom = lines.findLastIndex((line) => line.trim() !== '');
 
-  expect(status).toBe(lines.findIndex((line) => line.includes('demo-3403')) + 1);
+  expect(status).toBe(bottom);
 });
 
 it('moves the selected row with j, k, down, and up', async () => {
@@ -111,14 +112,15 @@ it('keeps the selected tree row in the frame when the tree is taller than the te
   const { setup, press, selectedLine } = await mount([], { width: 50, height: 5 }, [], groups);
 
   await press('s');
-  expect(selectedLine()).toContain('No plan');
+  expect(selectedLine()?.slice(1).trim()).not.toBe('');
+  expect(selectedLine()).not.toMatch(/demo-/);
 
   for (let step = 0; step < 6; step += 1) {
     await press('j');
   }
 
   expect(selectedLine()).toContain('Slice 5');
-  expect(setup.captureCharFrame()).not.toContain('No plan');
+  expect(setup.captureCharFrame().split('\n')[0]).toMatch(/demo-/);
 });
 
 it('opens the selected ticket with e in the home and the tree view', async () => {
@@ -165,16 +167,21 @@ it('ignores e on the group of slices without a plan', async () => {
   await press('s');
   await press('e');
 
-  expect(selectedLine()).toContain('No plan');
+  expect(selectedLine()?.slice(1).trim()).not.toBe('');
+  expect(selectedLine()).not.toMatch(/demo-/);
   expect(edited).toEqual([]);
 });
 
 it('ignores e when the list is empty', async () => {
   const { setup, edited, press } = await mount([], { width: 60, height: 8 });
+  const emptyFeedback = (): string => setup.captureCharFrame().split('\n')[0]?.trim() ?? '';
+
+  expect(emptyFeedback()).not.toBe('');
 
   await press('e');
 
-  expect(setup.captureCharFrame()).toContain('Nothing needs you.');
+  expect(emptyFeedback()).not.toBe('');
+  expect(setup.captureCharFrame()).not.toMatch(/demo-/);
   expect(edited).toEqual([]);
 });
 

@@ -221,3 +221,34 @@ it('keeps a default in a scope that is never active with the remapped scope', ()
   expect(keysOf(loaded.bindings, 'list', 'selectFirst')).toEqual(['gg']);
   expect(loaded.messages.some((message) => message.includes('messages layer'))).toBe(false);
 });
+
+it('accepts Ctrl+C as the whole quit key without a notice', () => {
+  const loaded = configOf({ keys: { quit: ['ctrl+c'] } });
+
+  expect(loaded.messages).toEqual([]);
+  expect(keysOf(loaded.bindings, 'global', 'quit')).toEqual(['ctrl+c']);
+});
+
+it('refuses an unreadable key in one command after a readable key in another command', () => {
+  const loaded = configOf({ keys: { selectNext: ['x'], help: ['<bad>'] } });
+
+  expect(loaded.bindings).toEqual(defaultBindings);
+  expect(loaded.messages).toHaveLength(1);
+  expect(loaded.messages[0]).toContain(configPath);
+});
+
+it('refuses two commands that share one multi-key sequence', () => {
+  const loaded = configOf({ keys: { help: ['xy'], showMessages: ['xy'] } });
+
+  expect(loaded.bindings).toEqual(defaultBindings);
+  expect(loaded.messages).toHaveLength(1);
+  expect(loaded.messages[0]).toContain(configPath);
+});
+
+it('refuses the whole config when an unknown command ID follows a valid remap', () => {
+  const loaded = configOf({ keys: { help: ['h'], unknownAction: ['x'] } });
+
+  expect(loaded.bindings).toEqual(defaultBindings);
+  expect(loaded.messages).toHaveLength(1);
+  expect(loaded.messages[0]).toContain(configPath);
+});

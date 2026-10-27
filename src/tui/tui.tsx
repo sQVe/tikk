@@ -275,7 +275,8 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
     }
   }, [session, sideLayout, snapshot.detailOpen]);
 
-  const listHeight = Math.max(1, height - statusRows);
+  const listHeight = Math.max(0, height - statusRows);
+  const hasContentRows = listHeight > 0;
 
   return (
     <box flexDirection="column" flexGrow={1}>
@@ -283,30 +284,32 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
       {commandScopes.map((scope) => (
         <KeyLayer key={scope} scope={scope} run={run} session={session} bindings={bindings} />
       ))}
-      {view.loaded ? (
-        <box flexDirection="row">
-          {fullDetail ? null : (
-            <box width={listWidth} flexShrink={0}>
-              <RowList
-                rows={view.rows}
-                selected={view.selection.index}
-                height={listHeight}
-                emptyMessage={
-                  snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
-                }
+      <box height={listHeight} flexShrink={0}>
+        {view.loaded && hasContentRows ? (
+          <box flexDirection="row">
+            {fullDetail ? null : (
+              <box width={listWidth} flexShrink={0}>
+                <RowList
+                  rows={view.rows}
+                  selected={view.selection.index}
+                  height={listHeight}
+                  emptyMessage={
+                    snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
+                  }
+                />
+              </box>
+            )}
+            {showsPane ? (
+              <DetailPane
+                row={selectedRow}
+                errors={snapshot.fileErrors}
+                palette={palette}
+                width={paneWidth}
               />
-            </box>
-          )}
-          {showsPane ? (
-            <DetailPane
-              row={selectedRow}
-              errors={snapshot.fileErrors}
-              palette={palette}
-              width={paneWidth}
-            />
-          ) : null}
-        </box>
-      ) : null}
+            ) : null}
+          </box>
+        ) : null}
+      </box>
       <StatusLine
         view={viewLabels[snapshot.view]}
         text={statusOf(snapshot, strayCount)}

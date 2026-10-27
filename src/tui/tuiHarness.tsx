@@ -6,7 +6,7 @@ import type { ReactNode } from 'react';
 
 import type { NeedView, TreeGroup } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
-import { App, createTuiSession, defaultBindings } from './tui.tsx';
+import { App, catalog, createTuiSession, defaultBindings } from './tui.tsx';
 import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
 
 type Setup = Awaited<ReturnType<typeof testRender>>;
@@ -73,6 +73,15 @@ const demoId = (raw: string): NeedView['id'] => {
   invariant(isDemoId(raw), `Test ID ${raw} is invalid.`);
 
   return raw;
+};
+
+// The label of a command as the catalog defines it, so tests track rewording of the label.
+export const commandLabel = (id: string): string => {
+  const command = catalog.find((candidate) => candidate.id === id);
+
+  invariant(command !== undefined, `The catalog has no ${id} command.`);
+
+  return command.label;
 };
 
 export const needView = (index: number, title: string): NeedView => ({

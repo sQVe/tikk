@@ -1,4 +1,7 @@
 import { expect, it } from 'bun:test';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { readSettings } from './config.ts';
 import type { ConfigEffects } from './config.ts';
@@ -72,4 +75,20 @@ it('names the file when it cannot be read', () => {
 
   expect(result.ok).toBe(false);
   expect(!result.ok && result.reason).toContain(configPath);
+});
+
+it('reports a config path that cannot be read as a file, without treating it as missing', async () => {
+  const tempHome = await mkdtemp(join(tmpdir(), 'tikk-home-'));
+  const unreadablePath = join(tempHome, '.config', 'tikk', 'config.json');
+
+  try {
+    await mkdir(unreadablePath, { recursive: true });
+
+    const result = readSettings(tempHome);
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.reason).toContain(unreadablePath);
+  } finally {
+    await rm(tempHome, { recursive: true, force: true });
+  }
 });

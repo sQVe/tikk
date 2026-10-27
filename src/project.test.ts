@@ -161,3 +161,10 @@ it('still resolves a project when the config has only a machine', async () => {
     value: 'tikk',
   });
 });
+
+it('fails with the config file name when machine resolution reads a malformed config', () => {
+  const result = machineWith('{ nope');
+
+  expect(result.ok).toBe(false);
+  expect(!result.ok && result.reason.message).toContain(configPath);
+});

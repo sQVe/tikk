@@ -37,6 +37,7 @@ export const DetailPane = (props: {
       flexDirection="column"
       width={props.width}
       flexShrink={0}
+      overflow="hidden"
       paddingLeft={1}
       border={['left']}
       borderColor={palette.dim}
@@ -44,11 +45,11 @@ export const DetailPane = (props: {
       {row === undefined
         ? null
         : factsOf(row, props.errors).map((fact) => (
-            <box flexDirection="row" key={`${fact.label}:${fact.value}`}>
-              <text fg={palette.dim} width={labelWidth} flexShrink={0}>
+            <box flexDirection="row" height={1} flexShrink={0} key={`${fact.label}:${fact.value}`}>
+              <text fg={palette.dim} width={labelWidth} height={1} flexShrink={0}>
                 {fact.label}
               </text>
-              <text fg={palette.text} wrapMode="char" flexShrink={1}>
+              <text fg={palette.text} wrapMode="none" truncate height={1} flexShrink={1}>
                 {singleLine(fact.value)}
               </text>
             </box>

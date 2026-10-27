@@ -16,6 +16,7 @@ type Setup = Awaited<ReturnType<typeof createTestRenderer>>;
 
 interface StartOptions {
   width?: number;
+  holdOpen?: Promise<unknown>;
   edit?: NeedsSession['edit'];
   resume?: () => void;
   closeFailure?: { kind: 'cleanup'; message: string };
@@ -59,7 +60,7 @@ const start = async (options: StartOptions = {}) => {
 
   const effects: TerminalEffects = {
     open: () =>
-      Promise.resolve({
+      (options.holdOpen ?? Promise.resolve()).then(() => ({
         renderer: {
           suspend: () => {
             lending.push('suspend');
@@ -89,7 +90,7 @@ const start = async (options: StartOptions = {}) => {
           },
         },
         keymap: createDefaultOpenTuiKeymap(setup.renderer),
-      }),
+      })),
     listen: (event, handler) => {
       handlers.set(event, handler);
 
@@ -137,22 +138,26 @@ const start = async (options: StartOptions = {}) => {
     },
   };
 
-  await act(async () => {
-    await startTerminal(
-      {
-        needs,
-        watch: (onChange) => {
-          watcher.onChange = onChange;
+  const started = startTerminal(
+    {
+      needs,
+      watch: (onChange) => {
+        watcher.onChange = onChange;
 
-          return () => {
-            watcher.stops += 1;
-          };
-        },
-        bindings: defaultBindings,
-        notices: [],
+        return () => {
+          watcher.stops += 1;
+        };
       },
-      effects,
-    );
+      bindings: defaultBindings,
+      notices: [],
+    },
+    effects,
+  );
+
+  await act(async () => {
+    if (options.holdOpen === undefined) {
+      await started;
+    }
   });
 
   await settle();
@@ -691,4 +696,18 @@ it('stops the running editor and never starts the queued one at shutdown', async
   expect(started).toBe(1);
   expect(exitCodes).toEqual([0]);
   expect(calls.dispose).toBe(1);
+});
+
+it('shuts down cleanly and exits 0 when SIGTERM arrives before the TUI session opens', async () => {
+  const opening = Promise.withResolvers<true>();
+  const { handlers, exitCodes, printed } = await start({ holdOpen: opening.promise });
+
+  handlers.get('SIGTERM')?.();
+  await settle();
+
+  opening.resolve(true);
+  await settle();
+
+  expect(exitCodes).toEqual([0]);
+  expect(printed).toEqual([]);
 });
