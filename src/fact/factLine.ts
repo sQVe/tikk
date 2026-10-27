@@ -82,6 +82,14 @@ const statusSchema = z.strictObject({
   forced: z.string().min(1).optional(),
 });
 
+// A waiting fact says whether a draft plan waits for the user, and what the user should do.
+const waitingSchema = z.strictObject({
+  ...baseShape,
+  kind: z.literal('waiting'),
+  waiting: z.boolean(),
+  text: z.string().min(1).optional(),
+});
+
 const unarchiveSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('unarchive'),
@@ -205,6 +213,7 @@ const factSchema = z.discriminatedUnion('kind', [
   passUpSchema,
   rejectSchema,
   statusSchema,
+  waitingSchema,
   unarchiveSchema,
   aliasSchema,
   prSchema,

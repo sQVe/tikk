@@ -64,6 +64,15 @@ it('prints one line per item with its ID, reason, and age', async () => {
   expect(output.text).toBe('demo-3467  question  1h  0000000000a1  A title\n');
 });
 
+it('prints a task with no date as a dash, and the tickets it blocks', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
+  const frontMatter = { ...makeTicket('demo-3468').frontMatter, blockedBy: [task.id] };
+  const blocked = makeTicket('demo-3468', { frontMatter });
+  const output = successOf(await needs([], [task, blocked]));
+
+  expect(output.text).toBe('demo-3467  blockingTask  -  A title  demo-3468\n');
+});
+
 it('prints nothing when no instruction waits on the user', async () => {
   const output = successOf(await needs([], [makeTicket('demo-3467')]));
 

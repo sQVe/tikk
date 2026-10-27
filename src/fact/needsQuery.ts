@@ -6,11 +6,13 @@ import { deriveInstructionStateFromOwnFacts, selectLastClaim } from './instructi
 import type { InstructionTicket } from './instructionState.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
+import { blockerState, clearingStates, deriveStates } from './ticketStates.ts';
 
+// A task has no create time, so its since and age are null until it has a status fact.
 interface NeedBase<Ticket extends InstructionTicket> {
   ticket: Ticket;
-  since: string;
-  ageSeconds: number;
+  since: string | null;
+  ageSeconds: number | null;
 }
 
 type NeedDetail =
@@ -18,7 +20,10 @@ type NeedDetail =
   | { reason: 'mergedUnverified' }
   | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
   | { reason: 'staleClaim'; holder: string }
-  | { reason: 'blockedFinding'; fingerprint: string; claim: string };
+  | { reason: 'blockedFinding'; fingerprint: string; claim: string }
+  | { reason: 'blockingTask'; blocks: TicketId[] }
+  | { reason: 'newTask' }
+  | { reason: 'draftPlan'; text?: string };
 
 export type NeedItem<Ticket extends InstructionTicket> = NeedBase<Ticket> & NeedDetail;
 
@@ -127,6 +132,74 @@ const needsOf = <Ticket extends InstructionTicket>(
   return items;
 };
 
+// A ticket's finished state comes from its facts, so an accepted instruction is finished.
+const isUnfinished = (
+  ticket: InstructionTicket,
+  states: ReturnType<typeof deriveStates>,
+): boolean =>
+  ticket.frontMatter.archived === undefined && !clearingStates.has(blockerState(ticket, states));
+
+const blocksOf = <Ticket extends InstructionTicket>(
+  task: Ticket,
+  tickets: Ticket[],
+  states: ReturnType<typeof deriveStates>,
+): TicketId[] =>
+  tickets
+    .filter(
+      (ticket) => isUnfinished(ticket, states) && ticket.frontMatter.blockedBy.includes(task.id),
+    )
+    .map((ticket) => ticket.id)
+    .toSorted((a, b) => a.localeCompare(b));
+
+const datedBy = (
+  at: string | undefined,
+  now: Date,
+): { since: string | null; ageSeconds: number | null } =>
+  at === undefined
+    ? { since: null, ageSeconds: null }
+    : { since: at, ageSeconds: ageSecondsOf(at, now) };
+
+const taskNeedsOf = <Ticket extends InstructionTicket>(
+  task: Ticket,
+  blocks: TicketId[],
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const dated = datedBy(own.findLast((fact) => fact.kind === 'status')?.at, now);
+
+  if (blocks.length > 0) {
+    return [{ ticket: task, reason: 'blockingTask', blocks, ...dated }];
+  }
+
+  if (task.frontMatter.new === true) {
+    return [{ ticket: task, reason: 'newTask', ...dated }];
+  }
+
+  return [];
+};
+
+const draftPlanNeedsOf = <Ticket extends InstructionTicket>(
+  plan: Ticket,
+  own: Fact[],
+  now: Date,
+): NeedItem<Ticket>[] => {
+  const waiting = own.findLast((fact) => fact.kind === 'waiting');
+
+  if (waiting?.kind !== 'waiting' || !waiting.waiting) {
+    return [];
+  }
+
+  return [
+    {
+      ticket: plan,
+      reason: 'draftPlan',
+      ...(waiting.text === undefined ? {} : { text: waiting.text }),
+      since: waiting.at,
+      ageSeconds: ageSecondsOf(waiting.at, now),
+    },
+  ];
+};
+
 const blockedFindingsOf = <Ticket extends InstructionTicket>(
   ticket: Ticket,
   own: Fact[],
@@ -167,6 +240,26 @@ const isOpenSlice = (ticket: InstructionTicket): boolean => {
   return (
     frontMatter.kind === 'slice' &&
     frontMatter.status === 'open' &&
+    frontMatter.archived === undefined
+  );
+};
+
+const isOpenTask = (ticket: InstructionTicket): boolean => {
+  const { frontMatter } = ticket;
+
+  return (
+    frontMatter.kind === 'task' &&
+    frontMatter.status === 'open' &&
+    frontMatter.archived === undefined
+  );
+};
+
+const isDraftPlan = (ticket: InstructionTicket): boolean => {
+  const { frontMatter } = ticket;
+
+  return (
+    frontMatter.kind === 'plan' &&
+    frontMatter.status === 'draft' &&
     frontMatter.archived === undefined
   );
 };
@@ -212,11 +305,20 @@ const sliceNeedsOf = <Ticket extends InstructionTicket>(
   return items;
 };
 
+// Items with no date sort after the dated items.
+const compareSince = (a: string | null, b: string | null): number => {
+  if (a === null || b === null) {
+    return Number(a === null) - Number(b === null);
+  }
+
+  return new Date(a).getTime() - new Date(b).getTime();
+};
+
 const byOldest = <Ticket extends InstructionTicket>(
   a: NeedItem<Ticket>,
   b: NeedItem<Ticket>,
 ): number => {
-  const bySince = new Date(a.since).getTime() - new Date(b.since).getTime();
+  const bySince = compareSince(a.since, b.since);
 
   if (bySince !== 0) {
     return bySince;
@@ -245,5 +347,19 @@ export const selectNeeds = <Ticket extends InstructionTicket>(
     .filter((ticket) => ticket.frontMatter.archived === undefined)
     .flatMap((ticket) => blockedFindingsOf(ticket, factsByTicket.get(ticket.id) ?? [], now));
 
-  return [...instructionItems, ...sliceItems, ...findingItems].toSorted(byOldest);
+  const states = deriveStates(tickets, index, now);
+
+  const taskItems = tickets
+    .filter(isOpenTask)
+    .flatMap((task) =>
+      taskNeedsOf(task, blocksOf(task, tickets, states), factsByTicket.get(task.id) ?? [], now),
+    );
+
+  const planItems = tickets
+    .filter(isDraftPlan)
+    .flatMap((plan) => draftPlanNeedsOf(plan, factsByTicket.get(plan.id) ?? [], now));
+
+  return [...instructionItems, ...sliceItems, ...findingItems, ...taskItems, ...planItems].toSorted(
+    byOldest,
+  );
 };

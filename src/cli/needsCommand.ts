@@ -10,18 +10,20 @@ import type { ReconcileProblem } from './prReconcile.ts';
 interface NeedViewBase {
   id: TicketId;
   title: string;
-  since: string;
-  ageSeconds: number;
+  since: string | null;
+  ageSeconds: number | null;
   parseError?: string;
 }
 
 export type NeedView = NeedViewBase &
   (
     | { reason: 'question' | 'submitted'; item: string; passedUp: boolean }
-    | { reason: 'mergedUnverified' }
+    | { reason: 'mergedUnverified' | 'newTask' }
     | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
     | { reason: 'staleClaim'; holder: string }
     | { reason: 'blockedFinding'; fingerprint: string; claim: string }
+    | { reason: 'blockingTask'; blocks: TicketId[] }
+    | { reason: 'draftPlan'; text?: string }
   );
 
 export interface NeedsReading {
@@ -33,7 +35,11 @@ const secondsPerMinute = 60;
 const secondsPerHour = 3600;
 const secondsPerDay = 86_400;
 
-const shortAge = (ageSeconds: number): string => {
+const shortAge = (ageSeconds: number | null): string => {
+  if (ageSeconds === null) {
+    return '-';
+  }
+
   if (ageSeconds < secondsPerMinute) {
     return `${ageSeconds}s`;
   }
@@ -88,7 +94,19 @@ const itemView = (item: NeedItem<CliTicket>): NeedView => {
     return { id, title, reason: item.reason, since, ageSeconds, fingerprint, claim, ...parseError };
   }
 
-  if (item.reason === 'mergedUnverified') {
+  if (item.reason === 'blockingTask') {
+    const { blocks } = item;
+
+    return { id, title, reason: item.reason, since, ageSeconds, blocks, ...parseError };
+  }
+
+  if (item.reason === 'draftPlan') {
+    const text = item.text === undefined ? {} : { text: item.text };
+
+    return { id, title, reason: item.reason, since, ageSeconds, ...text, ...parseError };
+  }
+
+  if (item.reason === 'mergedUnverified' || item.reason === 'newTask') {
     return { id, title, reason: item.reason, since, ageSeconds, ...parseError };
   }
 
@@ -112,16 +130,28 @@ const openWorkOf = (view: Extract<NeedView, { reason: 'flagged' }>): TicketId[] 
   ...view.openTasks,
 ];
 
+const linkedIdsOf = (view: NeedView): TicketId[] => {
+  if (view.reason === 'flagged') {
+    return openWorkOf(view);
+  }
+
+  return view.reason === 'blockingTask' ? view.blocks : [];
+};
+
 const itemIdOf = (view: NeedView): string =>
   view.reason === 'question' || view.reason === 'submitted' ? `  ${view.item}` : '';
 
+const textOf = (view: NeedView): string =>
+  view.reason === 'draftPlan' && view.text !== undefined ? `  ${view.text}` : '';
+
 const itemLine = (view: NeedView): string => {
   const age = shortAge(view.ageSeconds);
-  const line = `${view.id}  ${view.reason}  ${age}${itemIdOf(view)}  ${itemSubject(view)}`;
-  const openWork = view.reason === 'flagged' ? `  ${openWorkOf(view).join(' ')}` : '';
+  const line = `${view.id}  ${view.reason}  ${age}${itemIdOf(view)}  ${itemSubject(view)}${textOf(view)}`;
+  const linkedIds = linkedIdsOf(view);
+  const linked = linkedIds.length === 0 ? '' : `  ${linkedIds.join(' ')}`;
   const suffix = view.parseError === undefined ? '' : `  parseError ${view.parseError}`;
 
-  return `${line}${openWork}${suffix}\n`;
+  return `${line}${linked}${suffix}\n`;
 };
 
 export const readNeeds = async (

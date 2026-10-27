@@ -16,9 +16,24 @@ thin view over that query. It does no attention logic of its own. It can act on 
 as closing or accepting it, through the same code as the CLI command. `e` opens a ticket in
 `$EDITOR`, and the TUI edits no ticket text.
 
-The "needs you" view lists drafts waiting for agreement, blocked findings, merged but unverified
-slices, stale claims, unanswered worker questions, and new issues. Each item comes from
-`tikk needs --json`.
+The "needs you" view lists only what is on the user. Each item comes from `tikk needs --json` and
+has one reason:
+
+- `question`: an open question that a worker passed up, or that is 30 minutes old with no pass-up.
+- `submitted`: a submission that a worker passed up.
+- `staleClaim`: a claim whose lease ended.
+- `blockingTask`: an open task that an unfinished ticket lists in `blockedBy`.
+- `newTask`: a loose open task that `tikk new` created and that a later move, rank, done, or cancel
+  has not cleared.
+- `draftPlan`: a draft plan whose latest `waiting` fact is true. `tikk wait <id> --text <text>` sets
+  it, and `tikk wait <id> --done` clears it.
+- `flagged`: a merged slice with open instructions or tasks under it.
+- `mergedUnverified`: a merged slice with no current audit that meets every criterion.
+- `blockedFinding`: a review finding whose latest status is blocked.
+
+Questions, submissions, answers, acceptances, rejections, and pass-ups each name an item ID, so the
+reader can tell which item an action decides. A task has no create time, so its age comes from its
+latest status fact. A task with no status fact has no age.
 
 ## Consequences
 

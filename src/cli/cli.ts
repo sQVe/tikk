@@ -27,6 +27,7 @@ import { ticketMove } from './ticketMove.ts';
 import { ticketNew } from './ticketNew.ts';
 import { ticketRank } from './ticketRank.ts';
 import { ticketShow } from './ticketShow.ts';
+import { ticketWait } from './ticketWait.ts';
 
 export type { CliEffects, CliFailure, CliSession } from './cliEffects.ts';
 export { openNeedsSession } from './needsSession.ts';
@@ -60,6 +61,7 @@ const sessionCommands = new Map<string, SessionCommand>([
   ['pass-up', instructionPassUp],
   ['cancel', ticketCancel],
   ['done', ticketDone],
+  ['wait', ticketWait],
   ['ready', readyCommand],
   ['needs', needsCommand],
   ['pr', prCommand],
@@ -75,7 +77,7 @@ const sessionCommands = new Map<string, SessionCommand>([
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|reject|pass-up|cancel|done|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|reject|pass-up|cancel|done|wait|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,

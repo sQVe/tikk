@@ -58,6 +58,14 @@ describe('parseFactLine', () => {
     expect(parsedWithout.map((parsed) => parsed.ok)).toEqual(withItem.map(() => false));
   });
 
+  it('parses a waiting fact with or without text, and refuses an empty text', () => {
+    const waiting = parseFactLine(line({ kind: 'waiting', waiting: true, text: 'Pick a name' }));
+    const resumed = parseFactLine(line({ kind: 'waiting', waiting: false }));
+    const empty = parseFactLine(line({ kind: 'waiting', waiting: true, text: '' }));
+
+    expect([waiting.ok, resumed.ok, empty.ok]).toEqual([true, true, false]);
+  });
+
   it('refuses an item that is not 12 lower-case hex characters, or on a progress log', () => {
     for (const item of ['ABC123DEF456', 'abc123', 'abc123def4567']) {
       expect(parseFactLine(line({ kind: 'passUp', item })).ok).toBe(false);

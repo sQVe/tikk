@@ -109,6 +109,22 @@ it('cancels a plan in its file and appends a status fact', async () => {
   });
 });
 
+it('cancels a draft plan in its own file and keeps the file and its body', async () => {
+  const plan = makeKindTicket('demo-3467', 'plan', 'draft');
+  const { fakeSession, result } = await cancel(['demo-3467'], { tickets: [plan] });
+  const [write] = fakeSession.writes;
+  const written = parseTicketFile(write?.text ?? '');
+
+  successOf(result);
+  expect(write?.path).toBe(plan.path);
+  expect(written.ok && written.value.frontMatter.status).toBe('canceled');
+  expect(written.ok && written.value.body).toBe(plan.body);
+
+  expect(fakeSession.appends).toMatchObject([
+    { fact: { kind: 'status', ticket: 'demo-3467', status: 'canceled' } },
+  ]);
+});
+
 it('appends a status fact when it cancels an instruction', async () => {
   const { fakeSession, result } = await cancel(['demo-3467']);
 
