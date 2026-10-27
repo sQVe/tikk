@@ -206,6 +206,53 @@ describe('deriveInstructionState', () => {
     });
   });
 
+  it('ends the claim of a rejected submission when clock skew sorts the reject before the claim', () => {
+    const facts = [
+      makeFact('3469', {
+        kind: 'reject',
+        item: '5ab0000000a1',
+        reason: 'Tests fail.',
+        at: '2026-10-20T10:55:00.000Z',
+      }),
+      makeFact('3469', { ...liveClaim, at: '2026-10-20T11:00:00.000Z' }),
+      makeFact('3469', {
+        kind: 'log',
+        type: 'submitted',
+        item: '5ab0000000a1',
+        text: 'ready',
+        at: '2026-10-20T11:10:00.000Z',
+      }),
+    ];
+
+    expect(deriveInstructionState(ticket, facts, now)).toEqual({
+      state: 'open',
+      claim: null,
+      rejection: { item: '5ab0000000a1', reason: 'Tests fail.', at: '2026-10-20T10:55:00.000Z' },
+    });
+  });
+
+  it('keeps a claim taken after the rejected submission', () => {
+    const facts = [
+      makeFact('3469', { ...liveClaim, at: '2026-10-20T11:00:00.000Z' }),
+      makeFact('3469', {
+        kind: 'log',
+        type: 'submitted',
+        item: '5ab0000000a1',
+        text: 'ready',
+        at: '2026-10-20T11:10:00.000Z',
+      }),
+      makeFact('3469', {
+        kind: 'reject',
+        item: '5ab0000000a1',
+        reason: 'Tests fail.',
+        at: '2026-10-20T11:20:00.000Z',
+      }),
+      makeFact('3469', { ...liveClaim, at: '2026-10-20T11:30:00.000Z' }),
+    ];
+
+    expect(deriveInstructionState(ticket, facts, now).state).toBe('active');
+  });
+
   it('is done after an accept', () => {
     const facts = [
       makeFact('3469', { kind: 'log', type: 'submitted', item: '5ab0000000a1', text: 'ready' }),

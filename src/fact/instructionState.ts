@@ -68,12 +68,21 @@ export const dropStaleDecisions = (own: Fact[]): Fact[] => {
 
 const endsClaim = (fact: Fact): boolean => fact.kind === 'release' || fact.kind === 'reject';
 
-export const selectLastClaim = (own: Fact[]): ClaimFact | undefined => {
-  const holderFact = dropStaleDecisions(own).findLast(
-    (fact) => fact.kind === 'claim' || endsClaim(fact),
-  );
+// A reject comes from another machine, whose clock may sort it before the claim it ends. The
+// submission comes from the claim's own machine, so it orders the claim reliably.
+const rejectedAfter = (kept: Fact[], claimIndex: number): boolean =>
+  kept.some((fact) => fact.kind === 'reject') && lastIndexWhere(kept, isSubmittedLog) > claimIndex;
 
-  return holderFact?.kind === 'claim' ? holderFact : undefined;
+export const selectLastClaim = (own: Fact[]): ClaimFact | undefined => {
+  const kept = dropStaleDecisions(own);
+  const holderIndex = lastIndexWhere(kept, (fact) => fact.kind === 'claim' || endsClaim(fact));
+  const holderFact = kept[holderIndex];
+
+  if (holderFact?.kind !== 'claim' || rejectedAfter(kept, holderIndex)) {
+    return undefined;
+  }
+
+  return holderFact;
 };
 
 const rejectionOf = (own: Fact[]): InstructionRejection | null => {
