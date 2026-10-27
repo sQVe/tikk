@@ -1,6 +1,8 @@
 import type { CliFailure, NeedsReading, TreeGroup } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
 import { homeRowsOf } from './homeView.tsx';
+import { topAfter } from './overlayScroll.ts';
+import type { OverlayMove } from './overlayScroll.ts';
 import type { ListRow } from './rowList.tsx';
 import { treeRowsOf } from './treeView.tsx';
 
@@ -35,18 +37,39 @@ interface ListView {
   problems: readonly string[];
 }
 
+type Overlay = { kind: 'none' } | { kind: 'help'; top: number } | { kind: 'messages'; top: number };
+
+export interface TuiMessage {
+  id: number;
+  text: string;
+}
+
 export interface TuiSnapshot {
   view: ViewName;
   views: Record<ViewName, ListView>;
   notice: string;
+  messages: readonly TuiMessage[];
+  overlay: Overlay;
   fileErrors: readonly TicketFileError[];
 }
 
-type TuiIntent =
+type OverlayIntent =
+  | { kind: 'toggleHelp' }
+  | { kind: 'openMessages' }
+  | { kind: 'closeOverlay' }
+  | { kind: 'scrollOverlay'; move: OverlayMove; maximumTop: number };
+
+export type TuiIntent =
   | { kind: 'moveUp' }
   | { kind: 'moveDown' }
+  | { kind: 'moveFirst' }
+  | { kind: 'moveLast' }
   | { kind: 'switchView' }
-  | { kind: 'edit' };
+  | { kind: 'edit' }
+  | OverlayIntent;
+
+// Intents that only change the snapshot, with no load or effect.
+type LocalIntent = Exclude<TuiIntent, { kind: 'switchView' } | { kind: 'edit' }>;
 
 export interface TuiSession {
   getSnapshot: () => TuiSnapshot;
@@ -72,8 +95,12 @@ const initialSnapshot: TuiSnapshot = {
   view: 'home',
   views: { home: { ...emptyView, requested: true }, tree: emptyView },
   notice: '',
+  messages: [],
+  overlay: { kind: 'none' },
   fileErrors: [],
 };
+
+const messageLimit = 100;
 
 const errorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
@@ -127,15 +154,56 @@ const applyLoad = (snapshot: TuiSnapshot, name: ViewName, outcome: LoadOutcome):
   });
 };
 
-const moveSelection = (snapshot: TuiSnapshot, step: number): TuiSnapshot => {
+const selectRow = (snapshot: TuiSnapshot, target: number): TuiSnapshot => {
   const view = snapshot.views[snapshot.view];
-  const index = clampedIndex(view.selection.index + step, view.rows.length);
+  const index = clampedIndex(target, view.rows.length);
 
   if (index === view.selection.index) {
     return snapshot;
   }
 
   return withView(snapshot, snapshot.view, { ...view, selection: selectionAt(view.rows, index) });
+};
+
+const moveSelection = (snapshot: TuiSnapshot, step: number): TuiSnapshot =>
+  selectRow(snapshot, snapshot.views[snapshot.view].selection.index + step);
+
+const overlayAfter = (overlay: Overlay, intent: OverlayIntent): Overlay => {
+  if (intent.kind === 'toggleHelp') {
+    return overlay.kind === 'help' ? { kind: 'none' } : { kind: 'help', top: 0 };
+  }
+
+  if (intent.kind === 'openMessages') {
+    return { kind: 'messages', top: 0 };
+  }
+
+  if (intent.kind === 'closeOverlay') {
+    return { kind: 'none' };
+  }
+
+  return overlay.kind === 'none'
+    ? overlay
+    : { ...overlay, top: topAfter(overlay.top, intent.move, intent.maximumTop) };
+};
+
+const snapshotAfter = (snapshot: TuiSnapshot, intent: LocalIntent): TuiSnapshot => {
+  if (intent.kind === 'moveUp') {
+    return moveSelection(snapshot, -1);
+  }
+
+  if (intent.kind === 'moveDown') {
+    return moveSelection(snapshot, 1);
+  }
+
+  if (intent.kind === 'moveFirst') {
+    return selectRow(snapshot, 0);
+  }
+
+  if (intent.kind === 'moveLast') {
+    return selectRow(snapshot, snapshot.views[snapshot.view].rows.length - 1);
+  }
+
+  return { ...snapshot, overlay: overlayAfter(snapshot.overlay, intent) };
 };
 
 const followedSelection = (target: ListView, id: Selection['id']): Selection => {
@@ -196,6 +264,7 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
   let snapshot = initialSnapshot;
   let queue: Promise<void> = Promise.resolve();
   let stopped = false;
+  let lastMessageId = 0;
 
   const update = (next: TuiSnapshot) => {
     if (stopped || next === snapshot) {
@@ -263,6 +332,20 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     requestLoad(names);
   };
 
+  const showNotice = (notice: string) => {
+    if (notice === '') {
+      update({ ...snapshot, notice });
+
+      return;
+    }
+
+    lastMessageId += 1;
+
+    const messages = [{ id: lastMessageId, text: notice }, ...snapshot.messages];
+
+    update({ ...snapshot, notice, messages: messages.slice(0, messageLimit) });
+  };
+
   const edit = () => {
     const { id } = snapshot.views[snapshot.view].selection;
 
@@ -274,25 +357,17 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
       .lend(() => effects.edit(id))
       .then((loan) => {
         if (loan.ok) {
-          update({ ...snapshot, notice: loan.value.ok ? '' : loan.value.reason.message });
+          showNotice(loan.value.ok ? '' : loan.value.reason.message);
         }
       })
       .catch((error: unknown) => {
-        update({ ...snapshot, notice: errorMessage(error, 'The editor did not run.') });
+        showNotice(errorMessage(error, 'The editor did not run.'));
       });
   };
 
   const send = (intent: TuiIntent) => {
     if (stopped) {
       return;
-    }
-
-    if (intent.kind === 'moveUp') {
-      update(moveSelection(snapshot, -1));
-    }
-
-    if (intent.kind === 'moveDown') {
-      update(moveSelection(snapshot, 1));
     }
 
     if (intent.kind === 'switchView') {
@@ -303,10 +378,10 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
       if (loadsTree) {
         requestLoad(['tree']);
       }
-    }
-
-    if (intent.kind === 'edit') {
+    } else if (intent.kind === 'edit') {
       edit();
+    } else {
+      update(snapshotAfter(snapshot, intent));
     }
   };
 

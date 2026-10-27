@@ -20,7 +20,8 @@ interface CommitProbeControls {
 export interface TuiFixture {
   setup: Setup;
   edited: string[];
-  press: (key: string) => Promise<void>;
+  quits: () => number;
+  press: (key: string, modifiers?: { ctrl: boolean }) => Promise<void>;
   storeChanged: () => Promise<void>;
   selectedLine: () => string | undefined;
   pressAtNextCommit: (...keys: string[]) => void;
@@ -114,6 +115,7 @@ export const createTuiFixture = async (
 ): Promise<TuiFixture> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
+  let quitCount = 0;
 
   const probe: CommitProbeControls = {
     setup: undefined,
@@ -168,7 +170,16 @@ export const createTuiFixture = async (
   const session = createTuiSession(effects);
 
   const setup = await act(() =>
-    testRender(<WithKeymap session={session} onQuit={() => undefined} probe={probe} />, size),
+    testRender(
+      <WithKeymap
+        session={session}
+        onQuit={() => {
+          quitCount += 1;
+        }}
+        probe={probe}
+      />,
+      size,
+    ),
   );
 
   probe.setup = setup;
@@ -199,12 +210,12 @@ export const createTuiFixture = async (
     }
   }
 
-  const press = async (key: string): Promise<void> => {
+  const press = async (key: string, modifiers?: { ctrl: boolean }): Promise<void> => {
     await act(async () => {
       if (key === 'up' || key === 'down') {
         setup.mockInput.pressArrow(key);
       } else {
-        setup.mockInput.pressKey(key);
+        setup.mockInput.pressKey(key, modifiers);
       }
 
       await Bun.sleep(keySettleMilliseconds);
@@ -241,5 +252,14 @@ export const createTuiFixture = async (
     probe.keysAtCommit.push(...keys);
   };
 
-  return { setup, edited, press, storeChanged, selectedLine, pressAtNextCommit, cleanup };
+  return {
+    setup,
+    edited,
+    quits: () => quitCount,
+    press,
+    storeChanged,
+    selectedLine,
+    pressAtNextCommit,
+    cleanup,
+  };
 };
