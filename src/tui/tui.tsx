@@ -48,6 +48,13 @@ interface LayerProps {
   bindings: BindingTable;
 }
 
+// The state that decides which scopes are active. One owner: the key layers and the config
+// resolver both read it through scopesActiveWith.
+interface ActivityState {
+  overlay: TuiSnapshot['overlay']['kind'];
+  detailOpen: boolean;
+}
+
 const primaryStatusOf = (snapshot: TuiSnapshot): string => {
   const view = snapshot.views[snapshot.view];
 
@@ -85,22 +92,36 @@ const detailShare = 0.36;
 
 const statusRows = 1;
 
-const isScopeActive = (scope: CommandScope, snapshot: TuiSnapshot): boolean => {
-  const { kind } = snapshot.overlay;
-
+const isScopeActiveIn = (scope: CommandScope, state: ActivityState): boolean => {
   const active: Record<CommandScope, boolean> = {
     global: true,
-    list: kind === 'none' && !snapshot.detailOpen,
-    detail: snapshot.detailOpen,
+    list: state.overlay === 'none' && !state.detailOpen,
+    detail: state.detailOpen,
     input: false,
     rank: false,
     visual: false,
-    help: kind === 'help',
-    messages: kind === 'messages',
+    help: state.overlay === 'help',
+    messages: state.overlay === 'messages',
   };
 
   return active[scope];
 };
+
+const isScopeActive = (scope: CommandScope, snapshot: TuiSnapshot): boolean =>
+  isScopeActiveIn(scope, { overlay: snapshot.overlay.kind, detailOpen: snapshot.detailOpen });
+
+const overlayKinds: readonly ActivityState['overlay'][] = ['none', 'help', 'messages'];
+
+const activityStates: readonly ActivityState[] = overlayKinds.flatMap((overlay) =>
+  [false, true].map((detailOpen) => ({ overlay, detailOpen })),
+);
+
+// The scopes that can be active in the same state as the given scope, including itself when
+// it can be active at all.
+export const scopesActiveWith = (scope: CommandScope): CommandScope[] =>
+  commandScopes.filter((other) =>
+    activityStates.some((state) => isScopeActiveIn(scope, state) && isScopeActiveIn(other, state)),
+  );
 
 const messagesHeightOf = (height: number): number => Math.max(1, height - statusRows);
 

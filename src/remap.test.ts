@@ -181,3 +181,43 @@ it('refuses a sequence that starts with Ctrl+C for a command that is not quit', 
   expect(loaded.bindings).toEqual(defaultBindings);
   expect(loaded.messages[0]).toContain('Ctrl+C');
 });
+
+it('displaces the list edit key when a global remap takes it, with a notice', () => {
+  const loaded = configOf({ keys: { help: ['e'] } });
+
+  expect(keysOf(loaded.bindings, 'list', 'edit')).toEqual([]);
+  expect(keysOf(loaded.bindings, 'global', 'help')).toEqual(['e']);
+
+  expect(loaded.messages).toEqual([
+    'Key "e" of help replaces the default "e" of edit in the list layer.',
+  ]);
+});
+
+it('displaces a global default that a list remap takes, with a notice', () => {
+  const loaded = configOf({ keys: { selectNext: ['g'] } });
+
+  expect(keysOf(loaded.bindings, 'global', 'showMessages')).toEqual([]);
+  expect(keysOf(loaded.bindings, 'list', 'selectNext')).toEqual(['g']);
+
+  expect(loaded.messages).toContain(
+    'Key "g" of selectNext replaces the default "gm" of showMessages in the global layer.',
+  );
+});
+
+it('refuses two user keys that clash across scopes active together', () => {
+  const loaded = configOf({ keys: { help: ['x'], edit: ['x'] } });
+
+  expect(loaded.bindings).toEqual(defaultBindings);
+  expect(loaded.messages).toHaveLength(1);
+  expect(loaded.messages[0]).toContain(configPath);
+  expect(loaded.messages[0]).toContain('keys.help "x" and keys.edit "x"');
+  expect(loaded.messages[0]).toContain('clash in the global and list layers');
+});
+
+it('keeps a default in a scope that is never active with the remapped scope', () => {
+  const loaded = configOf({ keys: { closeHelp: ['g'] } });
+
+  expect(keysOf(loaded.bindings, 'messages', 'selectFirst')).toEqual(['gg']);
+  expect(keysOf(loaded.bindings, 'list', 'selectFirst')).toEqual(['gg']);
+  expect(loaded.messages.some((message) => message.includes('messages layer'))).toBe(false);
+});

@@ -12,6 +12,7 @@ import {
   emptyBindingTable,
   expandBindings,
   readableKeyOf,
+  scopesActiveWith,
 } from './tui/tui.tsx';
 
 type ConfigKeys = Record<string, string[]>;
@@ -22,8 +23,10 @@ type StrokesOf = (key: string) => readonly string[];
 
 type Remapped = Result<{ bindings: BindingTable; notices: string[] }, string>;
 
-interface ScopeResolution {
-  surviving: Binding[];
+type Pair = [Binding, Binding];
+
+interface Resolution {
+  surviving: BindingTable;
   notices: string[];
 }
 
@@ -134,53 +137,78 @@ const choicesOf = (keys: ConfigKeys, command: Command, strokesOf: StrokesOf): Ke
   return choices;
 };
 
-const clashMessage = (
-  first: Binding,
-  second: Binding,
-  scope: CommandScope,
-  path: string,
-): string => {
+const layersOf = (first: Binding, second: Binding): string =>
+  first.scope === second.scope
+    ? `the ${first.scope} layer`
+    : `the ${first.scope} and ${second.scope} layers`;
+
+const clashMessage = (first: Binding, second: Binding, path: string): string => {
   const shownFirst = `keys.${first.command.id} "${first.key}"`;
   const shownSecond = `keys.${second.command.id} "${second.key}"`;
 
-  return `${path}: ${shownFirst} and ${shownSecond} clash in the ${scope} layer. Give one of them another key.`;
+  return `${path}: ${shownFirst} and ${shownSecond} clash in ${layersOf(first, second)}. Give one of them another key.`;
 };
 
-const noticeOf = (winner: Binding, loser: Binding, scope: CommandScope): string =>
-  `Key "${winner.key}" of ${winner.command.id} replaces the default "${readableKeyOf(loser.key)}" of ${loser.command.id} in the ${scope} layer.`;
+// The loser is the default that a user key displaces in the scope where the two meet.
+const noticeOf = (winner: Binding, loser: Binding): string =>
+  `Key "${winner.key}" of ${winner.command.id} replaces the default "${readableKeyOf(loser.key)}" of ${loser.command.id} in the ${loser.scope} layer.`;
 
-const resolveScope = (
-  scope: CommandScope,
-  bindings: readonly Binding[],
+const withinScopePairs = (bindings: readonly Binding[]): Pair[] =>
+  bindings.flatMap((first, index) =>
+    bindings.slice(index + 1).map((second): Pair => [first, second]),
+  );
+
+const pairsBetween = (table: BindingTable, first: CommandScope, second: CommandScope): Pair[] => {
+  if (first === second) {
+    return withinScopePairs(table[first]);
+  }
+
+  if (!scopesActiveWith(first).includes(second)) {
+    return [];
+  }
+
+  return table[first].flatMap((a) => table[second].map((b): Pair => [a, b]));
+};
+
+// Every pair of bindings that can be active in the same state, so a user key is checked against
+// the defaults of each scope that is active with its own scope.
+const activePairsOf = (table: BindingTable): Pair[] =>
+  commandScopes.flatMap((first, index) =>
+    commandScopes.slice(index).flatMap((second) => pairsBetween(table, first, second)),
+  );
+
+const resolveBindings = (
+  table: BindingTable,
   strokesOf: StrokesOf,
   path: string,
-): Result<ScopeResolution, string> => {
+): Result<Resolution, string> => {
   const displaced = new Set<Binding>();
   const notices: string[] = [];
 
-  for (const [index, first] of bindings.entries()) {
-    for (const second of bindings.slice(index + 1)) {
-      if (!relatedStrokes(strokesOf(first.key), strokesOf(second.key))) {
-        continue;
-      }
+  for (const [first, second] of activePairsOf(table)) {
+    if (!relatedStrokes(strokesOf(first.key), strokesOf(second.key))) {
+      continue;
+    }
 
-      if (first.user && second.user) {
-        return { ok: false, reason: clashMessage(first, second, scope, path) };
-      }
+    if (first.user && second.user) {
+      return { ok: false, reason: clashMessage(first, second, path) };
+    }
 
-      const [winner, loser] = first.user ? [first, second] : [second, first];
+    const [winner, loser] = first.user ? [first, second] : [second, first];
 
-      if (winner.user) {
-        displaced.add(loser);
-        notices.push(noticeOf(winner, loser, scope));
-      }
+    if (winner.user) {
+      displaced.add(loser);
+      notices.push(noticeOf(winner, loser));
     }
   }
 
-  return {
-    ok: true,
-    value: { surviving: bindings.filter((binding) => !displaced.has(binding)), notices },
-  };
+  const surviving = emptyBindingTable();
+
+  for (const scope of commandScopes) {
+    surviving[scope] = table[scope].filter((binding) => !displaced.has(binding));
+  }
+
+  return { ok: true, value: { surviving, notices } };
 };
 
 const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeymap): Remapped => {
@@ -192,24 +220,16 @@ const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeymap): Re
   }
 
   const expanded = expandBindings((command) => choicesOf(keys, command, strokesOf));
-  const surviving = emptyBindingTable();
-  const notices = new Set<string>();
+  const resolved = resolveBindings(expanded, strokesOf, path);
 
-  for (const scope of commandScopes) {
-    const resolved = resolveScope(scope, expanded[scope], strokesOf, path);
-
-    if (!resolved.ok) {
-      return { ok: false, reason: resolved.reason };
-    }
-
-    surviving[scope] = resolved.value.surviving;
-
-    for (const notice of resolved.value.notices) {
-      notices.add(notice);
-    }
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason };
   }
 
-  return { ok: true, value: { bindings: surviving, notices: [...notices] } };
+  return {
+    ok: true,
+    value: { bindings: resolved.value.surviving, notices: [...new Set(resolved.value.notices)] },
+  };
 };
 
 const defaultsWith = (message: string): ConfigLoad => ({

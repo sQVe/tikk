@@ -184,3 +184,33 @@ it('leaves g then m to the message history when a list key is remapped to m', as
 
   expect(selectedLine()).toContain('First');
 });
+
+it('opens help on e and runs no edit when help is remapped to e, with a notice', async () => {
+  const { setup, press, edited } = await mountWithConfig(
+    { keys: { help: ['e'] } },
+    { width: 120, height: 40 },
+  );
+
+  await press('e');
+
+  expect(setup.captureCharFrame()).toContain('Close help');
+  expect(edited).toEqual([]);
+
+  await press('ESCAPE');
+  await press('g');
+  await press('m');
+
+  expect(setup.captureCharFrame()).toContain(
+    'Key "e" of help replaces the default "e" of edit in the list layer.',
+  );
+});
+
+it('runs selectNext on g when a list remap takes g', async () => {
+  const { press, selectedLine } = await mountWithConfig({ keys: { selectNext: ['g'] } });
+
+  expect(selectedLine()).toContain('First');
+
+  await press('g');
+
+  expect(selectedLine()).toContain('Second');
+});
