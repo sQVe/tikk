@@ -1,4 +1,4 @@
-import type { ConfigSettings } from './config/config.ts';
+import type { ConfigSettings } from './config.ts';
 import type { Result } from './result.ts';
 import { parseProjectName } from './ticket/ticket.ts';
 import type { ProjectName } from './ticket/ticket.ts';

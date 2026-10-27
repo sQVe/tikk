@@ -210,3 +210,34 @@ for (const overlay of ['help', 'messages'] as const) {
     });
   }
 }
+
+it('clips a help label that does not fit the box with an ellipsis', async () => {
+  const { setup, press } = await mount([], { width: 30, height: 40 });
+
+  await press('?');
+
+  const frame = setup.captureCharFrame();
+
+  expect(frame).toContain('Switch between home…');
+  expect(frame).not.toContain('Switch between home and tree');
+});
+
+it('drops the close hint from the help footer when the box is too narrow for it', async () => {
+  const { setup, press } = await mount([], { width: 30, height: 12 });
+
+  await press('?');
+
+  const frame = setup.captureCharFrame();
+
+  expect(frame).toMatch(/of \d+\s+j\/k scroll/);
+  expect(frame).not.toContain('q close');
+});
+
+it('shows the close hint in the help footer when the box is wide enough', async () => {
+  const { setup, press } = await mount([], { width: 80, height: 12 });
+
+  await press('?');
+
+  expect(setup.captureCharFrame()).toContain('j/k scroll');
+  expect(setup.captureCharFrame()).toContain('q close');
+});

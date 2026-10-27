@@ -1,27 +1,35 @@
 import { stringifyKeySequence } from '@opentui/keymap';
-import type { createTestKeymap } from '@opentui/keymap/testing';
+import { createTestKeymap } from '@opentui/keymap/testing';
 
-import type { Result } from '../result.ts';
-import type { Binding, BindingTable, Command, CommandScope, KeyChoice } from '../tui/tui.tsx';
+import type { ConfigSettings } from './config.ts';
+import type { Result } from './result.ts';
+import type { Binding, BindingTable, Command, CommandScope, KeyChoice } from './tui/tui.tsx';
 import {
   catalog,
   commandScopes,
+  defaultBindings,
+  defaultChoiceOf,
   emptyBindingTable,
   expandBindings,
   readableKeyOf,
-} from '../tui/tui.tsx';
+} from './tui/tui.tsx';
 
-export type ConfigKeys = Record<string, string[]>;
+type ConfigKeys = Record<string, string[]>;
 
 type ConfigKeymap = ReturnType<typeof createTestKeymap>['keymap'];
 
 type StrokesOf = (key: string) => readonly string[];
 
-export type Remapped = Result<{ bindings: BindingTable; notices: string[] }, string>;
+type Remapped = Result<{ bindings: BindingTable; notices: string[] }, string>;
 
 interface ScopeResolution {
   surviving: Binding[];
   notices: string[];
+}
+
+export interface ConfigLoad {
+  bindings: BindingTable;
+  messages: string[];
 }
 
 const ctrlC = 'ctrl+c';
@@ -61,8 +69,9 @@ const relatedStrokes = (first: readonly string[], second: readonly string[]): bo
 
 const commandIdsText = (): string => [...new Set(catalog.map((command) => command.id))].join(', ');
 
+// A stroke can hold a sequence, such as "ctrl+c x", so each space-separated token is compared.
 const usesCtrlC = (strokes: readonly string[]): boolean =>
-  strokes.some((stroke) => stroke.includes(ctrlC));
+  strokes.some((stroke) => stroke.split(' ').includes(ctrlC));
 
 const isWholeQuitKey = (id: string, key: string): boolean => id === 'quit' && key === ctrlC;
 
@@ -104,18 +113,26 @@ const checkEntries = (keys: ConfigKeys, strokesOf: StrokesOf, path: string): str
 };
 
 // Quit always keeps Ctrl+C, so a remap of quit can never take it away.
-const choicesOf = (keys: ConfigKeys, command: Command): KeyChoice[] => {
+const choicesOf = (keys: ConfigKeys, command: Command, strokesOf: StrokesOf): KeyChoice[] => {
   const configured = keys[command.id];
 
   if (configured === undefined) {
-    return command.keys.map((key) => ({ key, user: false }));
+    return command.keys.map((key) => defaultChoiceOf(command, key));
   }
 
   const uniqueKeys = [...new Set(configured)];
-  const choices: KeyChoice[] = uniqueKeys.map((key) => ({ key, user: true }));
+
+  // Only a command that exits a pending sequence by default may do so with a remapped key.
+  const exitsSequence = command.keysDuringSequence !== undefined;
+
+  const choices: KeyChoice[] = uniqueKeys.map((key) => ({
+    key,
+    user: true,
+    sequenceExit: exitsSequence && strokesOf(key).length === 1,
+  }));
 
   if (command.id === 'quit' && !uniqueKeys.includes(ctrlC)) {
-    choices.push({ key: ctrlC, user: false });
+    choices.push(defaultChoiceOf(command, ctrlC));
   }
 
   return choices;
@@ -171,7 +188,7 @@ const resolveScope = (
   };
 };
 
-export const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeymap): Remapped => {
+const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeymap): Remapped => {
   const strokesOf = parsedStrokesOf(keymap);
   const problem = checkEntries(keys, strokesOf, path);
 
@@ -179,7 +196,7 @@ export const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeym
     return { ok: false, reason: problem };
   }
 
-  const expanded = expandBindings((command) => choicesOf(keys, command));
+  const expanded = expandBindings((command) => choicesOf(keys, command, strokesOf));
   const surviving = emptyBindingTable();
   const notices = new Set<string>();
 
@@ -198,4 +215,30 @@ export const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeym
   }
 
   return { ok: true, value: { bindings: surviving, notices: [...notices] } };
+};
+
+const defaultsWith = (message: string): ConfigLoad => ({
+  bindings: defaultBindings,
+  messages: [message],
+});
+
+// Only the terminal path calls this, so the catalog and the keymap load there and nowhere else.
+export const loadBindings = (
+  settings: Result<ConfigSettings, string>,
+  path: string,
+): ConfigLoad => {
+  if (!settings.ok) {
+    return defaultsWith(settings.reason);
+  }
+
+  const harness = createTestKeymap({ defaultKeys: true });
+  const remapped = remapBindings(settings.value.keys, path, harness.keymap);
+
+  harness.cleanup();
+
+  if (!remapped.ok) {
+    return defaultsWith(remapped.reason);
+  }
+
+  return { bindings: remapped.value.bindings, messages: remapped.value.notices };
 };

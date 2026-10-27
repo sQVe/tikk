@@ -1,9 +1,10 @@
 import { expect, it } from 'bun:test';
 
-import type { BindingTable, CommandScope } from '../tui/tui.tsx';
-import { defaultBindings, keysOfAction } from '../tui/tui.tsx';
-import { loadConfig } from './config.ts';
+import { readSettings } from './config.ts';
 import type { ConfigEffects } from './config.ts';
+import { loadBindings } from './remap.ts';
+import type { BindingTable, CommandScope } from './tui/tui.tsx';
+import { defaultBindings, keysOfAction } from './tui/tui.tsx';
 
 const home = '/home/demo';
 const configPath = '/home/demo/.config/tikk/config.json';
@@ -12,7 +13,9 @@ const effectsWithText = (text: string): ConfigEffects => ({
   readFile: () => ({ kind: 'text', text }),
 });
 
-const configOf = (value: unknown) => loadConfig(home, effectsWithText(JSON.stringify(value)));
+const loadWith = (effects: ConfigEffects) => loadBindings(readSettings(home, effects), configPath);
+
+const configOf = (value: unknown) => loadWith(effectsWithText(JSON.stringify(value)));
 
 const keysOf = (bindings: BindingTable, scope: CommandScope, id: string): string[] =>
   bindings[scope].filter((binding) => binding.command.id === id).map((binding) => binding.key);
@@ -26,7 +29,7 @@ it('moves a command to the key the config names and lists that key in help', () 
 });
 
 it('uses the default keys when the config file is missing', () => {
-  const loaded = loadConfig(home, { readFile: () => ({ kind: 'missing' }) });
+  const loaded = loadWith({ readFile: () => ({ kind: 'missing' }) });
 
   expect(loaded.bindings).toEqual(defaultBindings);
   expect(loaded.messages).toEqual([]);
@@ -43,7 +46,7 @@ it('reads the config from the home directory', () => {
     },
   };
 
-  loadConfig(home, effects);
+  loadWith(effects);
 
   expect(reads).toEqual(['/home/demo/.config/tikk/config.json']);
 });
@@ -74,7 +77,7 @@ it('ignores top-level fields it does not use, such as aliases', () => {
 });
 
 it('names the config path and keeps the defaults when the file is not JSON', () => {
-  const loaded = loadConfig(home, effectsWithText('{ "keys": '));
+  const loaded = loadWith(effectsWithText('{ "keys": '));
 
   expect(loaded.bindings).toEqual(defaultBindings);
   expect(loaded.messages[0]).toContain(configPath);
@@ -163,4 +166,18 @@ it('accepts a key listed twice for a command that is not quit', () => {
 
   expect(loaded.messages).toEqual([]);
   expect(keysOf(loaded.bindings, 'global', 'help')).toEqual(['h']);
+});
+
+it('accepts a named control key that is not Ctrl+C', () => {
+  const loaded = configOf({ keys: { help: ['ctrl+comma'] } });
+
+  expect(loaded.messages).toEqual([]);
+  expect(keysOf(loaded.bindings, 'global', 'help')).toEqual(['ctrl+comma']);
+});
+
+it('refuses a sequence that starts with Ctrl+C for a command that is not quit', () => {
+  const loaded = configOf({ keys: { help: ['ctrl+c x'] } });
+
+  expect(loaded.bindings).toEqual(defaultBindings);
+  expect(loaded.messages[0]).toContain('Ctrl+C');
 });

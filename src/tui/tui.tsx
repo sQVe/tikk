@@ -22,6 +22,7 @@ export {
   catalog,
   commandScopes,
   defaultBindings,
+  defaultChoiceOf,
   emptyBindingTable,
   expandBindings,
   keysOfAction,

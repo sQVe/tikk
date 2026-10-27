@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { loadConfig, readSettings } from '../src/config/config.ts';
+import { configPathOf, readSettings } from '../src/config.ts';
 import { resolveMachine, resolveProject } from '../src/project.ts';
+import { loadBindings } from '../src/remap.ts';
 import { createTuiFixture, needView } from '../src/tui/tuiHarness.tsx';
 import type { TuiFixture } from '../src/tui/tuiHarness.tsx';
 
@@ -32,7 +33,7 @@ const sharedConfig = { machine: 'laptop', projects: { 'sqve/tikk': 'tk' }, keys:
 
 it('applies the key remap in the TUI and resolves the machine and project from the same file', async () => {
   const home = await homeWithConfig(sharedConfig);
-  const loaded = loadConfig(home);
+  const loaded = loadBindings(readSettings(home), configPathOf(home));
 
   expect(loaded.messages).toEqual([]);
 

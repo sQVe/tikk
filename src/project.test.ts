@@ -1,7 +1,7 @@
 import { expect, it } from 'bun:test';
 
-import { readSettings } from './config/config.ts';
-import type { ConfigFileRead } from './config/config.ts';
+import { readSettings } from './config.ts';
+import type { ConfigFileRead } from './config.ts';
 import { resolveMachine, resolveProject } from './project.ts';
 import type { GitOutcome } from './project.ts';
 

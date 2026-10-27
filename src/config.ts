@@ -1,14 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { createTestKeymap } from '@opentui/keymap/testing';
 import { z } from 'zod';
 
-import type { Result } from '../result.ts';
-import type { BindingTable } from '../tui/tui.tsx';
-import { defaultBindings } from '../tui/tui.tsx';
-import { remapBindings } from './remap.ts';
-import type { ConfigKeys } from './remap.ts';
+import type { Result } from './result.ts';
 
 export type ConfigFileRead =
   | { kind: 'missing' }
@@ -22,12 +17,7 @@ export interface ConfigEffects {
 export interface ConfigSettings {
   projects: Record<string, string>;
   machine: string | undefined;
-  keys: ConfigKeys;
-}
-
-export interface ConfigLoad {
-  bindings: BindingTable;
-  messages: string[];
+  keys: Record<string, string[]>;
 }
 
 // Other top-level fields are ignored, so a file can hold settings this module does not read.
@@ -56,7 +46,7 @@ const defaultEffects: ConfigEffects = {
   },
 };
 
-const configPathOf = (homeDirectory: string): string =>
+export const configPathOf = (homeDirectory: string): string =>
   join(homeDirectory, '.config', 'tikk', 'config.json');
 
 const shapeMessageOf = (path: string): string =>
@@ -104,35 +94,4 @@ export const readSettings = (
   }
 
   return parseSettings(read.text, path);
-};
-
-const defaultsWith = (message: string): ConfigLoad => ({
-  bindings: defaultBindings,
-  messages: [message],
-});
-
-const loadKeys = (keys: ConfigKeys, path: string): ConfigLoad => {
-  const harness = createTestKeymap({ defaultKeys: true });
-  const remapped = remapBindings(keys, path, harness.keymap);
-
-  harness.cleanup();
-
-  if (!remapped.ok) {
-    return defaultsWith(remapped.reason);
-  }
-
-  return { bindings: remapped.value.bindings, messages: remapped.value.notices };
-};
-
-export const loadConfig = (
-  homeDirectory: string,
-  effects: ConfigEffects = defaultEffects,
-): ConfigLoad => {
-  const settings = readSettings(homeDirectory, effects);
-
-  if (!settings.ok) {
-    return defaultsWith(settings.reason);
-  }
-
-  return loadKeys(settings.value.keys, configPathOf(homeDirectory));
 };

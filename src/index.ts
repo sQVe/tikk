@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 import { openNeedsSession, runCli } from './cli/cli.ts';
 import type { CliEffects } from './cli/cli.ts';
-import { loadConfig, readSettings } from './config/config.ts';
+import { configPathOf, readSettings } from './config.ts';
 import { resolveMachine, resolveProject } from './project.ts';
 import type { GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
@@ -328,7 +328,8 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
   }
 
   const { startTerminal } = await import('./terminal.tsx');
-  const config = loadConfig(homeDirectory);
+  const { loadBindings } = await import('./remap.ts');
+  const config = loadBindings(readSettings(homeDirectory), configPathOf(homeDirectory));
 
   await startTerminal({
     needs: opened.value,

@@ -50,6 +50,9 @@ export interface Binding {
 export interface KeyChoice {
   key: string;
   user: boolean;
+  // Whether a pending sequence hands this key to the command. A user key is one only when it is a
+  // single stroke, since the matcher takes one stroke.
+  sequenceExit: boolean;
 }
 
 type KeyChoices = (command: Command) => readonly KeyChoice[];
@@ -239,14 +242,6 @@ export const emptyBindingTable = (): Record<CommandScope, Binding[]> => ({
   messages: [],
 });
 
-const isSequenceExit = (command: Command, choice: KeyChoice): boolean => {
-  if (command.keysDuringSequence === undefined) {
-    return false;
-  }
-
-  return choice.user || command.keysDuringSequence.includes(choice.key);
-};
-
 const bindingOf = (
   command: Command,
   scope: CommandScope,
@@ -257,11 +252,18 @@ const bindingOf = (
   scope,
   key: choice.key,
   user: choice.user,
-  duringSequence: isSequenceExit(command, choice),
+  duringSequence: choice.sequenceExit,
   ...(overlayMove === undefined ? {} : { overlayMove }),
 });
 
-const defaultChoicesOf: KeyChoices = (command) => command.keys.map((key) => ({ key, user: false }));
+export const defaultChoiceOf = (command: Command, key: string): KeyChoice => ({
+  key,
+  user: false,
+  sequenceExit: command.keysDuringSequence?.includes(key) === true,
+});
+
+const defaultChoicesOf: KeyChoices = (command) =>
+  command.keys.map((key) => defaultChoiceOf(command, key));
 
 // Own bindings come before the overlay copies of a scope, so the first match is the own action.
 export const expandBindings = (choicesOf: KeyChoices): BindingTable => {
