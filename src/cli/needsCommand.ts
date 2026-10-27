@@ -1,5 +1,5 @@
 import { selectNeeds } from '../fact/fact.ts';
-import type { NeedItem } from '../fact/fact.ts';
+import type { NeedDetail, NeedItem } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
@@ -15,16 +15,7 @@ interface NeedViewBase {
   parseError?: string;
 }
 
-export type NeedView = NeedViewBase &
-  (
-    | { reason: 'question' | 'submitted'; item: string; passedUp: boolean }
-    | { reason: 'mergedUnverified' | 'newTask' }
-    | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
-    | { reason: 'staleClaim'; holder: string }
-    | { reason: 'blockedFinding'; fingerprint: string; claim: string }
-    | { reason: 'blockingTask'; blocks: TicketId[] }
-    | { reason: 'draftPlan'; text?: string }
-  );
+export type NeedView = NeedViewBase & NeedDetail;
 
 export interface NeedsReading {
   items: NeedView[];
@@ -55,71 +46,12 @@ const shortAge = (ageSeconds: number | null): string => {
   return `${Math.floor(ageSeconds / secondsPerDay)}d`;
 };
 
+// The JSON key order follows the order of the fields in each item from the fact module.
 const itemView = (item: NeedItem<CliTicket>): NeedView => {
-  const { id, frontMatter } = item.ticket;
-  const { title } = frontMatter;
-  const { since, ageSeconds } = item;
-  const parseError = item.ticket.error === null ? {} : { parseError: item.ticket.path };
+  const { ticket, ...detail } = item;
+  const parseError = ticket.error === null ? {} : { parseError: ticket.path };
 
-  if (item.reason === 'staleClaim') {
-    return {
-      id,
-      title,
-      reason: item.reason,
-      since,
-      ageSeconds,
-      holder: item.holder,
-      ...parseError,
-    };
-  }
-
-  if (item.reason === 'flagged') {
-    const { openInstructions, openTasks } = item;
-
-    return {
-      id,
-      title,
-      reason: item.reason,
-      since,
-      ageSeconds,
-      openInstructions,
-      openTasks,
-      ...parseError,
-    };
-  }
-
-  if (item.reason === 'blockedFinding') {
-    const { fingerprint, claim } = item;
-
-    return { id, title, reason: item.reason, since, ageSeconds, fingerprint, claim, ...parseError };
-  }
-
-  if (item.reason === 'blockingTask') {
-    const { blocks } = item;
-
-    return { id, title, reason: item.reason, since, ageSeconds, blocks, ...parseError };
-  }
-
-  if (item.reason === 'draftPlan') {
-    const text = item.text === undefined ? {} : { text: item.text };
-
-    return { id, title, reason: item.reason, since, ageSeconds, ...text, ...parseError };
-  }
-
-  if (item.reason === 'mergedUnverified' || item.reason === 'newTask') {
-    return { id, title, reason: item.reason, since, ageSeconds, ...parseError };
-  }
-
-  return {
-    id,
-    title,
-    reason: item.reason,
-    since,
-    ageSeconds,
-    item: item.item,
-    passedUp: item.passedUp,
-    ...parseError,
-  };
+  return { id: ticket.id, title: ticket.frontMatter.title, ...detail, ...parseError };
 };
 
 export const itemSubject = (view: NeedView): string =>

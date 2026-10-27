@@ -1,10 +1,13 @@
 import { invariant } from '../invariant.ts';
 import { parseProjectName, parseTicketId } from '../ticket/ticket.ts';
 import type { TicketFrontMatter } from '../ticket/ticket.ts';
-import type { Fact, InstructionTicket } from './fact.ts';
+import type { Fact, InstructionTicket, NeedItem } from './fact.ts';
 import { parseFactLine } from './fact.ts';
 
 export const now = new Date('2026-10-20T12:00:00.000Z');
+
+export const reasonsOf = (items: NeedItem<InstructionTicket>[]): string[][] =>
+  items.map((item) => [item.ticket.id, item.reason]);
 
 export const instructionId = (suffix: string): InstructionTicket['id'] => {
   const parsed = parseTicketId(`me-${suffix}`);

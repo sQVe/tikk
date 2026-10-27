@@ -331,6 +331,35 @@ it('keeps the key order of each reason in the JSON', async () => {
   ]);
 });
 
+it('keeps the key order of the blocking task and draft plan reasons in the JSON', async () => {
+  const task = makeKindTicket('demo-3467', 'task');
+  const frontMatter = { ...makeTicket('demo-3468').frontMatter, blockedBy: [task.id] };
+
+  const blockedOutput = successOf(
+    await needs([], [task, makeTicket('demo-3468', { frontMatter })]),
+  );
+
+  expect(itemsJson(blockedOutput)).toBe(
+    '[{"id":"demo-3467","title":"A title","reason":"blockingTask","since":null,"ageSeconds":null,"blocks":["demo-3468"]}]',
+  );
+
+  const plan = makeKindTicket('demo-3476', 'plan', 'draft');
+
+  const waiting = makeFact({
+    ticket: 'demo-3476',
+    kind: 'waiting',
+    waiting: true,
+    text: 'Pick a name',
+    at: '2026-10-20T11:00:00.000Z',
+  });
+
+  const planOutput = successOf(await needs([], [plan], [waiting]));
+
+  expect(itemsJson(planOutput)).toBe(
+    '[{"id":"demo-3476","title":"A title","reason":"draftPlan","since":"2026-10-20T11:00:00.000Z","ageSeconds":3600,"text":"Pick a name"}]',
+  );
+});
+
 const neededItems = async (flow: Flow): Promise<unknown[]> => {
   const { json } = successOf(await flow.step(needsCommand, []));
 

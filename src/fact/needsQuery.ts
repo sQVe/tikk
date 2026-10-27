@@ -1,12 +1,14 @@
 import type { TicketId } from '../ticket/ticket.ts';
+import { ageSecondsOf } from './ageSeconds.ts';
 import type { Fact } from './factLine.ts';
 import { selectFindings } from './findingStatus.ts';
 import { latestSubmission, selectOpenQuestions, selectPassedUp } from './instructionItems.ts';
 import { deriveInstructionStateFromOwnFacts, selectLastClaim } from './instructionState.ts';
 import type { InstructionTicket } from './instructionState.ts';
+import { selectDraftPlanNeeds, selectTaskNeeds } from './needTaskPlan.ts';
 import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
-import { blockerState, clearingStates, deriveStates } from './ticketStates.ts';
+import { deriveStates } from './ticketStates.ts';
 
 // A task has no create time, so its since and age are null until it has a status fact.
 interface NeedBase<Ticket extends InstructionTicket> {
@@ -15,7 +17,7 @@ interface NeedBase<Ticket extends InstructionTicket> {
   ageSeconds: number | null;
 }
 
-type NeedDetail =
+export type NeedDetail =
   | { reason: 'question' | 'submitted'; item: string; passedUp: boolean }
   | { reason: 'mergedUnverified' }
   | { reason: 'flagged'; openInstructions: TicketId[]; openTasks: TicketId[] }
@@ -28,11 +30,6 @@ type NeedDetail =
 export type NeedItem<Ticket extends InstructionTicket> = NeedBase<Ticket> & NeedDetail;
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
-
-const millisecondsPerSecond = 1000;
-
-const ageSecondsOf = (since: string, now: Date): number =>
-  Math.max(0, Math.floor((now.getTime() - new Date(since).getTime()) / millisecondsPerSecond));
 
 // A question that nobody passed up still reaches the user after 30 minutes.
 const questionTimeoutSeconds = 1800;
@@ -132,74 +129,6 @@ const needsOf = <Ticket extends InstructionTicket>(
   return items;
 };
 
-// A ticket's finished state comes from its facts, so an accepted instruction is finished.
-const isUnfinished = (
-  ticket: InstructionTicket,
-  states: ReturnType<typeof deriveStates>,
-): boolean =>
-  ticket.frontMatter.archived === undefined && !clearingStates.has(blockerState(ticket, states));
-
-const blocksOf = <Ticket extends InstructionTicket>(
-  task: Ticket,
-  tickets: Ticket[],
-  states: ReturnType<typeof deriveStates>,
-): TicketId[] =>
-  tickets
-    .filter(
-      (ticket) => isUnfinished(ticket, states) && ticket.frontMatter.blockedBy.includes(task.id),
-    )
-    .map((ticket) => ticket.id)
-    .toSorted((a, b) => a.localeCompare(b));
-
-const datedBy = (
-  at: string | undefined,
-  now: Date,
-): { since: string | null; ageSeconds: number | null } =>
-  at === undefined
-    ? { since: null, ageSeconds: null }
-    : { since: at, ageSeconds: ageSecondsOf(at, now) };
-
-const taskNeedsOf = <Ticket extends InstructionTicket>(
-  task: Ticket,
-  blocks: TicketId[],
-  own: Fact[],
-  now: Date,
-): NeedItem<Ticket>[] => {
-  const dated = datedBy(own.findLast((fact) => fact.kind === 'status')?.at, now);
-
-  if (blocks.length > 0) {
-    return [{ ticket: task, reason: 'blockingTask', blocks, ...dated }];
-  }
-
-  if (task.frontMatter.new === true) {
-    return [{ ticket: task, reason: 'newTask', ...dated }];
-  }
-
-  return [];
-};
-
-const draftPlanNeedsOf = <Ticket extends InstructionTicket>(
-  plan: Ticket,
-  own: Fact[],
-  now: Date,
-): NeedItem<Ticket>[] => {
-  const waiting = own.findLast((fact) => fact.kind === 'waiting');
-
-  if (waiting?.kind !== 'waiting' || !waiting.waiting) {
-    return [];
-  }
-
-  return [
-    {
-      ticket: plan,
-      reason: 'draftPlan',
-      ...(waiting.text === undefined ? {} : { text: waiting.text }),
-      since: waiting.at,
-      ageSeconds: ageSecondsOf(waiting.at, now),
-    },
-  ];
-};
-
 const blockedFindingsOf = <Ticket extends InstructionTicket>(
   ticket: Ticket,
   own: Fact[],
@@ -240,26 +169,6 @@ const isOpenSlice = (ticket: InstructionTicket): boolean => {
   return (
     frontMatter.kind === 'slice' &&
     frontMatter.status === 'open' &&
-    frontMatter.archived === undefined
-  );
-};
-
-const isOpenTask = (ticket: InstructionTicket): boolean => {
-  const { frontMatter } = ticket;
-
-  return (
-    frontMatter.kind === 'task' &&
-    frontMatter.status === 'open' &&
-    frontMatter.archived === undefined
-  );
-};
-
-const isDraftPlan = (ticket: InstructionTicket): boolean => {
-  const { frontMatter } = ticket;
-
-  return (
-    frontMatter.kind === 'plan' &&
-    frontMatter.status === 'draft' &&
     frontMatter.archived === undefined
   );
 };
@@ -349,15 +258,9 @@ export const selectNeeds = <Ticket extends InstructionTicket>(
 
   const states = deriveStates(tickets, index, now);
 
-  const taskItems = tickets
-    .filter(isOpenTask)
-    .flatMap((task) =>
-      taskNeedsOf(task, blocksOf(task, tickets, states), factsByTicket.get(task.id) ?? [], now),
-    );
+  const taskItems = selectTaskNeeds(tickets, factsByTicket, states, now);
 
-  const planItems = tickets
-    .filter(isDraftPlan)
-    .flatMap((plan) => draftPlanNeedsOf(plan, factsByTicket.get(plan.id) ?? [], now));
+  const planItems = selectDraftPlanNeeds(tickets, factsByTicket, now);
 
   return [...instructionItems, ...sliceItems, ...findingItems, ...taskItems, ...planItems].toSorted(
     byOldest,
