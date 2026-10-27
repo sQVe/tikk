@@ -60,19 +60,14 @@ const stateOnly = (
 const isDecision = (fact: Fact): fact is DecisionFact =>
   fact.kind === 'reject' || fact.kind === 'accept';
 
-// A reject or an accept counts only when it names the latest submission of the whole history.
-// Merged facts from another machine can decide an earlier submission after a newer one, and clock
-// skew can sort a decision before the submission it names.
 export const dropStaleDecisions = (own: Fact[]): Fact[] => {
   const latestItem = own.findLast(isSubmittedLog)?.item;
 
   return own.filter((fact) => !isDecision(fact) || fact.item === latestItem);
 };
 
-// A release or a reject ends the claim before it, so a worker claims again after a reject.
 const endsClaim = (fact: Fact): boolean => fact.kind === 'release' || fact.kind === 'reject';
 
-// The last claim, unless a later fact ended it. Its lease may have run out.
 export const selectLastClaim = (own: Fact[]): ClaimFact | undefined => {
   const holderFact = dropStaleDecisions(own).findLast(
     (fact) => fact.kind === 'claim' || endsClaim(fact),
@@ -81,7 +76,6 @@ export const selectLastClaim = (own: Fact[]): ClaimFact | undefined => {
   return holderFact?.kind === 'claim' ? holderFact : undefined;
 };
 
-// Only a rejection of the latest submission is left, so a new submission replaces it.
 const rejectionOf = (own: Fact[]): InstructionRejection | null => {
   const reject = own.findLast((fact) => fact.kind === 'reject');
 

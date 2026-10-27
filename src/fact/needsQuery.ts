@@ -10,7 +10,6 @@ import { buildSliceIndex, deriveSliceState } from './sliceState.ts';
 import type { SliceIndex } from './sliceState.ts';
 import { deriveStates } from './ticketStates.ts';
 
-// A task has no create time, so its since and age are null until it has a status fact.
 interface NeedBase<Ticket extends InstructionTicket> {
   ticket: Ticket;
   since: string | null;
@@ -32,7 +31,6 @@ export type NeedItem<Ticket extends InstructionTicket> = NeedBase<Ticket> & Need
 
 const notWaiting = new Set<string>(['draft', 'done', 'canceled']);
 
-// A question that nobody passed up still reaches the user after 30 minutes.
 const questionTimeoutSeconds = 1800;
 
 const questionNeedsOf = <Ticket extends InstructionTicket>(
@@ -216,7 +214,6 @@ const sliceNeedsOf = <Ticket extends InstructionTicket>(
   return items;
 };
 
-// Items with no date sort after the dated items.
 const compareSince = (a: string | null, b: string | null): number => {
   if (a === null || b === null) {
     return Number(a === null) - Number(b === null);

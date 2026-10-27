@@ -259,7 +259,6 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
   }
 };
 
-// Six random bytes print as the 12 hex characters of an item ID.
 const itemIdBytes = 6;
 
 export const createEffects = (storeRoot: string, cachePath: string): CliEffects => {

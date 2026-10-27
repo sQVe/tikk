@@ -44,7 +44,6 @@ const logShape = {
   forced: z.string().min(1).optional(),
 };
 
-// A question or a submission names its own item. An answer names the question it answers.
 const logSchema = z.discriminatedUnion('type', [
   z.strictObject({ ...logShape, type: z.enum(['progress', 'discovered']) }),
   z.strictObject({
@@ -82,7 +81,6 @@ const statusSchema = z.strictObject({
   forced: z.string().min(1).optional(),
 });
 
-// A waiting fact says whether a draft plan waits for the user, and what the user should do.
 const waitingSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('waiting'),

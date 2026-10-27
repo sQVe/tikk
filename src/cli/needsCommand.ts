@@ -46,7 +46,6 @@ const shortAge = (ageSeconds: number | null): string => {
   return `${Math.floor(ageSeconds / secondsPerDay)}d`;
 };
 
-// The JSON key order follows the order of the fields in each item from the fact module.
 const itemView = (item: NeedItem<CliTicket>): NeedView => {
   const { ticket, ...detail } = item;
   const parseError = ticket.error === null ? {} : { parseError: ticket.path };
@@ -62,7 +61,6 @@ export const itemSubject = (view: NeedView): string => {
   return view.reason === 'question' ? view.text : view.title;
 };
 
-// A question can span lines, and the text output keeps one line per item.
 const lineBreaks = /\s*[\r\n\u2028\u2029]+\s*/g;
 
 const openWorkOf = (view: Extract<NeedView, { reason: 'flagged' }>): TicketId[] => [

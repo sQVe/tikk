@@ -6,7 +6,6 @@ import type { NeedItem } from './needsQuery.ts';
 import type { deriveStates } from './ticketStates.ts';
 import { blockerState, clearingStates } from './ticketStates.ts';
 
-// A ticket's finished state comes from its facts, so an accepted instruction is finished.
 const isUnfinished = (
   ticket: InstructionTicket,
   states: ReturnType<typeof deriveStates>,

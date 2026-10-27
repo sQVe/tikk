@@ -82,7 +82,6 @@ export const appendAndShow = async (
   return instructionOutput(locked.instruction, derived);
 };
 
-// Shows the item that a question or a submission created, so later commands can name it.
 export const appendAndShowItem = async (
   input: CommandInput,
   locked: LockedInstruction,
@@ -130,7 +129,6 @@ export const checkTree = (
   return checkSessionTree(input.session, locked.instruction.frontMatter);
 };
 
-// The locked facts hold only what decides the state, so questions and pass-ups are read here.
 export const listInstructionFacts = async (
   input: CommandInput,
   locked: LockedInstruction,
@@ -144,7 +142,6 @@ export const listInstructionFacts = async (
   return facts;
 };
 
-// The submission that an accept, a reject, or a pass-up decides on.
 export const requireSubmission = (
   locked: LockedInstruction,
 ): Result<InstructionItem, CliFailure> => {

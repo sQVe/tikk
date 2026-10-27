@@ -92,7 +92,6 @@ export const run = async (
   return { fakeSession, result };
 };
 
-// Commands that run one after another on the same store, as separate tikk calls would.
 export const openFlow = (options: RunOptions = {}): Flow => {
   const fakeSession = makeSession({
     tickets: options.tickets ?? [parentSlice, instruction],
@@ -114,7 +113,6 @@ export const openFlow = (options: RunOptions = {}): Flow => {
   return { fakeSession, step };
 };
 
-// The item a question or a submission printed.
 export const itemOf = (result: CommandResult): string => {
   const { json } = successOf(result);
 

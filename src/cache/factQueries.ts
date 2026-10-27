@@ -80,8 +80,6 @@ export const hasValidFactErrorRows = (database: Database): boolean =>
 const stateFactsSql = `(kind IN ('claim', 'release', 'accept', 'reject', 'status', 'unarchive', 'pr',
   'audit') OR (kind = 'log' AND log_type = 'submitted'))`;
 
-// Only these facts date when a ticket finished or was unarchived. An accept counts only after the
-// submission it names, so the submissions come too.
 const archiveFactsSql = `(kind IN ('accept', 'status', 'unarchive') OR (kind = 'log' AND log_type = 'submitted'))`;
 
 const readFacts = (
