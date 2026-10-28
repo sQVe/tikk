@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import { criterionFingerprint } from '../fact/fact.ts';
 import {
   failed,
   makeEffects,
@@ -22,6 +23,18 @@ const openWith = async (...args: Parameters<typeof makeSession>): Promise<NeedsS
   }
 
   return opened.value;
+};
+
+const sliceOf = (id: string, parent: string) => {
+  const base = makeKindTicket(id, 'slice');
+
+  return makeTicket(id, {
+    frontMatter: {
+      ...base.frontMatter,
+      parent: ticketIdOf(parent),
+      criteria: [{ id: 'works', check: 'Run it.', expected: 'It works.' }],
+    },
+  });
 };
 
 const childOf = (id: string, parent: string, archived?: string) => {
@@ -164,4 +177,67 @@ it('returns the same children from show --json and from loadDetail', async () =>
   ]);
 
   expect(shown).toMatchObject({ ok: true, value: { json: { children: loadedChildren } } });
+});
+
+it('loads a plan as done once its only slice is done, and keeps its stored status', async () => {
+  const plan = makeKindTicket('demo-3466', 'plan');
+  const slice = sliceOf('demo-3469', 'demo-3466');
+
+  const merged = makeFact({
+    ticket: 'demo-3469',
+    kind: 'pr',
+    repository: 'sqve/tikk',
+    number: 7,
+    state: 'merged',
+    base: 'main',
+    head: 'aaa',
+    trunk: 'main',
+    inTrunk: true,
+  });
+
+  const audit = makeFact({
+    ticket: 'demo-3469',
+    kind: 'audit',
+    repository: 'sqve/tikk',
+    changeHash: 'hash1',
+    head: 'aaa',
+    base: 'main',
+    verdicts: [
+      {
+        criterion: 'works',
+        verdict: 'met',
+        evidence: 'Ran it.',
+        definition: criterionFingerprint({ check: 'Run it.', expected: 'It works.' }),
+      },
+    ],
+  });
+
+  const instruction = makeTicket('demo-3479', {
+    frontMatter: {
+      ...makeTicket('demo-3479').frontMatter,
+      parent: ticketIdOf('demo-3469'),
+    },
+  });
+
+  const submitted = makeFact({
+    ticket: 'demo-3479',
+    kind: 'log',
+    type: 'submitted',
+    text: '',
+    item: '5ab0000000a1',
+  });
+
+  const accepted = makeFact({ ticket: 'demo-3479', kind: 'accept', item: '5ab0000000a1' });
+
+  const needs = await openWith({
+    tickets: [plan, slice, instruction],
+    facts: [merged, audit, submitted, accepted],
+  });
+
+  expect(await needs.loadDetail('demo-3466')).toMatchObject({
+    ok: true,
+    value: { ticket: { id: 'demo-3466', status: 'open' }, state: 'done' },
+  });
+
+  await needs.close();
 });

@@ -1,5 +1,11 @@
-import { buildSliceIndex, deriveSliceState, deriveInstructionState } from '../fact/fact.ts';
+import {
+  buildSliceIndex,
+  deriveInstructionState,
+  derivePlanState,
+  deriveSliceState,
+} from '../fact/fact.ts';
 import type {
+  PlanStateName,
   SliceState,
   InstructionClaim,
   InstructionRejection,
@@ -43,6 +49,10 @@ export interface InstructionView extends TicketView {
 
 interface SliceView extends TicketView, SliceState {}
 
+interface PlanView extends TicketView {
+  state: PlanStateName;
+}
+
 export interface TicketChild {
   id: TicketId;
   kind: CliTicket['frontMatter']['kind'];
@@ -52,6 +62,7 @@ export interface TicketChild {
 export type ShownState =
   | { kind: 'slice'; derived: SliceState }
   | { kind: 'instruction'; derived: InstructionState }
+  | { kind: 'plan'; state: PlanStateName }
   | { kind: 'status'; state: CliTicket['frontMatter']['status'] };
 
 export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => {
@@ -131,22 +142,33 @@ export const storeFailure = (message: string): CommandResult => ({
 
 const storeError = (message: string): CliFailure => ({ code: 'storeError', message });
 
-const deriveSlice = async (
-  session: CliSession,
-  now: Date,
-  ticket: CliTicket,
-): Promise<Result<ShownState, CliFailure>> => {
-  const listed = session.listTicketOutlines();
+// A file that no longer parses keeps its old front matter in the cache, so it must not count.
+const parsedTickets = (session: CliSession): Result<CliTicket[], CliFailure> => {
+  const listed = session.listTickets({ includeArchived: true });
 
   if (!listed.ok) {
     return { ok: false, reason: storeError(listed.reason.message) };
   }
 
-  const outlines = listed.value;
+  return { ok: true, value: listed.value.filter((other) => other.error === null) };
+};
 
-  const instructionIds = outlines
-    .filter((outline) => outline.frontMatter.parent === ticket.id)
-    .map((outline) => outline.id);
+const deriveSlice = async (
+  session: CliSession,
+  now: Date,
+  ticket: CliTicket,
+): Promise<Result<ShownState, CliFailure>> => {
+  const parsed = parsedTickets(session);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const tickets = parsed.value;
+
+  const instructionIds = tickets
+    .filter((other) => other.frontMatter.parent === ticket.id)
+    .map((other) => other.id);
 
   const facts = await session.listStateFacts([ticket.id, ...instructionIds]);
 
@@ -154,9 +176,42 @@ const deriveSlice = async (
     return { ok: false, reason: storeError(facts.reason.message) };
   }
 
-  const derived = deriveSliceState(ticket, buildSliceIndex(outlines, facts.value), now);
+  const derived = deriveSliceState(ticket, buildSliceIndex(tickets, facts.value), now);
 
   return { ok: true, value: { kind: 'slice', derived } };
+};
+
+const derivePlan = async (
+  session: CliSession,
+  now: Date,
+  ticket: CliTicket,
+): Promise<Result<ShownState, CliFailure>> => {
+  const parsed = parsedTickets(session);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const tickets = parsed.value;
+
+  const sliceIds = tickets
+    .filter((other) => other.frontMatter.parent === ticket.id)
+    .filter((other) => other.frontMatter.kind === 'slice')
+    .map((other) => other.id);
+
+  const childIds = tickets
+    .filter((other) => sliceIds.some((sliceId) => sliceId === other.frontMatter.parent))
+    .map((other) => other.id);
+
+  const facts = await session.listStateFacts([...sliceIds, ...childIds]);
+
+  if (!facts.ok) {
+    return { ok: false, reason: storeError(facts.reason.message) };
+  }
+
+  const state = derivePlanState(ticket, buildSliceIndex(tickets, facts.value), now);
+
+  return { ok: true, value: { kind: 'plan', state } };
 };
 
 export const deriveShownState = async (
@@ -168,6 +223,10 @@ export const deriveShownState = async (
 
   if (kind === 'slice' && status === 'open') {
     return deriveSlice(session, now, ticket);
+  }
+
+  if (kind === 'plan') {
+    return derivePlan(session, now, ticket);
   }
 
   if (kind !== 'instruction') {
@@ -186,8 +245,13 @@ export const deriveShownState = async (
   };
 };
 
-export const shownStateName = (shown: ShownState): TreeStateName =>
-  shown.kind === 'status' ? shown.state : shown.derived.state;
+export const shownStateName = (shown: ShownState): TreeStateName => {
+  if (shown.kind === 'status' || shown.kind === 'plan') {
+    return shown.state;
+  }
+
+  return shown.derived.state;
+};
 
 export const ticketChildrenOf = (
   session: CliSession,
@@ -214,6 +278,12 @@ export const ticketChildrenOf = (
 const shownView = (ticket: CliTicket, shown: ShownState): TicketView => {
   if (shown.kind === 'slice') {
     const view: SliceView = { ...ticketView(ticket, true), ...shown.derived };
+
+    return view;
+  }
+
+  if (shown.kind === 'plan') {
+    const view: PlanView = { ...ticketView(ticket, true), state: shown.state };
 
     return view;
   }

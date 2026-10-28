@@ -232,9 +232,9 @@ it('keeps a PR linked by another process while gh reads the old PR', async () =>
 
   const facts = await fakeSession.session.listStateFacts();
 
-  const outlines = fakeSession.session.listTicketOutlines();
+  const tickets = fakeSession.session.listTickets({ includeArchived: true });
 
-  const index = buildSliceIndex(outlines.ok ? outlines.value : [], facts.ok ? facts.value : []);
+  const index = buildSliceIndex(tickets.ok ? tickets.value : [], facts.ok ? facts.value : []);
 
   expect(outcome.updated).toEqual([]);
   expect(selectSlicePr(ticketIdOf('demo-3467'), index)?.number).toBe(8);

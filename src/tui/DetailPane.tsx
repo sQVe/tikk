@@ -5,41 +5,19 @@ import { AttentionBlock } from './AttentionBlock.tsx';
 import { DetailHeader } from './DetailHeader.tsx';
 import { DetailTabs } from './DetailTabs.tsx';
 import type { DetailWindow } from './detailWindow.ts';
-import { errorsOfTicket } from './fileErrors.ts';
-import type { TicketFileError } from './fileErrors.ts';
 import type { Palette } from './palette.ts';
 import { singleLine } from './rowList.tsx';
 import type { DetailFact, ListRow } from './rowList.tsx';
 
 const labelWidth = 8;
 
-const fileFactsOf = (id: string | null, errors: readonly TicketFileError[]): DetailFact[] => {
-  if (id === null) {
-    return [];
-  }
-
-  return errorsOfTicket(errors, id).flatMap((error) => [
-    { label: 'File', value: error.path },
-    { label: 'Error', value: error.message },
-  ]);
-};
-
-const factsOf = (row: ListRow, errors: readonly TicketFileError[]): DetailFact[] => [
-  ...row.facts,
-  ...fileFactsOf(row.id, errors),
-];
-
 // The columns the pane's left border and padding take from its width.
 export const detailPaneChromeColumns = 2;
 
-const FactRows = (props: {
-  row: ListRow;
-  errors: readonly TicketFileError[];
-  palette: Palette;
-}): ReactNode => {
+const FactRows = (props: { facts: readonly DetailFact[]; palette: Palette }): ReactNode => {
   const { palette } = props;
 
-  return factsOf(props.row, props.errors).map((fact) => (
+  return props.facts.map((fact) => (
     <box flexDirection="row" height={1} flexShrink={0} key={`${fact.label}:${fact.value}`}>
       <text
         fg={palette.text}
@@ -59,7 +37,6 @@ const FactRows = (props: {
 
 const PaneContent = (props: {
   row: ListRow | undefined;
-  errors: readonly TicketFileError[];
   palette: Palette;
   detailWindow: DetailWindow | undefined;
 }): ReactNode => {
@@ -70,7 +47,7 @@ const PaneContent = (props: {
   }
 
   if (detailWindow === undefined) {
-    return <FactRows row={row} errors={props.errors} palette={palette} />;
+    return row.id === null ? <FactRows facts={row.facts} palette={palette} /> : null;
   }
 
   return (
@@ -84,7 +61,6 @@ const PaneContent = (props: {
 
 export const DetailPane = (props: {
   row: ListRow | undefined;
-  errors: readonly TicketFileError[];
   palette: Palette;
   width: number;
   detailWindow: DetailWindow | undefined;
@@ -101,12 +77,7 @@ export const DetailPane = (props: {
       border={['left']}
       borderColor={palette.text}
     >
-      <PaneContent
-        row={props.row}
-        errors={props.errors}
-        palette={palette}
-        detailWindow={props.detailWindow}
-      />
+      <PaneContent row={props.row} palette={palette} detailWindow={props.detailWindow} />
     </box>
   );
 };

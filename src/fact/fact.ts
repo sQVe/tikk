@@ -18,6 +18,7 @@ export { selectTicketHistory } from './ticketHistory.ts';
 export { compareRank } from './rankOrder.ts';
 export { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
 export { derivePlanState } from './planState.ts';
+export type { PlanStateName } from './planState.ts';
 export type { SliceIndex, SliceState } from './sliceState.ts';
 export { deriveInstructionState } from './instructionState.ts';
 

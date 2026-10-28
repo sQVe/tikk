@@ -229,8 +229,8 @@ const treeDetailsOf = (tree: ProjectTree): Map<string, TicketDetail> => {
   };
 
   for (const project of tree.projects) {
-    for (const task of project.inbox) {
-      add('task', null, task);
+    for (const entry of project.inbox) {
+      add(entry.kind, null, entry);
     }
 
     for (const plan of project.plans) {

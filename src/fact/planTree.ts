@@ -1,6 +1,6 @@
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
-import { deriveInstructionState } from './instructionState.ts';
+import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
 import type { InstructionStateName, InstructionTicket } from './instructionState.ts';
 import { derivePlanState } from './planState.ts';
 import type { PlanStateName } from './planState.ts';
@@ -41,9 +41,16 @@ interface TreePlan {
   slices: TreeSlice[];
 }
 
+interface TreeInboxEntry {
+  id: TicketId;
+  title: string;
+  kind: 'task' | 'instruction';
+  state: TaskStateName | InstructionStateName;
+}
+
 export interface TreeProject {
   name: ProjectName;
-  inbox: TreeTask[];
+  inbox: TreeInboxEntry[];
   plans: TreePlan[];
   slices: TreeSlice[];
 }
@@ -55,7 +62,6 @@ export interface ProjectTree {
 
 interface TreeInput {
   shown: InstructionTicket[];
-  facts: Fact[];
   index: SliceIndex;
   now: Date;
 }
@@ -67,6 +73,9 @@ const ofKind = (
   tickets: InstructionTicket[],
   kind: InstructionTicket['frontMatter']['kind'],
 ): InstructionTicket[] => tickets.filter((ticket) => ticket.frontMatter.kind === kind);
+
+const isTaskLike = (ticket: InstructionTicket): boolean =>
+  ticket.frontMatter.kind === 'task' || ticket.frontMatter.kind === 'instruction';
 
 const treeTask = (task: InstructionTicket): TreeTask => ({
   id: task.id,
@@ -85,7 +94,7 @@ const projectOrder =
   };
 
 const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) => {
-  const { shown, facts, index, now } = input;
+  const { shown, index, now } = input;
   const shownById = new Map(shown.map((ticket) => [ticket.id, ticket]));
 
   // A parent in another project counts as not shown, so every ticket stays in its own project.
@@ -104,17 +113,31 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
 
   const tasksOf = (parent: TicketId): TreeTask[] => (tasksByParent.get(parent) ?? []).map(treeTask);
 
+  const treeInstruction = (instruction: InstructionTicket): TreeInstruction => ({
+    id: instruction.id,
+    title: instruction.frontMatter.title,
+    state: deriveInstructionStateFromOwnFacts(
+      instruction,
+      index.factsByTicket.get(instruction.id) ?? [],
+      now,
+    ).state,
+  });
+
+  const inboxEntry = (ticket: InstructionTicket): TreeInboxEntry => {
+    if (ticket.frontMatter.kind === 'instruction') {
+      return { ...treeInstruction(ticket), kind: 'instruction' };
+    }
+
+    return { ...treeTask(ticket), kind: 'task' };
+  };
+
   const treeSlice = (slice: InstructionTicket): TreeSlice => ({
     id: slice.id,
     title: slice.frontMatter.title,
     state: deriveSliceState(slice, index, now).state,
     pr: selectSlicePr(slice.id, index)?.number ?? null,
     tasks: tasksOf(slice.id),
-    instructions: (instructionsByParent.get(slice.id) ?? []).map((instruction) => ({
-      id: instruction.id,
-      title: instruction.frontMatter.title,
-      state: deriveInstructionState(instruction, facts, now).state,
-    })),
+    instructions: (instructionsByParent.get(slice.id) ?? []).map(treeInstruction),
   });
 
   const treePlan = (plan: InstructionTicket): TreePlan => ({
@@ -131,7 +154,7 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
 
     return {
       name,
-      inbox: ofKind(roots, 'task').map(treeTask),
+      inbox: roots.filter(isTaskLike).map(inboxEntry),
       plans: ofKind(roots, 'plan').map(treePlan),
       slices: ofKind(roots, 'slice').map(treeSlice),
     };
@@ -147,7 +170,7 @@ export const buildProjectTree = (
   const shown = tickets.filter(isShown).toSorted(compareRank);
   const index = buildSliceIndex(tickets, facts);
   const names = [...new Set(shown.map((ticket) => ticket.frontMatter.project))];
-  const projectOf = buildProjects({ shown, facts, index, now });
+  const projectOf = buildProjects({ shown, index, now });
 
   return { current, projects: names.toSorted(projectOrder(current)).map(projectOf) };
 };

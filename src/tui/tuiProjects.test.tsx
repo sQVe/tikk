@@ -100,7 +100,7 @@ it('shows a loose task under its project Inbox row', async () => {
   const tree = twoProjects();
   const [beta] = tree.projects;
 
-  beta?.inbox.push({ id: ticketId('demo-3520'), title: 'Loose task', state: 'open' });
+  beta?.inbox.push({ id: ticketId('demo-3520'), title: 'Loose task', kind: 'task', state: 'open' });
 
   const mounted = await mount([], size, [], tree);
 
@@ -112,6 +112,27 @@ it('shows a loose task under its project Inbox row', async () => {
   expect(inbox).toBeGreaterThan(indexOfLine(lines, 'beta'));
   expect(lines[inbox + 1]).toContain('demo-3520  Loose task');
   expect(lines[inbox + 2]).toContain('demo-3500  Plan 3500');
+});
+
+it('shows an Inbox instruction with the instruction icon and its derived state', async () => {
+  const tree = twoProjects();
+  const [beta] = tree.projects;
+
+  beta?.inbox.push({
+    id: ticketId('demo-3530'),
+    title: 'Orphan instruction',
+    kind: 'instruction',
+    state: 'done',
+  });
+
+  const mounted = await mount([], size, [], tree);
+
+  await mounted.press('s');
+
+  const lines = linesOf(mounted);
+  const inbox = indexOfLine(lines, 'Inbox (1)');
+
+  expect(lines[inbox + 1]).toContain('› ● demo-3530  Orphan instruction');
 });
 
 it('unfolds a folded project with za and lists the instructions of a slice under Instructions (n)', async () => {
@@ -178,4 +199,16 @@ it('counts the open needs of a slice instructions on its Instructions row', asyn
   const row = linesOf(mounted).find((line) => line.includes('Instructions (2)'));
 
   expect(row).toMatch(/Instructions \(2\)\s+! 2/);
+});
+
+it('shows a state icon on a ticket row and none on a project row, and never prints undefined', async () => {
+  const mounted = await mount([], size, [], twoProjects());
+
+  await mounted.press('s');
+
+  const lines = linesOf(mounted);
+
+  expect(lines[indexOfLine(lines, 'demo-3500  Plan 3500')]).toContain('◆ ○ demo-3500  Plan 3500');
+  expect(lines[indexOfLine(lines, 'beta')]).toContain('■ beta');
+  expect(lines.join('\n')).not.toContain('undefined');
 });

@@ -1,6 +1,6 @@
 import type { NeedView, ProjectTree, TreeProject, TreeSlice, TreeStateName } from '../cli/cli.ts';
 import { singleLine } from './rowList.tsx';
-import type { DetailFact, ListRow } from './rowList.tsx';
+import type { DetailFact, ListRow, RowMarks } from './rowList.tsx';
 import type { IconKind } from './ticketIcons.ts';
 
 export interface FoldState {
@@ -10,17 +10,27 @@ export interface FoldState {
 
 export type FoldIntent = 'toggle' | 'open' | 'close';
 
-interface TreeNode {
+interface TreeNodeBase {
   key: string;
-  id: string | null;
   kind: IconKind;
-  state: TreeStateName | null;
   text: string;
-  facts: DetailFact[];
   attention: number;
   foldedAtFirst: boolean;
   children: TreeNode[];
 }
+
+interface GroupTreeNode extends TreeNodeBase {
+  id: null;
+  state: null;
+  facts: DetailFact[];
+}
+
+interface TicketTreeNode extends TreeNodeBase {
+  id: string;
+  state: TreeStateName;
+}
+
+type TreeNode = GroupTreeNode | TicketTreeNode;
 
 interface TicketEntry {
   id: string;
@@ -43,27 +53,19 @@ export const kindLabels: Record<IconKind, string> = {
 export const noFolds: FoldState = { folded: new Set(), seen: new Set() };
 
 const groupNode = (
-  fields: Pick<TreeNode, 'key' | 'kind' | 'text' | 'facts' | 'foldedAtFirst' | 'children'>,
-): TreeNode => ({ ...fields, id: null, state: null, attention: 0 });
+  fields: Pick<GroupTreeNode, 'key' | 'kind' | 'text' | 'facts' | 'foldedAtFirst' | 'children'>,
+): GroupTreeNode => ({ ...fields, id: null, state: null, attention: 0 });
 
 const ticketNode = (
   kind: IconKind,
   entry: TicketEntry,
   children: TreeNode[] = [],
-  extraFacts: DetailFact[] = [],
-): TreeNode => ({
+): TicketTreeNode => ({
   key: entry.id,
   id: entry.id,
   kind,
   state: entry.state,
   text: `${entry.id}  ${singleLine(entry.title)}`,
-  facts: [
-    { label: 'ID', value: entry.id },
-    { label: 'Title', value: singleLine(entry.title) },
-    { label: 'Kind', value: kindLabels[kind] },
-    { label: 'State', value: entry.state },
-    ...extraFacts,
-  ],
   attention: 0,
   foldedAtFirst: false,
   children,
@@ -71,6 +73,9 @@ const ticketNode = (
 
 const taskNodes = (tasks: readonly TicketEntry[]): TreeNode[] =>
   tasks.map((task) => ticketNode('task', task));
+
+const inboxNodes = (entries: TreeProject['inbox']): TreeNode[] =>
+  entries.map((entry) => ticketNode(entry.kind, entry));
 
 const instructionsNode = (slice: TreeSlice, needCounts: NeedCounts): TreeNode[] => {
   const { instructions } = slice;
@@ -100,10 +105,9 @@ const instructionsNode = (slice: TreeSlice, needCounts: NeedCounts): TreeNode[] 
   return [{ ...node, attention }];
 };
 
-const sliceNode = (slice: TreeSlice, needCounts: NeedCounts): TreeNode => {
-  const pr = slice.pr === null ? [] : [{ label: 'PR', value: `#${slice.pr}` }];
+const sliceNode = (slice: TreeSlice, needCounts: NeedCounts): TicketTreeNode => {
   const children = [...taskNodes(slice.tasks), ...instructionsNode(slice, needCounts)];
-  const node = ticketNode('slice', slice, children, pr);
+  const node = ticketNode('slice', slice, children);
 
   return slice.pr === null ? node : { ...node, text: `${node.text}  #${slice.pr}` };
 };
@@ -118,7 +122,7 @@ const projectNode = (project: TreeProject, current: boolean, needCounts: NeedCou
       { label: 'Count', value: String(project.inbox.length) },
     ],
     foldedAtFirst: false,
-    children: taskNodes(project.inbox),
+    children: inboxNodes(project.inbox),
   });
 
   const plans = project.plans.map((plan) =>
@@ -177,25 +181,24 @@ export const foldsAfterLoad = (folds: FoldState, tree: ProjectTree): FoldState =
   };
 };
 
+const rowOfNode = (node: TreeNode, marks: RowMarks): ListRow =>
+  node.id === null
+    ? { key: node.key, id: null, text: node.text, facts: node.facts, marks }
+    : { key: node.key, id: node.id, text: node.text, marks };
+
 const rowsOfNodes = (nodes: readonly TreeNode[], folds: FoldState, depth: number): ListRow[] =>
   nodes.flatMap((node) => {
     const folded = folds.folded.has(node.key);
     const hasChildren = node.children.length > 0;
     const unfoldedMark = hasChildren ? 'unfolded' : null;
 
-    const row: ListRow = {
-      key: node.key,
-      id: node.id,
-      text: node.text,
-      facts: node.facts,
-      marks: {
-        depth,
-        kind: node.kind,
-        state: node.state,
-        fold: hasChildren && folded ? 'folded' : unfoldedMark,
-        attention: node.attention,
-      },
-    };
+    const row = rowOfNode(node, {
+      depth,
+      kind: node.kind,
+      state: node.state,
+      fold: hasChildren && folded ? 'folded' : unfoldedMark,
+      attention: node.attention,
+    });
 
     const children = hasChildren && !folded ? rowsOfNodes(node.children, folds, depth + 1) : [];
 

@@ -210,6 +210,48 @@ it('shows a ticket under its own project when its parent is in another project',
   expect(alphaProject?.plans[0]?.slices).toEqual([]);
 });
 
+it('shows an instruction in its own project inbox when its parent slice is in another project', () => {
+  const alpha = projectName('alpha');
+  const beta = projectName('beta');
+  const slice = makeTicket('333a', { kind: 'slice', project: alpha });
+  const instruction = makeTicket('333b', { parent: '333a', project: beta });
+
+  const tree = buildProjectTree([slice, instruction], [], now, beta);
+  const [betaProject, alphaProject] = tree.projects;
+
+  expect(betaProject?.inbox.map((entry) => entry.id)).toEqual([instruction.id]);
+  expect(alphaProject?.slices[0]?.instructions).toEqual([]);
+});
+
+it('shows an instruction in the inbox when its parent slice is missing or canceled', () => {
+  const canceledSlice = makeTicket('333a', { kind: 'slice', status: 'canceled' });
+  const orphan = makeTicket('333b', { parent: '333c' });
+  const ofCanceledSlice = makeTicket('333d', { parent: '333a' });
+
+  const tree = buildProjectTree([canceledSlice, orphan, ofCanceledSlice], [], now, me);
+
+  expect(tree.projects[0]?.inbox.map((entry) => entry.id)).toEqual([orphan.id, ofCanceledSlice.id]);
+});
+
+it('shows an orphan instruction in the inbox with its derived state, not its stored status', () => {
+  const orphan = makeTicket('333a', { parent: '333b' });
+
+  const submission = makeFact('333a', {
+    kind: 'log',
+    type: 'submitted',
+    text: '',
+    item: '5ab0000000a1',
+  });
+
+  const accept = makeFact('333a', { kind: 'accept', item: '5ab0000000a1' });
+
+  const tree = buildProjectTree([orphan], [submission, accept], now, me);
+
+  expect(tree.projects[0]?.inbox).toEqual([
+    { id: orphan.id, title: orphan.frontMatter.title, kind: 'instruction', state: 'done' },
+  ]);
+});
+
 it('shows a plan as done once its slices are done and its direct tasks are done', () => {
   const plan = makeTicket('333a', { kind: 'plan' });
   const slice = makeTicket('333b', { kind: 'slice', parent: '333a' });

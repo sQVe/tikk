@@ -10,7 +10,7 @@ export interface DetailFact {
   value: string;
 }
 
-interface RowMarks {
+export interface RowMarks {
   depth: number;
   kind: IconKind;
   state: TreeStateName | null;
@@ -18,13 +18,23 @@ interface RowMarks {
   attention: number;
 }
 
-export interface ListRow {
+interface ListRowBase {
   key: string;
-  id: string | null;
   text: string;
-  facts: readonly DetailFact[];
   marks?: RowMarks;
 }
+
+// A group row has no ticket, so the detail pane shows its facts instead of a ticket window.
+interface GroupListRow extends ListRowBase {
+  id: null;
+  facts: readonly DetailFact[];
+}
+
+interface TicketListRow extends ListRowBase {
+  id: string;
+}
+
+export type ListRow = GroupListRow | TicketListRow;
 
 export interface RowListProps {
   rows: readonly ListRow[];

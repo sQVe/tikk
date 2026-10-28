@@ -415,7 +415,6 @@ const Screen = ({ session, onQuit, bindings, icons }: Omit<AppProps, 'keymap'>):
             {showsPane ? (
               <DetailPane
                 row={selectedRow}
-                errors={snapshot.fileErrors}
                 palette={palette}
                 width={paneWidth}
                 detailWindow={detailWindow}

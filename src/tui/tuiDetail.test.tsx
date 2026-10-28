@@ -94,7 +94,7 @@ it('leaves the PR row out of the tree detail for a slice without a PR', async ()
   expect(setup.captureCharFrame()).not.toMatch(/\bPR\b/);
 });
 
-it('shows the plan and instruction facts of a tree row in the detail', async () => {
+it('shows the plan and instruction titles and states in the detail header', async () => {
   const { setup, press, selectedLine } = await mount(
     [],
     { width: 120, height: 20 },

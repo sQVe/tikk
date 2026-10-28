@@ -13,7 +13,8 @@ export type SliceStateName =
 
 export interface SliceTicket {
   id: TicketId;
-  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'criteria'>;
+  // The full front matter, so a tree outline without criteria cannot stand in for a slice.
+  frontMatter: TicketFrontMatter;
 }
 
 interface SlicePr {
