@@ -1,8 +1,9 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
-  "testRunner": "bun",
-  "bun": { "timeout": 120000 },
-  "coverageAnalysis": "perTest",
+  "testRunner": "command",
+  "commandRunner": { "command": "bun test --bail" },
+  "coverageAnalysis": "off",
+  "dryRunTimeoutMinutes": 12,
   "mutate": [
     "src/**/*.ts",
     "src/**/*.tsx",
@@ -17,11 +18,10 @@
   ],
   "tsconfigFile": "stryker-no-tsconfig.json",
   "checkers": [],
-  "plugins": ["@hughescr/stryker-bun-runner"],
   "concurrency": 4,
   "timeoutMS": 10000,
   "fileLogLevel": "off",
-  "ignorePatterns": [".tau", "docs", "tests/*.test.ts", "CHANGELOG.md", "dist", "coverage"],
+  "ignorePatterns": [".tau", "docs", "CHANGELOG.md", "dist", "coverage"],
   "tempDirName": ".stryker-tmp",
   "cleanTempDir": true
 }
