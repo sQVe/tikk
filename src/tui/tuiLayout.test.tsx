@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'bun:test';
 
 import { act } from 'react';
 
-import { createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import { createTuiFixture, needView, projectTree } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -103,9 +103,11 @@ it('returns to the side-by-side layout when the terminal grows while the detail 
 });
 
 it('shows the kind and state of a tree row in the detail pane', async () => {
-  const { setup, press } = await mount([], { width: 120, height: 20 }, [], treeGroups());
+  const { setup, press } = await mount([], { width: 120, height: 20 }, [], projectTree());
 
   await press('s');
+  await press('j');
+  await press('j');
   await press('j');
 
   const frame = setup.captureCharFrame();

@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'bun:test';
 
-import type { NeedView, TreeGroup } from '../cli/cli.ts';
-import { createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import type { NeedView, ProjectTree } from '../cli/cli.ts';
+import { createTuiFixture, needView, projectTree } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -39,20 +39,17 @@ it('shows no age in the detail of an item that has none', async () => {
   expect(setup.captureCharFrame()).not.toMatch(/Age\s/);
 });
 
-const treeWithPr = (pr: number | null): TreeGroup[] => {
-  const [group] = treeGroups();
-
-  if (group === undefined) {
-    throw new Error('The demo tree has no group.');
-  }
-
-  const [slice] = group.slices;
+const treeWithPr = (pr: number | null): ProjectTree => {
+  const tree = projectTree();
+  const slice = tree.projects[0]?.plans[0]?.slices[0];
 
   if (slice === undefined) {
     throw new Error('The demo tree has no slice.');
   }
 
-  return [{ ...group, slices: [{ ...slice, pr }] }];
+  slice.pr = pr;
+
+  return tree;
 };
 
 it('shows the PR number of a slice in the tree detail', async () => {
@@ -64,6 +61,8 @@ it('shows the PR number of a slice in the tree detail', async () => {
   );
 
   await press('s');
+  await press('j');
+  await press('j');
   await press('j');
 
   expect(selectedLine()).toContain('demo-3402');
@@ -80,8 +79,11 @@ it('leaves the PR row out of the tree detail for a slice without a PR', async ()
 
   await press('s');
   await press('j');
+  await press('j');
+  await press('j');
 
   expect(selectedLine()).toContain('demo-3402');
+  expect(selectedLine()).not.toContain('#');
   expect(setup.captureCharFrame()).not.toMatch(/\bPR\b/);
 });
 
@@ -90,16 +92,20 @@ it('shows the plan and instruction facts of a tree row in the detail', async () 
     [],
     { width: 120, height: 20 },
     [],
-    treeGroups(),
+    projectTree(),
   );
 
   await press('s');
+  await press('j');
+  await press('j');
 
   expect(selectedLine()).toContain('demo-3401');
   expect(setup.captureCharFrame()).toMatch(/Plan title\s*$/m);
   expect(setup.captureCharFrame()).toMatch(/Plan\s*$/m);
 
   await press('j');
+  await press('j');
+  await press(' ');
   await press('j');
 
   expect(selectedLine()).toContain('demo-3403');
@@ -110,25 +116,27 @@ it('shows the plan and instruction facts of a tree row in the detail', async () 
 const lastNonEmptyRow = (frame: string): string =>
   frame.split('\n').findLast((row) => row.trim() !== '') ?? '';
 
-it('shows no file error in the detail of the row without a plan', async () => {
-  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
-
-  const { setup, press, selectedLine } = await mount([], { width: 120, height: 20 }, [], groups, {
-    loadErrors: () =>
-      Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
-  });
+it('shows no file error in the detail of a project row', async () => {
+  const { setup, press, selectedLine } = await mount(
+    [],
+    { width: 120, height: 20 },
+    [],
+    projectTree(),
+    {
+      loadErrors: () =>
+        Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
+    },
+  );
 
   await press('s');
 
-  expect(selectedLine()).toBeDefined();
+  expect(selectedLine()).toContain('demo');
   expect(setup.captureCharFrame()).not.toContain('Broken');
   expect(setup.captureCharFrame()).not.toContain('broken.md');
 });
 
 it('counts a file error with no ticket row as a file error on the tree', async () => {
-  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
-
-  const { setup, press } = await mount([], { width: 120, height: 20 }, [], groups, {
+  const { setup, press } = await mount([], { width: 120, height: 20 }, [], projectTree(), {
     loadErrors: () =>
       Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
   });

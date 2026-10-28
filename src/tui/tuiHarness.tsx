@@ -4,7 +4,7 @@ import { testRender } from '@opentui/react/test-utils';
 import { act, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import type { NeedView, TreeGroup } from '../cli/cli.ts';
+import type { NeedView, ProjectTree, TreeProject } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
 import { App, catalog, createTuiSession, defaultBindings } from './tui.tsx';
 import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
@@ -69,8 +69,16 @@ const WithKeymap = ({
 
 const isDemoId = (raw: string): raw is NeedView['id'] => /^demo-\d+$/.test(raw);
 
-const demoId = (raw: string): NeedView['id'] => {
+export const ticketId = (raw: string): NeedView['id'] => {
   invariant(isDemoId(raw), `Test ID ${raw} is invalid.`);
+
+  return raw;
+};
+
+const isProjectName = (raw: string): raw is TreeProject['name'] => /^[a-z][a-z0-9-]*$/.test(raw);
+
+export const projectName = (raw: string): TreeProject['name'] => {
+  invariant(isProjectName(raw), `Test project ${raw} is invalid.`);
 
   return raw;
 };
@@ -85,7 +93,7 @@ export const commandLabel = (id: string): string => {
 };
 
 export const needView = (index: number, title: string): NeedView => ({
-  id: demoId(`demo-${firstDemoNumber + index}`),
+  id: ticketId(`demo-${firstDemoNumber + index}`),
   title,
   reason: 'submitted',
   since: '2026-10-20T11:00:00.000Z',
@@ -94,32 +102,45 @@ export const needView = (index: number, title: string): NeedView => ({
   passedUp: true,
 });
 
-export const treeGroups = (): TreeGroup[] => {
-  const planId = demoId('demo-3401');
-  const activeId = demoId('demo-3402');
-  const instructionId = demoId('demo-3403');
+export const noProjects = (): ProjectTree => ({ current: null, projects: [] });
 
-  return [
+// One current project with a plan, an active slice with a PR, and one instruction.
+export const projectTree = (): ProjectTree => ({
+  current: projectName('demo'),
+  projects: [
     {
-      plan: { id: planId, title: 'Plan title', state: 'open' },
-      slices: [
+      name: projectName('demo'),
+      inbox: [],
+      plans: [
         {
-          id: activeId,
-          title: 'Slice title',
-          state: 'active',
-          pr: 12,
-          instructions: [{ id: instructionId, title: 'Instruction title', state: 'open' }],
+          id: ticketId('demo-3401'),
+          title: 'Plan title',
+          state: 'open',
+          tasks: [],
+          slices: [
+            {
+              id: ticketId('demo-3402'),
+              title: 'Slice title',
+              state: 'active',
+              pr: 12,
+              tasks: [],
+              instructions: [
+                { id: ticketId('demo-3403'), title: 'Instruction title', state: 'open' },
+              ],
+            },
+          ],
         },
       ],
+      slices: [],
     },
-  ];
-};
+  ],
+});
 
 export const createTuiFixture = async (
   items: NeedView[],
   size: { width: number; height: number },
   problems: string[] = [],
-  groups: TreeGroup[] = [],
+  tree: ProjectTree = noProjects(),
   overrides: Partial<TuiEffects> = {},
   bindings: BindingTable = defaultBindings,
   notices: string[] = [],
@@ -155,7 +176,7 @@ export const createTuiFixture = async (
       });
     },
     loadTree: () => {
-      const loaded = Promise.resolve({ ok: true as const, value: structuredClone(groups) });
+      const loaded = Promise.resolve({ ok: true as const, value: structuredClone(tree) });
 
       return loaded.then((result) => {
         probe.reloaded();

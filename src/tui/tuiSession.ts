@@ -1,16 +1,17 @@
-import type { CliFailure, NeedsReading, TreeGroup } from '../cli/cli.ts';
+import type { CliFailure, NeedView, NeedsReading, ProjectTree } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
 import { strayErrorsOf } from './fileErrors.ts';
 import type { TicketFileError } from './fileErrors.ts';
 import { homeRowsOf } from './homeView.tsx';
 import { topAfter } from './overlayScroll.ts';
 import type { OverlayMove } from './overlayScroll.ts';
+import { foldsAfter, foldsAfterLoad, noFolds, projectRowsOf } from './projectTree.ts';
+import type { FoldIntent, FoldState } from './projectTree.ts';
 import type { ListRow } from './rowList.tsx';
-import { treeRowsOf } from './treeView.tsx';
 
 export interface TuiEffects {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
-  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
+  loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
   loadErrors: () => Promise<Result<TicketFileError[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
@@ -50,6 +51,9 @@ export interface TuiSnapshot {
   overlay: Overlay;
   detailOpen: boolean;
   fileErrors: readonly TicketFileError[];
+  needs: readonly NeedView[];
+  projectTree: ProjectTree | undefined;
+  folds: FoldState;
 }
 
 type OverlayIntent =
@@ -67,6 +71,7 @@ export type TuiIntent =
   | { kind: 'edit' }
   | { kind: 'openDetail' }
   | { kind: 'closeDetail' }
+  | { kind: 'fold'; fold: FoldIntent }
   | OverlayIntent;
 
 type LocalIntent = Exclude<TuiIntent, { kind: 'switchView' } | { kind: 'edit' }>;
@@ -79,7 +84,8 @@ export interface TuiSession {
 }
 
 type LoadOutcome =
-  | { ok: true; rows: ListRow[]; problems: readonly string[] }
+  | { ok: true; name: 'home'; reading: NeedsReading }
+  | { ok: true; name: 'tree'; tree: ProjectTree }
   | { ok: false; message: string };
 
 const emptyView: ListView = {
@@ -99,6 +105,9 @@ const initialSnapshot: TuiSnapshot = {
   overlay: { kind: 'none' },
   detailOpen: false,
   fileErrors: [],
+  needs: [],
+  projectTree: undefined,
+  folds: noFolds,
 };
 
 const messageLimit = 100;
@@ -137,14 +146,13 @@ const withView = (snapshot: TuiSnapshot, name: ViewName, view: ListView): TuiSna
   views: { ...snapshot.views, [name]: view },
 });
 
-const applyLoad = (snapshot: TuiSnapshot, name: ViewName, outcome: LoadOutcome): TuiSnapshot => {
+const withRows = (
+  snapshot: TuiSnapshot,
+  name: ViewName,
+  rows: ListRow[],
+  problems: readonly string[],
+): TuiSnapshot => {
   const view = snapshot.views[name];
-
-  if (!outcome.ok) {
-    return withView(snapshot, name, { ...view, failure: outcome.message });
-  }
-
-  const { rows, problems } = outcome;
   const selection = selectionAt(rows, repairedIndex(view.selection, rows));
 
   return withView(snapshot, name, {
@@ -152,9 +160,47 @@ const applyLoad = (snapshot: TuiSnapshot, name: ViewName, outcome: LoadOutcome):
     loaded: true,
     rows,
     selection,
-    failure: undefined,
     problems,
   });
+};
+
+const withoutFailure = (snapshot: TuiSnapshot, name: ViewName): TuiSnapshot =>
+  withView(snapshot, name, { ...snapshot.views[name], failure: undefined });
+
+const withTreeRows = (snapshot: TuiSnapshot): TuiSnapshot => {
+  const { projectTree, folds, needs } = snapshot;
+
+  if (projectTree === undefined) {
+    return snapshot;
+  }
+
+  return withRows(snapshot, 'tree', projectRowsOf(projectTree, folds, needs), []);
+};
+
+const applyLoad = (snapshot: TuiSnapshot, name: ViewName, outcome: LoadOutcome): TuiSnapshot => {
+  if (!outcome.ok) {
+    return withView(snapshot, name, { ...snapshot.views[name], failure: outcome.message });
+  }
+
+  if (outcome.name === 'tree') {
+    const folds = foldsAfterLoad(snapshot.folds, outcome.tree);
+
+    return withTreeRows({ ...withoutFailure(snapshot, 'tree'), projectTree: outcome.tree, folds });
+  }
+
+  const { items, reconcileProblems } = outcome.reading;
+  const problems = reconcileProblems.map((problem) => problem.message);
+  const loaded = { ...withoutFailure(snapshot, 'home'), needs: items };
+  const next = withRows(loaded, 'home', homeRowsOf(items), problems);
+
+  return withTreeRows(next);
+};
+
+const fold = (snapshot: TuiSnapshot, intent: FoldIntent): TuiSnapshot => {
+  const view = snapshot.views[snapshot.view];
+  const folds = foldsAfter(snapshot.folds, intent, view.rows[view.selection.index]);
+
+  return folds === snapshot.folds ? snapshot : withTreeRows({ ...snapshot, folds });
 };
 
 const selectRow = (snapshot: TuiSnapshot, target: number): TuiSnapshot => {
@@ -206,6 +252,10 @@ const snapshotAfter = (snapshot: TuiSnapshot, intent: LocalIntent): TuiSnapshot 
     return selectRow(snapshot, snapshot.views[snapshot.view].rows.length - 1);
   }
 
+  if (intent.kind === 'fold') {
+    return fold(snapshot, intent.fold);
+  }
+
   if (intent.kind === 'openDetail' || intent.kind === 'closeDetail') {
     return { ...snapshot, detailOpen: intent.kind === 'openDetail' };
   }
@@ -233,16 +283,12 @@ const switchView = (snapshot: TuiSnapshot): TuiSnapshot => {
 
 const homeOutcome = (result: Result<NeedsReading, CliFailure>): LoadOutcome =>
   result.ok
-    ? {
-        ok: true,
-        rows: homeRowsOf(result.value.items),
-        problems: result.value.reconcileProblems.map((problem) => problem.message),
-      }
+    ? { ok: true, name: 'home', reading: result.value }
     : { ok: false, message: result.reason.message };
 
-const treeOutcome = (result: Result<TreeGroup[], CliFailure>): LoadOutcome =>
+const treeOutcome = (result: Result<ProjectTree, CliFailure>): LoadOutcome =>
   result.ok
-    ? { ok: true, rows: treeRowsOf(result.value), problems: [] }
+    ? { ok: true, name: 'tree', tree: result.value }
     : { ok: false, message: result.reason.message };
 
 const readView = async (effects: TuiEffects, name: ViewName): Promise<LoadOutcome> => {

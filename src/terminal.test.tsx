@@ -119,7 +119,7 @@ const start = async (options: StartOptions = {}) => {
 
       return Promise.resolve({ ok: true, value: { items: [needView], reconcileProblems: [] } });
     },
-    loadTree: () => Promise.resolve({ ok: true, value: [] }),
+    loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
     edit:
       options.edit ??

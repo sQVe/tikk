@@ -91,6 +91,13 @@ const selectedTicketReason = (snapshot: TuiSnapshot): string | undefined => {
   return id === undefined ? 'No ticket is selected.' : undefined;
 };
 
+const foldReason = (snapshot: TuiSnapshot): string | undefined => {
+  const view = snapshot.views[snapshot.view];
+  const fold = view.rows[view.selection.index]?.marks?.fold ?? null;
+
+  return fold === null ? 'This row does not fold.' : undefined;
+};
+
 const session = (intent: TuiIntent): CommandIntent => ({ kind: 'session', intent });
 
 export const catalog: readonly Command[] = [
@@ -163,8 +170,35 @@ export const catalog: readonly Command[] = [
     intent: session({ kind: 'moveLast' }),
   },
   {
+    id: 'toggleFold',
+    label: 'Fold or unfold the selected row',
+    scope: 'list',
+    section: 'moving',
+    keys: ['za', 'space'],
+    disabledReason: foldReason,
+    intent: session({ kind: 'fold', fold: 'toggle' }),
+  },
+  {
+    id: 'openFold',
+    label: 'Unfold the selected row',
+    scope: 'list',
+    section: 'moving',
+    keys: ['zo'],
+    disabledReason: foldReason,
+    intent: session({ kind: 'fold', fold: 'open' }),
+  },
+  {
+    id: 'closeFold',
+    label: 'Fold the selected row',
+    scope: 'list',
+    section: 'moving',
+    keys: ['zc'],
+    disabledReason: foldReason,
+    intent: session({ kind: 'fold', fold: 'close' }),
+  },
+  {
     id: 'switchView',
-    label: 'Switch between home and tree',
+    label: 'Switch between home and projects',
     scope: 'list',
     section: 'tickets',
     keys: ['s'],

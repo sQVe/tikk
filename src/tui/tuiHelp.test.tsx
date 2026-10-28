@@ -1,9 +1,14 @@
 import { afterEach, expect, it } from 'bun:test';
 
-import type { TreeGroup } from '../cli/cli.ts';
 import { helpWindowOf } from './helpWindow.ts';
 import { catalog, defaultBindings } from './tuiCommands.ts';
-import { commandLabel, createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import {
+  commandLabel,
+  createTuiFixture,
+  noProjects,
+  needView,
+  projectTree,
+} from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 import { createTuiSession } from './tuiSession.ts';
 
@@ -38,7 +43,7 @@ const firstFailureOf = (frame: string): number => Number(/Failure (\d+)\./.exec(
 const helpTitlesOf = (): string[] => {
   const session = createTuiSession({
     load: () => Promise.resolve({ ok: true, value: { items: [], reconcileProblems: [] } }),
-    loadTree: () => Promise.resolve({ ok: true, value: [] }),
+    loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
@@ -54,10 +59,15 @@ const helpTitlesOf = (): string[] => {
 };
 
 // Rows between the edit row and the next action's row, so a reason row under edit adds one.
-const helpFrameOf = async (groups: TreeGroup[]): Promise<string> => {
-  const { setup, press } = await mount([], { width: 80, height: 60 }, [], groups);
+const helpFrameOf = async (rowsDown: number): Promise<string> => {
+  const { setup, press } = await mount([], { width: 80, height: 60 }, [], projectTree());
 
   await press('s');
+
+  for (let step = 0; step < rowsDown; step += 1) {
+    await press('j');
+  }
+
   await press('?');
 
   const frame = setup.captureCharFrame();
@@ -68,8 +78,8 @@ const helpFrameOf = async (groups: TreeGroup[]): Promise<string> => {
   return frame;
 };
 
-const editGapOf = async (groups: TreeGroup[]): Promise<number> => {
-  const frame = await helpFrameOf(groups);
+const editGapOf = async (rowsDown: number): Promise<number> => {
+  const frame = await helpFrameOf(rowsDown);
 
   return rowIndexOf(frame, commandLabel('openDetail')) - rowIndexOf(frame, commandLabel('edit'));
 };
@@ -132,9 +142,15 @@ it('keeps a failed editor run in the message history after the status clears', a
     () => Promise.resolve({ ok: true as const, value: undefined }),
   ];
 
-  const { setup, press } = await mount([needView(0, 'First')], { width: 60, height: 12 }, [], [], {
-    edit: () => outcomes.shift()?.() ?? Promise.reject(new Error('No more edits.')),
-  });
+  const { setup, press } = await mount(
+    [needView(0, 'First')],
+    { width: 60, height: 12 },
+    [],
+    noProjects(),
+    {
+      edit: () => outcomes.shift()?.() ?? Promise.reject(new Error('No more edits.')),
+    },
+  );
 
   await press('e');
   await press('e');
@@ -214,16 +230,22 @@ const helpRowWithKey = (frame: string, key: string): string =>
 it('scrolls a long message history from the newest to the oldest message', async () => {
   let failures = 0;
 
-  const { setup, press } = await mount([needView(0, 'First')], { width: 60, height: 8 }, [], [], {
-    edit: () => {
-      failures += 1;
+  const { setup, press } = await mount(
+    [needView(0, 'First')],
+    { width: 60, height: 8 },
+    [],
+    noProjects(),
+    {
+      edit: () => {
+        failures += 1;
 
-      return Promise.resolve({
-        ok: false,
-        reason: { code: 'storeError', message: `Failure ${failures}.` },
-      });
+        return Promise.resolve({
+          ok: false,
+          reason: { code: 'storeError', message: `Failure ${failures}.` },
+        });
+      },
     },
-  });
+  );
 
   for (let count = 0; count < 8; count += 1) {
     await press('e');
@@ -363,9 +385,15 @@ it('keeps the status line on the bottom row while help is open on an empty list'
 });
 
 it('keeps the status line on the bottom row while help is open during a load that has not settled', async () => {
-  const { setup, press } = await mount([], { width: 80, height: 12 }, ['STATUS-MARKER'], [], {
-    load: () => Promise.withResolvers<never>().promise,
-  });
+  const { setup, press } = await mount(
+    [],
+    { width: 80, height: 12 },
+    ['STATUS-MARKER'],
+    noProjects(),
+    {
+      load: () => Promise.withResolvers<never>().promise,
+    },
+  );
 
   const pending = lastRowOf(setup.captureCharFrame());
 
@@ -377,7 +405,7 @@ it('keeps the status line on the bottom row while help is open during a load tha
 });
 
 it('shows the status line on the only row of an 80 by 1 terminal while the list is loading', async () => {
-  const { setup } = await mount([], { width: 80, height: 1 }, [], [], {
+  const { setup } = await mount([], { width: 80, height: 1 }, [], noProjects(), {
     load: () => Promise.withResolvers<never>().promise,
   });
 
@@ -454,15 +482,15 @@ it('draws the title of every help section', async () => {
   }
 });
 
-it('shows a reason under edit in help when the selected group has no plan', async () => {
-  const withPlan = await editGapOf(treeGroups());
-  const withoutPlan = await editGapOf([{ plan: null, slices: [] }]);
+it('shows a reason under edit in help when the selected row is a project', async () => {
+  const onPlan = await editGapOf(2);
+  const onProject = await editGapOf(0);
 
-  expect(withoutPlan).toBeGreaterThan(withPlan);
+  expect(onProject).toBeGreaterThan(onPlan);
 });
 
-it('explains with visible text why edit is disabled for a group without a plan', async () => {
-  const frame = await helpFrameOf([{ plan: null, slices: [] }]);
+it('explains with visible text why edit is disabled for a project row', async () => {
+  const frame = await helpFrameOf(0);
   const editAt = rowIndexOf(frame, commandLabel('edit'));
   const reason = rowsOf(frame)[editAt + 1] ?? '';
 
@@ -488,10 +516,16 @@ it('consumes a key that misses a pending sequence, so no later listener receives
 });
 
 it('shows the position of the recent messages in the messages overlay', async () => {
-  const { setup, press } = await mount([needView(0, 'First')], { width: 60, height: 12 }, [], [], {
-    edit: () =>
-      Promise.resolve({ ok: false, reason: { code: 'storeError', message: 'x'.repeat(600) } }),
-  });
+  const { setup, press } = await mount(
+    [needView(0, 'First')],
+    { width: 60, height: 12 },
+    [],
+    noProjects(),
+    {
+      edit: () =>
+        Promise.resolve({ ok: false, reason: { code: 'storeError', message: 'x'.repeat(600) } }),
+    },
+  );
 
   await press('e');
   await press('g');
@@ -533,16 +567,22 @@ it('keeps list keys working after ? closes help', async () => {
 it('moves the messages overlay up one line from its bottom with k', async () => {
   let failures = 0;
 
-  const { setup, press } = await mount([needView(0, 'First')], { width: 60, height: 8 }, [], [], {
-    edit: () => {
-      failures += 1;
+  const { setup, press } = await mount(
+    [needView(0, 'First')],
+    { width: 60, height: 8 },
+    [],
+    noProjects(),
+    {
+      edit: () => {
+        failures += 1;
 
-      return Promise.resolve({
-        ok: false,
-        reason: { code: 'storeError', message: `Failure ${failures}.` },
-      });
+        return Promise.resolve({
+          ok: false,
+          reason: { code: 'storeError', message: `Failure ${failures}.` },
+        });
+      },
     },
-  });
+  );
 
   for (let count = 0; count < 20; count += 1) {
     await press('e');

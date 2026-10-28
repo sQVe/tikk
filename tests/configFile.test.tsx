@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { configPathOf, readSettings } from '../src/config.ts';
 import { resolveMachine, resolveProject } from '../src/project.ts';
 import { loadBindings } from '../src/remap.ts';
-import { commandLabel, createTuiFixture, needView } from '../src/tui/tuiHarness.tsx';
+import { commandLabel, createTuiFixture, noProjects, needView } from '../src/tui/tuiHarness.tsx';
 import type { TuiFixture } from '../src/tui/tuiHarness.tsx';
 
 const homes: string[] = [];
@@ -41,7 +41,7 @@ it('applies the key remap in the TUI and resolves the machine and project from t
     [needView(0, 'First')],
     { width: 80, height: 40 },
     [],
-    [],
+    noProjects(),
     {},
     loaded.bindings,
   );

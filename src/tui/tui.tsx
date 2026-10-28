@@ -14,6 +14,7 @@ import { messageWindowOf } from './messageWindow.ts';
 import { palette } from './palette.ts';
 import { RowList } from './rowList.tsx';
 import { StatusLine } from './StatusLine.tsx';
+import { unicodeIcons } from './ticketIcons.ts';
 import { commandScopes, keysOfAction, scopePriority } from './tuiCommands.ts';
 import type { Binding, BindingTable, CommandScope } from './tuiCommands.ts';
 import type { TuiIntent, TuiSession, TuiSnapshot } from './tuiSession.ts';
@@ -84,7 +85,7 @@ const statusOf = (snapshot: TuiSnapshot, strayCount: number): string =>
     .filter((part) => part !== '')
     .join('; ');
 
-const viewLabels: Record<TuiSnapshot['view'], string> = { home: 'Home', tree: 'Tree' };
+const viewLabels: Record<TuiSnapshot['view'], string> = { home: 'Home', tree: 'Projects' };
 
 const sideLayoutMinimumWidth = 90;
 const detailMaximumWidth = 44;
@@ -294,9 +295,8 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
                   selected={view.selection.index}
                   height={listHeight}
                   palette={palette}
-                  emptyMessage={
-                    snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
-                  }
+                  icons={unicodeIcons}
+                  emptyMessage={snapshot.view === 'home' ? 'Nothing needs you.' : 'No projects.'}
                 />
               </box>
             )}

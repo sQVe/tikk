@@ -8,7 +8,7 @@ import type { TuiSnapshot } from './tuiSession.ts';
 const snapshotOf = async (): Promise<TuiSnapshot> => {
   const session = createTuiSession({
     load: () => Promise.resolve({ ok: true, value: { items: [], reconcileProblems: [] } }),
-    loadTree: () => Promise.resolve({ ok: true, value: [] }),
+    loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),

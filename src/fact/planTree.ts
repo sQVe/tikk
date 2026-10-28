@@ -1,4 +1,4 @@
-import type { TicketId } from '../ticket/ticket.ts';
+import type { ProjectName, TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 import { deriveInstructionState } from './instructionState.ts';
 import type { InstructionStateName, InstructionTicket } from './instructionState.ts';
@@ -6,7 +6,17 @@ import { derivePlanState } from './planState.ts';
 import type { PlanStateName } from './planState.ts';
 import { compareRank } from './rankOrder.ts';
 import { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
-import type { SliceStateName } from './sliceState.ts';
+import type { SliceIndex, SliceStateName } from './sliceState.ts';
+
+type TaskStateName = 'open' | 'done';
+
+export type TreeStateName = PlanStateName | SliceStateName | InstructionStateName | TaskStateName;
+
+interface TreeTask {
+  id: TicketId;
+  title: string;
+  state: TaskStateName;
+}
 
 interface TreeInstruction {
   id: TicketId;
@@ -14,23 +24,40 @@ interface TreeInstruction {
   state: InstructionStateName;
 }
 
-interface TreeSlice {
+export interface TreeSlice {
   id: TicketId;
   title: string;
   state: SliceStateName;
   pr: number | null;
+  tasks: TreeTask[];
   instructions: TreeInstruction[];
 }
 
-interface TreePlanHeader {
+interface TreePlan {
   id: TicketId;
   title: string;
   state: PlanStateName;
+  tasks: TreeTask[];
+  slices: TreeSlice[];
 }
 
-export interface TreeGroup {
-  plan: TreePlanHeader | null;
+export interface TreeProject {
+  name: ProjectName;
+  inbox: TreeTask[];
+  plans: TreePlan[];
   slices: TreeSlice[];
+}
+
+export interface ProjectTree {
+  current: ProjectName | null;
+  projects: TreeProject[];
+}
+
+interface TreeInput {
+  shown: InstructionTicket[];
+  facts: Fact[];
+  index: SliceIndex;
+  now: Date;
 }
 
 const isShown = (ticket: InstructionTicket): boolean =>
@@ -39,63 +66,88 @@ const isShown = (ticket: InstructionTicket): boolean =>
 const ofKind = (
   tickets: InstructionTicket[],
   kind: InstructionTicket['frontMatter']['kind'],
-): InstructionTicket[] =>
-  tickets.filter((ticket) => ticket.frontMatter.kind === kind && isShown(ticket));
+): InstructionTicket[] => tickets.filter((ticket) => ticket.frontMatter.kind === kind);
 
-const byRank = (tickets: InstructionTicket[]): InstructionTicket[] => tickets.toSorted(compareRank);
+const treeTask = (task: InstructionTicket): TreeTask => ({
+  id: task.id,
+  title: task.frontMatter.title,
+  state: task.frontMatter.status === 'done' ? 'done' : 'open',
+});
 
-export const buildPlanTree = (
+const projectOrder =
+  (current: ProjectName | null) =>
+  (left: ProjectName, right: ProjectName): number => {
+    if ((left === current) !== (right === current)) {
+      return left === current ? -1 : 1;
+    }
+
+    return left < right ? -1 : 1;
+  };
+
+const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) => {
+  const { shown, facts, index, now } = input;
+  const shownById = new Map(shown.map((ticket) => [ticket.id, ticket]));
+
+  // A parent in another project counts as not shown, so every ticket stays in its own project.
+  const shownParentOf = (ticket: InstructionTicket): TicketId | undefined => {
+    const { parent, project } = ticket.frontMatter;
+    const found = parent === undefined ? undefined : shownById.get(parent);
+
+    return found?.frontMatter.project === project ? parent : undefined;
+  };
+
+  const childrenByParent = (tickets: InstructionTicket[]) => Map.groupBy(tickets, shownParentOf);
+  const tasksByParent = childrenByParent(ofKind(shown, 'task'));
+  const instructionsByParent = childrenByParent(ofKind(shown, 'instruction'));
+  const slicesByParent = childrenByParent(ofKind(shown, 'slice'));
+  const isLoose = (ticket: InstructionTicket): boolean => shownParentOf(ticket) === undefined;
+
+  const tasksOf = (parent: TicketId): TreeTask[] => (tasksByParent.get(parent) ?? []).map(treeTask);
+
+  const treeSlice = (slice: InstructionTicket): TreeSlice => ({
+    id: slice.id,
+    title: slice.frontMatter.title,
+    state: deriveSliceState(slice, index, now).state,
+    pr: selectSlicePr(slice.id, index)?.number ?? null,
+    tasks: tasksOf(slice.id),
+    instructions: (instructionsByParent.get(slice.id) ?? []).map((instruction) => ({
+      id: instruction.id,
+      title: instruction.frontMatter.title,
+      state: deriveInstructionState(instruction, facts, now).state,
+    })),
+  });
+
+  const treePlan = (plan: InstructionTicket): TreePlan => ({
+    id: plan.id,
+    title: plan.frontMatter.title,
+    state: derivePlanState(plan, index, now),
+    tasks: tasksOf(plan.id),
+    slices: (slicesByParent.get(plan.id) ?? []).map(treeSlice),
+  });
+
+  return (name) => {
+    const inProject = (ticket: InstructionTicket) => ticket.frontMatter.project === name;
+    const roots = shown.filter((ticket) => inProject(ticket) && isLoose(ticket));
+
+    return {
+      name,
+      inbox: ofKind(roots, 'task').map(treeTask),
+      plans: ofKind(roots, 'plan').map(treePlan),
+      slices: ofKind(roots, 'slice').map(treeSlice),
+    };
+  };
+};
+
+export const buildProjectTree = (
   tickets: InstructionTicket[],
   facts: Fact[],
   now: Date,
-): TreeGroup[] => {
+  current: ProjectName | null,
+): ProjectTree => {
+  const shown = tickets.filter(isShown).toSorted(compareRank);
   const index = buildSliceIndex(tickets, facts);
+  const names = [...new Set(shown.map((ticket) => ticket.frontMatter.project))];
+  const projectOf = buildProjects({ shown, facts, index, now });
 
-  const instructionsByParent = Map.groupBy(
-    byRank(ofKind(tickets, 'instruction')),
-    (instruction) => instruction.frontMatter.parent,
-  );
-
-  const treeSlice = (slice: InstructionTicket): TreeSlice => {
-    const derived = deriveSliceState(slice, index, now);
-
-    const instructions =
-      derived.state === 'active'
-        ? (instructionsByParent.get(slice.id) ?? []).map((instruction) => ({
-            id: instruction.id,
-            title: instruction.frontMatter.title,
-            state: deriveInstructionState(instruction, facts, now).state,
-          }))
-        : [];
-
-    return {
-      id: slice.id,
-      title: slice.frontMatter.title,
-      state: derived.state,
-      pr: selectSlicePr(slice.id, index)?.number ?? null,
-      instructions,
-    };
-  };
-
-  const plans = byRank(ofKind(tickets, 'plan'));
-  const planIds = new Set(plans.map((plan) => plan.id));
-  const slices = byRank(ofKind(tickets, 'slice'));
-  const slicesByPlan = Map.groupBy(slices, (slice) => slice.frontMatter.parent);
-
-  const groups: TreeGroup[] = plans.map((plan) => ({
-    plan: { id: plan.id, title: plan.frontMatter.title, state: derivePlanState(plan, index, now) },
-    slices: (slicesByPlan.get(plan.id) ?? []).map(treeSlice),
-  }));
-
-  const orphans = slices.filter((slice) => {
-    const { parent } = slice.frontMatter;
-
-    return parent === undefined || !planIds.has(parent);
-  });
-
-  if (orphans.length > 0) {
-    groups.push({ plan: null, slices: orphans.map(treeSlice) });
-  }
-
-  return groups;
+  return { current, projects: names.toSorted(projectOrder(current)).map(projectOf) };
 };

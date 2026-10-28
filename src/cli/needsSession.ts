@@ -1,5 +1,5 @@
-import { buildPlanTree } from '../fact/fact.ts';
-import type { TreeGroup } from '../fact/fact.ts';
+import { buildProjectTree } from '../fact/fact.ts';
+import type { ProjectTree } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import type { CliEffects, CliFailure, EditorCleanupFailure } from './cliEffects.ts';
@@ -16,7 +16,7 @@ interface FileErrorRow {
 
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
-  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
+  loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
   loadErrors: () => Promise<Result<FileErrorRow[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
@@ -62,7 +62,7 @@ export const openNeedsSession = async (
     return readNeeds({ effects: loadEffects, session });
   };
 
-  const readTree = async (): Promise<Result<TreeGroup[], CliFailure>> => {
+  const readTree = async (): Promise<Result<ProjectTree, CliFailure>> => {
     const refreshed = await refreshSession(loadEffects, session);
 
     if (!refreshed.ok) {
@@ -81,7 +81,13 @@ export const openNeedsSession = async (
       return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
     }
 
-    return { ok: true, value: buildPlanTree(listed.value, facts.value, effects.now()) };
+    const project = await effects.resolveProject();
+    const current = project.ok ? project.value : null;
+
+    return {
+      ok: true,
+      value: buildProjectTree(listed.value, facts.value, effects.now(), current),
+    };
   };
 
   const edit = async (rawId: string): Promise<Result<undefined, CliFailure>> => {
@@ -149,5 +155,8 @@ export const openNeedsSession = async (
     return closingResult;
   };
 
-  return { ok: true, value: { load, loadTree, loadErrors, edit: editTicket, close } };
+  return {
+    ok: true,
+    value: { load, loadTree, loadErrors, edit: editTicket, close },
+  };
 };

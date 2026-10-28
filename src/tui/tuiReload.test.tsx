@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'bun:test';
 
 import type { NeedView } from '../cli/cli.ts';
-import { createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import { createTuiFixture, noProjects, needView, projectTree, ticketId } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -24,7 +24,7 @@ it('shows a failed home read and recovers on a successful store refresh', async 
     [],
     { width: 60, height: 8 },
     [],
-    [],
+    noProjects(),
     {
       load: async () => {
         if (failed) {
@@ -62,14 +62,14 @@ it('shows a failed tree read and recovers on a successful store refresh', async 
     [],
     { width: 60, height: 8 },
     [],
-    [],
+    noProjects(),
     {
       loadTree: async () => {
         if (failed) {
           return { ok: false, reason: { code: 'storeError', message: 'Tree read failed.' } };
         }
 
-        return { ok: true, value: treeGroups() };
+        return { ok: true, value: projectTree() };
       },
     },
   );
@@ -86,9 +86,11 @@ it('shows a failed tree read and recovers on a successful store refresh', async 
   await storeChanged();
 
   expect(setup.captureCharFrame()).not.toContain('Tree read failed.');
-  expect(selectedLine()).toContain('Plan title');
-  expect(setup.captureCharFrame()).toContain('Instruction title');
+  expect(selectedLine()).toContain('demo');
+  expect(setup.captureCharFrame()).toContain('Plan title');
 
+  await press('j');
+  await press('j');
   await press('e');
   expect(edited).toEqual(['demo-3401']);
 });
@@ -118,34 +120,31 @@ it('keeps the selected position when a reload removes the selected row', async (
 });
 
 it('reloads the loaded tree when the store changes', async () => {
-  const groups = treeGroups();
+  const tree = projectTree();
 
-  const { press, storeChanged, selectedLine } = await mount(
-    [],
-    { width: 60, height: 8 },
-    [],
-    groups,
-  );
+  const { press, storeChanged, selectedLine } = await mount([], { width: 60, height: 8 }, [], tree);
 
   await press('s');
+  await press('j');
+  await press('j');
 
-  const [group] = groups;
+  const plan = tree.projects[0]?.plans[0];
 
-  if (group?.plan !== null && group?.plan !== undefined) {
-    group.plan.title = 'Renamed plan';
+  if (plan !== undefined) {
+    plan.title = 'Renamed plan';
   }
 
   await storeChanged();
 
-  expect(selectedLine()).toContain('demo-3401  Renamed plan  open');
+  expect(selectedLine()).toContain('demo-3401  Renamed plan');
 
-  if (group?.plan !== null && group?.plan !== undefined) {
-    group.plan.title = 'Renamed again';
+  if (plan !== undefined) {
+    plan.title = 'Renamed again';
   }
 
   await storeChanged();
 
-  expect(selectedLine()).toContain('demo-3401  Renamed again  open');
+  expect(selectedLine()).toContain('demo-3401  Renamed again');
 });
 
 it('keeps the first row selected when a reload inserts a row before it and no key was pressed', async () => {
@@ -181,27 +180,33 @@ it('selects the row at the last position of a moved ticket when a reload removes
 });
 
 it('keeps the selected tree row across reloads that insert and then remove rows', async () => {
-  const groups = treeGroups();
+  const tree = projectTree();
+  const plans = tree.projects[0]?.plans ?? [];
 
   const { setup, press, storeChanged, selectedLine } = await mount(
     [],
     { width: 60, height: 8 },
     [],
-    groups,
+    tree,
   );
 
   await press('s');
+  await press('j');
+  await press('j');
   expect(selectedLine()).toContain('Plan title');
 
-  groups.unshift({
-    plan: { id: 'demo-3409' as NeedView['id'], title: 'Added plan', state: 'open' },
+  plans.unshift({
+    id: ticketId('demo-3409'),
+    title: 'Added plan',
+    state: 'open',
+    tasks: [],
     slices: [],
   });
 
   await storeChanged();
   expect(selectedLine()).toContain('Plan title');
 
-  groups.splice(1, 1);
+  plans.splice(1, 1);
   await storeChanged();
 
   expect(setup.captureCharFrame()).not.toContain('Plan title');
@@ -262,14 +267,15 @@ it('moves one row for each j that arrives before the next commit', async () => {
 });
 
 it('opens the tree row on screen when e arrives in the commit of a reload that removed the selected row', async () => {
-  const groups = treeGroups();
-  const [group] = groups;
+  const tree = projectTree();
+  const slices = tree.projects[0]?.plans[0]?.slices ?? [];
 
-  group?.slices.push({
-    id: 'demo-3404' as NeedView['id'],
+  slices.push({
+    id: ticketId('demo-3404'),
     title: 'Other slice',
     state: 'planned',
     pr: null,
+    tasks: [],
     instructions: [],
   });
 
@@ -277,14 +283,16 @@ it('opens the tree row on screen when e arrives in the commit of a reload that r
     [],
     { width: 60, height: 8 },
     [],
-    groups,
+    tree,
   );
 
   await press('s');
   await press('j');
+  await press('j');
+  await press('j');
   expect(selectedLine()).toContain('Slice title');
 
-  group?.slices.splice(0, 1);
+  slices.splice(0, 1);
   pressAtNextCommit('e');
   await storeChanged();
 

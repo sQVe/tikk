@@ -201,12 +201,37 @@ const startTikk = (
     child.terminal?.write(text);
   };
 
+  const waitForSelected = (text: string) =>
+    waitFor(
+      () =>
+        screenOf(terminal.output).lines.some((line) => line.startsWith('>') && line.includes(text)),
+      `"${text}" selected`,
+    );
+
+  // The plan sits below its project row and the Inbox row of the current project.
+  const selectPlan = async (text: string): Promise<void> => {
+    type('s');
+    await waitForScreen(text);
+    type('jj');
+    await waitForSelected(text);
+  };
+
   const close = () => {
     child.kill('SIGKILL');
     child.terminal?.close();
   };
 
-  return { child, terminal, shows, waitForScreen, waitForOutput, type, close };
+  return {
+    child,
+    terminal,
+    shows,
+    waitForScreen,
+    waitForSelected,
+    selectPlan,
+    waitForOutput,
+    type,
+    close,
+  };
 };
 
 const isRunning = (pid: number): boolean => {
@@ -235,15 +260,14 @@ it('lends the terminal to $EDITOR on e, shows the typed title in the tree, and e
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('s');
-    await tikk.waitForScreen(`> ${plan.id}  aaaa  draft`);
+    await tikk.selectPlan(`${plan.id}  aaaa`);
 
     const beforeEdit = tikk.terminal.output.length;
 
     tikk.type('e');
     await tikk.waitForOutput(editorReady, beforeEdit);
     tikk.type(`${typedTitle}\r`);
-    await tikk.waitForScreen(`> ${plan.id}  ${typedTitle}  draft`);
+    await tikk.waitForSelected(`${plan.id}  ${typedTitle}`);
 
     tikk.type('s');
     await tikk.waitForScreen('Nothing needs you.');
@@ -272,15 +296,14 @@ it.skipIf(Bun.which('nvim') === null)(
     try {
       await tikk.waitForScreen('Nothing needs you.');
 
-      tikk.type('s');
-      await tikk.waitForScreen(`> ${plan.id}  aaaa  draft`);
+      await tikk.selectPlan(`${plan.id}  aaaa`);
 
       const beforeEdit = tikk.terminal.output.length;
 
       tikk.type('e');
       await tikk.waitForOutput('title: aaaa', beforeEdit);
       tikk.type(':%s/^title: .*/title: Neovim edit/\r:wq\r');
-      await tikk.waitForScreen(`> ${plan.id}  Neovim edit  draft`);
+      await tikk.waitForSelected(`${plan.id}  Neovim edit`);
 
       tikk.type('q');
 
@@ -308,8 +331,7 @@ it('stops a non-exec editor wrapper and its descendant before restoring the term
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('s');
-    await tikk.waitForScreen('aaaa  draft');
+    await tikk.selectPlan('aaaa');
 
     const beforeEdit = tikk.terminal.output.length;
 
@@ -556,8 +578,7 @@ it.each(['process list failure', 'signal refusal'])(
     try {
       await tikk.waitForScreen('Nothing needs you.');
 
-      tikk.type('s');
-      await tikk.waitForScreen('aaaa  draft');
+      await tikk.selectPlan('aaaa');
 
       const beforeEdit = tikk.terminal.output.length;
 
@@ -609,8 +630,7 @@ it('keeps handling delayed SIGTERM during editor cleanup and restores the termin
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('s');
-    await tikk.waitForScreen('aaaa  draft');
+    await tikk.selectPlan('aaaa');
 
     const beforeEdit = tikk.terminal.output.length;
 
@@ -659,8 +679,7 @@ it('stops an editor that ignores SIGTERM at shutdown, restores the terminal, and
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('s');
-    await tikk.waitForScreen('aaaa  draft');
+    await tikk.selectPlan('aaaa');
 
     const beforeEdit = tikk.terminal.output.length;
 
