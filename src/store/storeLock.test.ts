@@ -1,4 +1,5 @@
 import { expect, it } from 'bun:test';
+import { basename, dirname } from 'node:path';
 
 import { acquireStoreLock, tryStoreLock } from './store.ts';
 import type { StoreLockFunctions } from './store.ts';
@@ -13,6 +14,10 @@ interface Harness {
 const store = { root: '/store' };
 const lockPath = '/store/.git/tikk.lock';
 const breakerPath = '/store/.git/tikk.lock.break';
+
+const generationPath = (generation: number): string => `${breakerPath}.${generation}`;
+
+const releasedPath = (generation: number): string => `${generationPath(generation)}.released`;
 
 const codeError = (code: string): Error => Object.assign(new Error(code), { code });
 
@@ -59,6 +64,8 @@ const harness = (livePids: number[], pid = 100): Harness => {
         throw codeError('ENOENT');
       }
     },
+    readdir: async (directory) =>
+      [...files.keys()].filter((path) => dirname(path) === directory).map((path) => basename(path)),
     isProcessAlive: (candidate) => livePids.includes(candidate),
     sleep: async (milliseconds) => {
       sleeps.push(milliseconds);
@@ -194,25 +201,100 @@ it('lets only one of two acquirers that saw the same stale lock hold it', async 
   expect(firstResult?.ok).toBe(true);
   expect(secondResult).toMatchObject({ ok: false, reason: { kind: 'locked' } });
   expect(files.get(lockPath)).toBe('100\n');
-  expect(files.has(breakerPath)).toBe(false);
+  expect(files.has(releasedPath(0))).toBe(true);
 });
 
 it('retries while another process holds the breaker', async () => {
   const { functions, files, sleeps } = harness([555]);
 
   files.set(lockPath, '999\n');
-  files.set(breakerPath, '555\n');
+  files.set(generationPath(0), '555\n');
 
   const sleep = functions.sleep;
 
   functions.sleep = async (milliseconds) => {
     await sleep(milliseconds);
-    files.delete(breakerPath);
+    files.set(releasedPath(0), '555\n');
   };
 
   expect((await acquireStoreLock(functions, store)).ok).toBe(true);
   expect(sleeps.length).toBe(1);
   expect(files.get(lockPath)).toBe('100\n');
+  expect(files.get(generationPath(1))).toBe('100\n');
+});
+
+it('counts only exact breaker generations and ignores the unnumbered breaker', async () => {
+  const { functions, files } = harness([555]);
+
+  files.set(lockPath, '999\n');
+  files.set(breakerPath, '555\n');
+  files.set(`${generationPath(5)}.555.1`, '555\n');
+  files.set(`${releasedPath(7)}.555.1`, '555\n');
+  files.set('/store/.git/xikk.lock.break.9', '555\n');
+
+  expect((await acquireStoreLock(functions, store)).ok).toBe(true);
+  expect(files.get(lockPath)).toBe('100\n');
+  expect(files.get(generationPath(0))).toBe('100\n');
+  expect(files.has(generationPath(5))).toBe(false);
+  expect(files.has(generationPath(8))).toBe(false);
+  expect(files.has(generationPath(10))).toBe(false);
+});
+
+it('links the number after the highest generation file or release marker', async () => {
+  const { functions, files } = harness([]);
+
+  files.set(lockPath, '999\n');
+  files.set(generationPath(9), '555\n');
+  files.set(releasedPath(9), '555\n');
+  files.set(releasedPath(11), '556\n');
+
+  expect((await acquireStoreLock(functions, store)).ok).toBe(true);
+  expect(files.get(lockPath)).toBe('100\n');
+  expect(files.get(generationPath(12))).toBe('100\n');
+  expect(files.has(generationPath(10))).toBe(false);
+  expect(files.has(generationPath(11))).toBe(false);
+});
+
+it('fails and keeps the stale lock when it cannot list the breaker generations', async () => {
+  const { functions, files } = harness([]);
+
+  files.set(lockPath, '999\n');
+
+  functions.readdir = async () => {
+    throw codeError('EACCES');
+  };
+
+  expect(await acquireStoreLock(functions, store)).toMatchObject({
+    ok: false,
+    reason: { kind: 'failed' },
+  });
+
+  expect(files.get(lockPath)).toBe('999\n');
+  expect([...files.keys()]).toEqual([lockPath]);
+});
+
+it('fails when it cannot release its breaker generation', async () => {
+  const { functions, files } = harness([]);
+  const link = functions.link;
+
+  files.set(lockPath, '999\n');
+
+  functions.link = async (existingPath, newPath) => {
+    if (newPath === releasedPath(0)) {
+      throw codeError('EACCES');
+    }
+
+    await link(existingPath, newPath);
+  };
+
+  expect(await acquireStoreLock(functions, store)).toMatchObject({
+    ok: false,
+    reason: { kind: 'failed' },
+  });
+
+  expect(files.has(lockPath)).toBe(false);
+  expect(files.get(generationPath(0))).toBe('100\n');
+  expect(files.has(releasedPath(0))).toBe(false);
 });
 
 it('never lets a second acquirer clear a lock whose holder has not written its PID yet', async () => {
@@ -266,18 +348,260 @@ it('fails when a stale lock cannot be removed', async () => {
   });
 
   expect(files.get(lockPath)).toBe('999\n');
-  expect(files.has(breakerPath)).toBe(false);
+  expect(files.has(releasedPath(0))).toBe(true);
 });
 
-it('removes a breaker whose owner no longer exists', async () => {
+it('takes over a breaker whose owner no longer exists', async () => {
   const { functions, files } = harness([]);
 
   files.set(lockPath, '999\n');
-  files.set(breakerPath, '555\n');
+  files.set(generationPath(0), '555\n');
 
   expect((await acquireStoreLock(functions, store)).ok).toBe(true);
   expect(files.get(lockPath)).toBe('100\n');
-  expect(files.has(breakerPath)).toBe(false);
+  expect(files.get(generationPath(0))).toBe('555\n');
+  expect(files.get(generationPath(1))).toBe('100\n');
+  expect(files.has(releasedPath(1))).toBe(true);
+});
+
+it('keeps one owner when two acquirers find the same dead breaker', async () => {
+  const { functions: first, files } = harness([100, 200]);
+  const firstPaused = Promise.withResolvers<undefined>();
+  const resumeFirst = Promise.withResolvers<undefined>();
+  const secondPaused = Promise.withResolvers<undefined>();
+  const resumeSecond = Promise.withResolvers<undefined>();
+  const lockRemovers: number[] = [];
+  let secondClock = 0;
+  let secondReadDeadBreaker = false;
+  let secondWaited = false;
+
+  files.set(lockPath, '999\n');
+  files.set(generationPath(0), '555\n');
+
+  const recordLockRemoval =
+    (pid: number, unlink: StoreLockFunctions['unlink']) => async (path: string) => {
+      if (path === lockPath) {
+        lockRemovers.push(pid);
+      }
+
+      await unlink(path);
+    };
+
+  // The second acquirer pauses after it reads the dead breaker, before it changes any breaker.
+  const pauseSecondAtBreaker = async (path: string) => {
+    if (secondReadDeadBreaker && !secondWaited && path.startsWith(breakerPath)) {
+      secondWaited = true;
+      secondPaused.resolve(undefined);
+      await resumeSecond.promise;
+    }
+  };
+
+  const second: StoreLockFunctions = {
+    ...first,
+    pid: 200,
+    readFile: async (path) => {
+      const text = await first.readFile(path);
+
+      if (path.startsWith(breakerPath) && text === '555\n') {
+        secondReadDeadBreaker = true;
+      }
+
+      return text;
+    },
+    link: async (existingPath, newPath) => {
+      await pauseSecondAtBreaker(newPath);
+      await first.link(existingPath, newPath);
+    },
+    unlink: async (path) => {
+      await pauseSecondAtBreaker(path);
+      await recordLockRemoval(200, first.unlink)(path);
+    },
+    sleep: async (milliseconds) => {
+      secondClock += milliseconds;
+    },
+    now: () => secondClock,
+  };
+
+  const unlink = recordLockRemoval(100, first.unlink);
+
+  // The first acquirer pauses when it has read the stale PID again and is about to remove the lock.
+  first.unlink = async (path) => {
+    if (path === lockPath && lockRemovers.length === 0) {
+      firstPaused.resolve(undefined);
+      await resumeFirst.promise;
+    }
+
+    await unlink(path);
+  };
+
+  const secondAttempt = acquireStoreLock(second, store);
+
+  await secondPaused.promise;
+
+  const firstAttempt = acquireStoreLock(first, store);
+
+  await firstPaused.promise;
+  resumeSecond.resolve(undefined);
+
+  const secondResult = await secondAttempt;
+
+  resumeFirst.resolve(undefined);
+
+  const firstResult = await firstAttempt;
+  const holders = [firstResult, secondResult].filter((result) => result.ok);
+
+  expect(holders).toHaveLength(1);
+  expect(firstResult.ok).toBe(true);
+  expect(secondResult).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(lockRemovers).toEqual([100]);
+  expect(files.get(lockPath)).toBe('100\n');
+  expect(files.get(generationPath(1))).toBe('100\n');
+  expect(files.has(generationPath(2))).toBe(false);
+});
+
+it('never takes a breaker generation that a live owner holds', async () => {
+  const { functions: first, files } = harness([100, 300]);
+  const third: StoreLockFunctions = { ...first, pid: 300 };
+  const unlink = first.unlink;
+  let thirdResult: Awaited<ReturnType<typeof tryStoreLock>> | undefined;
+  let breakersDuringPause: string[] = [];
+
+  files.set(lockPath, '999\n');
+  files.set(generationPath(0), '555\n');
+
+  // The first acquirer holds generation 1 and is about to remove the stale lock.
+  first.unlink = async (path) => {
+    if (path === lockPath && thirdResult === undefined) {
+      thirdResult = await tryStoreLock(third, store);
+      breakersDuringPause = [...files.keys()].filter((key) => key.startsWith(breakerPath));
+    }
+
+    await unlink(path);
+  };
+
+  const firstResult = await acquireStoreLock(first, store);
+
+  expect(firstResult.ok).toBe(true);
+  expect(thirdResult).toMatchObject({ ok: false, reason: { kind: 'locked' } });
+  expect(breakersDuringPause.toSorted()).toEqual([generationPath(0), generationPath(1)]);
+  expect(files.get(generationPath(1))).toBe('100\n');
+  expect(files.get(lockPath)).toBe('100\n');
+});
+
+it('lets exactly one successor take over the generation of a dead owner', async () => {
+  const { functions: first, files } = harness([100, 200]);
+  const nextGeneration = generationPath(2);
+  const bothArrived = Promise.withResolvers<undefined>();
+  const successors: number[] = [];
+  let arrived = 0;
+  let secondClock = 0;
+
+  files.set(lockPath, '999\n');
+  files.set(generationPath(0), '554\n');
+  files.set(generationPath(1), '555\n');
+
+  // Both acquirers have read the dead owner of generation 1 before either links generation 2.
+  const linkAfterBoth =
+    (pid: number, link: StoreLockFunctions['link']) =>
+    async (existingPath: string, newPath: string) => {
+      if (newPath === nextGeneration && arrived < 2) {
+        arrived += 1;
+
+        if (arrived === 2) {
+          bothArrived.resolve(undefined);
+        }
+
+        await bothArrived.promise;
+      }
+
+      await link(existingPath, newPath);
+
+      if (newPath === nextGeneration) {
+        successors.push(pid);
+      }
+    };
+
+  const second: StoreLockFunctions = {
+    ...first,
+    pid: 200,
+    link: linkAfterBoth(200, first.link),
+    sleep: async (milliseconds) => {
+      secondClock += milliseconds;
+    },
+    now: () => secondClock,
+  };
+
+  first.link = linkAfterBoth(100, first.link);
+
+  const results = await Promise.all([
+    acquireStoreLock(first, store),
+    acquireStoreLock(second, store),
+  ]);
+
+  const holders = results.filter((result) => result.ok);
+  const lockHolder = files.get(lockPath) ?? '';
+
+  expect(holders).toHaveLength(1);
+  expect(successors).toHaveLength(1);
+  expect(files.get(nextGeneration)).toBe(`${successors[0]}\n`);
+  expect(['100\n', '200\n']).toContain(lockHolder);
+  expect(files.get(generationPath(1))).toBe('555\n');
+  expect(files.has(generationPath(3))).toBe(false);
+});
+
+it('never reuses a generation whose release marker outlives its file', async () => {
+  const { functions, files } = harness([100, 200, 300]);
+  const firstPaused = Promise.withResolvers<undefined>();
+  const resumeFirst = Promise.withResolvers<undefined>();
+  const secondPaused = Promise.withResolvers<undefined>();
+  const resumeSecond = Promise.withResolvers<undefined>();
+  const unlink = functions.unlink;
+
+  files.set(lockPath, '999\n');
+  files.set(releasedPath(0), '555\n');
+
+  // Each acquirer pauses when it has read the stale PID again and is about to remove the lock.
+  const pauseAtLock =
+    (paused: PromiseWithResolvers<undefined>, resume: PromiseWithResolvers<undefined>) =>
+    async (path: string) => {
+      if (path === lockPath) {
+        paused.resolve(undefined);
+        await resume.promise;
+      }
+
+      await unlink(path);
+    };
+
+  const first: StoreLockFunctions = { ...functions, unlink: pauseAtLock(firstPaused, resumeFirst) };
+
+  const second: StoreLockFunctions = {
+    ...functions,
+    pid: 200,
+    unlink: pauseAtLock(secondPaused, resumeSecond),
+  };
+
+  const firstAttempt = tryStoreLock(first, store);
+
+  await firstPaused.promise;
+
+  const secondAttempt = tryStoreLock(second, store);
+
+  await Promise.race([secondPaused.promise, secondAttempt]);
+  resumeFirst.resolve(undefined);
+
+  const firstResult = await firstAttempt;
+  const thirdResult = await tryStoreLock({ ...functions, pid: 300 }, store);
+
+  resumeSecond.resolve(undefined);
+
+  const secondResult = await secondAttempt;
+  const holders = [firstResult, secondResult, thirdResult].filter((result) => result.ok);
+
+  expect(holders).toHaveLength(1);
+  expect(firstResult.ok).toBe(true);
+  expect(files.get(lockPath)).toBe('100\n');
+  expect(files.has(generationPath(0))).toBe(false);
+  expect(files.get(generationPath(1))).toBe('100\n');
 });
 
 it('keeps the breaker of a live owner that pauses longer than 5 seconds', async () => {
@@ -301,7 +625,7 @@ it('keeps the breaker of a live owner that pauses longer than 5 seconds', async 
 
       advance(6000);
       secondResult = await acquireStoreLock(second, store);
-      breakerDuringPause = files.get(breakerPath);
+      breakerDuringPause = files.get(generationPath(0));
       pausedMilliseconds = sharedNow() - pausedAt;
     }
 
@@ -322,10 +646,10 @@ it('fails when it cannot read the PID of a breaker', async () => {
   const readFile = functions.readFile;
 
   files.set(lockPath, '999\n');
-  files.set(breakerPath, '555\n');
+  files.set(generationPath(0), '555\n');
 
   functions.readFile = async (path) => {
-    if (path === breakerPath) {
+    if (path === generationPath(0)) {
       throw codeError('EIO');
     }
 
@@ -338,7 +662,7 @@ it('fails when it cannot read the PID of a breaker', async () => {
   });
 
   expect(files.get(lockPath)).toBe('999\n');
-  expect(files.get(breakerPath)).toBe('555\n');
+  expect(files.get(generationPath(0))).toBe('555\n');
 });
 
 it('retries when the lock disappears before it reads the PID', async () => {

@@ -76,6 +76,7 @@ export const storeLock: StoreLockFunctions = {
   randomSuffix: () => crypto.randomUUID(),
   readFile: (path) => readFile(path, 'utf8'),
   unlink: ticketFiles.unlink,
+  readdir: ticketFiles.readdir,
   isProcessAlive: (pid) => {
     try {
       process.kill(pid, 0);
