@@ -387,7 +387,6 @@ it('keeps one owner when two acquirers find the same dead breaker', async () => 
       await unlink(path);
     };
 
-  // The second acquirer pauses after it reads the dead breaker, before it changes any breaker.
   const pauseSecondAtBreaker = async (path: string) => {
     if (secondReadDeadBreaker && !secondWaited && path.startsWith(breakerPath)) {
       secondWaited = true;
@@ -424,7 +423,6 @@ it('keeps one owner when two acquirers find the same dead breaker', async () => 
 
   const unlink = recordLockRemoval(100, first.unlink);
 
-  // The first acquirer pauses when it has read the stale PID again and is about to remove the lock.
   first.unlink = async (path) => {
     if (path === lockPath && lockRemovers.length === 0) {
       firstPaused.resolve(undefined);
@@ -469,7 +467,6 @@ it('never takes a breaker generation that a live owner holds', async () => {
   files.set(lockPath, '999\n');
   files.set(generationPath(0), '555\n');
 
-  // The first acquirer holds generation 1 and is about to remove the stale lock.
   first.unlink = async (path) => {
     if (path === lockPath && thirdResult === undefined) {
       thirdResult = await tryStoreLock(third, store);
@@ -500,7 +497,6 @@ it('lets exactly one successor take over the generation of a dead owner', async 
   files.set(generationPath(0), '554\n');
   files.set(generationPath(1), '555\n');
 
-  // Both acquirers have read the dead owner of generation 1 before either links generation 2.
   const linkAfterBoth =
     (pid: number, link: StoreLockFunctions['link']) =>
     async (existingPath: string, newPath: string) => {
@@ -560,7 +556,6 @@ it('never reuses a generation whose release marker outlives its file', async () 
   files.set(lockPath, '999\n');
   files.set(releasedPath(0), '555\n');
 
-  // Each acquirer pauses when it has read the stale PID again and is about to remove the lock.
   const pauseAtLock =
     (paused: PromiseWithResolvers<undefined>, resume: PromiseWithResolvers<undefined>) =>
     async (path: string) => {
