@@ -55,6 +55,8 @@ interface NewTicket {
   project: ProjectName;
   slug: string;
   text: string;
+  // IDs that an alias already names, so a new ticket must not take them.
+  reserved: ReadonlySet<TicketId>;
 }
 
 type DirectoryFunctions = Pick<TicketFileFunctions, 'readdir' | 'stat'>;
@@ -276,7 +278,7 @@ const createWithFreeId = async (
     return names;
   }
 
-  if (idIsTaken(names.value, parsed.value)) {
+  if (idIsTaken(names.value, parsed.value) || ticket.reserved.has(parsed.value)) {
     return createWithFreeId(files, ticket, attemptsLeft - 1);
   }
 
@@ -300,6 +302,7 @@ export const createTicketFile = async (
   project: ProjectName,
   title: string,
   text: string,
+  reserved: ReadonlySet<TicketId> = new Set<TicketId>(),
 ): Promise<Result<CreatedTicketFile, TicketFileReason>> => {
   const directory = projectDirectory(store, project);
 
@@ -309,7 +312,7 @@ export const createTicketFile = async (
     return failed(`Cannot create ${directory}.`);
   }
 
-  const ticket = { store, project, slug: createTicketSlug(title), text };
+  const ticket = { store, project, slug: createTicketSlug(title), text, reserved };
 
   return createWithFreeId(files, ticket, maxCreateAttempts);
 };

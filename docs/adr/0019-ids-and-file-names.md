@@ -17,9 +17,10 @@ and never renamed automatically. The one exception is an ID clash found after a 
 tikk gives the newer ticket a new ID, renames its file, and writes an `alias` fact from the old ID
 to the new one. The alias also names the fact lines that the renamed ticket's side added under the
 old ID, so those lines read under the new ID. Fact lines are never rewritten. Until a sync resolves
-a shared ID, commands that append a fact for it refuse it with the `idShared` error. The rename
-moves the whole folder `tickets/<project>/<id>/` with the ticket file, even when both clashing
-tickets had a folder. A new ID never matches a folder name that exists.
+a shared ID, commands that append a fact for it refuse it with the `idShared` error. An alias whose
+clash was abandoned, with no ticket under its new ID, moves nothing, and no new ID takes that ID.
+The rename moves the whole folder `tickets/<project>/<id>/` with the ticket file, even when both
+clashing tickets had a folder. A new ID never matches a folder name that exists.
 
 The `project` field comes from the repository's `origin` through tikk's config, and is `personal`
 outside a repository. It replaces Linear team and project routing.

@@ -202,6 +202,7 @@ const strictCommands = {
   logNewer: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-b.md',
   parents: 'rev-list --first-parent --merges --parents HEAD',
   headFacts: 'ls-tree -r -z --name-only HEAD -- facts',
+  headTickets: 'ls-tree -r -z --name-only HEAD -- tickets',
   headRenamed: 'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa-b.md',
   head: 'rev-parse --verify --quiet HEAD',
   readTree: 'read-tree HEAD',
@@ -216,6 +217,7 @@ const strictReplies: Record<string, string> = {
   [strictCommands.logNewer]: '1000\n2000\n',
   [strictCommands.parents]: '',
   [strictCommands.headFacts]: '',
+  [strictCommands.headTickets]: '',
   [strictCommands.headRenamed]: 'tickets/demo/demo-aaaa-b.md\0',
   [strictCommands.head]: '',
   [strictCommands.readTree]: '',
@@ -290,6 +292,7 @@ it('runs exactly the expected Git calls for a tracked clash, and commits with si
     strictCommands.logOlder,
     strictCommands.logNewer,
     strictCommands.headFacts,
+    strictCommands.headTickets,
     strictCommands.headRenamed,
     strictCommands.parents,
     strictCommands.head,
@@ -731,9 +734,109 @@ it('stops before the alias and the rename when a fact file that exists cannot be
         'tickets/demo/demo-aaaa-b.md\0',
       ),
       'rev-list --first-parent --merges --parents HEAD': gitOutput('merge left right\n'),
-      'ls-tree -r -z --name-only left -- facts': gitOutput('facts/fake/2026-10.jsonl\0'),
-      'show left:facts/fake/2026-10.jsonl': gitFailure('read failed'),
+      'ls-tree -r -z --name-only right -- facts': gitOutput('facts/fake/2026-10.jsonl\0'),
+      'show right:facts/fake/2026-10.jsonl': gitFailure('read failed'),
     }),
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.aliasWrites()).toBe(0);
+  expect(fake.renames).toEqual([]);
+});
+
+it('stops before the alias and the rename when this machine fact folder cannot be read', async () => {
+  const fake = twoTickets({
+    git: mergeGit({
+      'ls-tree -r -z --name-only left -- tickets/demo/demo-aaaa-b.md': gitOutput(
+        'tickets/demo/demo-aaaa-b.md\0',
+      ),
+      'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa-b.md': gitOutput(
+        'tickets/demo/demo-aaaa-b.md\0',
+      ),
+      'rev-list --first-parent --merges --parents HEAD': gitOutput('merge left right\n'),
+    }),
+  });
+
+  const readdir = fake.functions.readdir;
+
+  fake.functions.readdir = (directory) =>
+    directory === '/store/facts/fake'
+      ? Promise.reject(Object.assign(new Error('denied'), { code: 'EACCES' }))
+      : readdir(directory);
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.aliasWrites()).toBe(0);
+  expect(fake.renames).toEqual([]);
+});
+
+it('does not give a clashing ticket an ID that an alias fact already names as its new ID', async () => {
+  const alias = JSON.stringify({
+    version: 1,
+    ticket: 'demo-qqqq',
+    at: '2026-10-05T10:00:00.000Z',
+    machine: 'fake',
+    kind: 'alias',
+    from: 'demo-aaaa',
+  });
+
+  const fake = twoTickets({
+    suffixes: ['qqqq', 'zzzz'],
+    files: { [factPath]: { text: `${alias}\n`, mtimeMs: 0 } },
+    folders: {
+      '/store/tickets': ['demo'],
+      '/store/tickets/demo': ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+      '/store/facts': ['fake'],
+      '/store/facts/fake': ['2026-10.jsonl'],
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((entry) => String(entry.to))).toEqual(['demo-zzzz']);
+});
+
+it('does not reuse the new ID of an alias that HEAD already holds', async () => {
+  const committedAlias = JSON.stringify({
+    version: 1,
+    ticket: 'demo-qqqq',
+    at: '2026-10-05T10:00:00.000Z',
+    machine: 'fake',
+    kind: 'alias',
+    from: 'demo-aaaa',
+  });
+
+  const fake = twoTickets({
+    aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: 'facts/fake/2026-10.jsonl' }],
+    git: (args) =>
+      args.some((arg) => arg.startsWith('HEAD:facts/'))
+        ? gitOutput(`${committedAlias}\n`)
+        : undefined,
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-zzzz']);
+  expect(fake.aliasWrites()).toBe(1);
+});
+
+it('stops before an alias or a rename when HEAD has the alias fact file but it cannot be read', async () => {
+  const aliasFactPath = 'facts/fake/2026-10.jsonl';
+
+  const fake = twoTickets({
+    aliases: [{ from: 'demo-aaaa', to: 'demo-qqqq', path: aliasFactPath }],
+    git: (args) => {
+      if (args.includes(`HEAD:${aliasFactPath}`)) {
+        return gitFailure('injected read failure');
+      }
+
+      return args.includes('ls-tree') && args.includes(aliasFactPath)
+        ? gitOutput(`${aliasFactPath}\0`)
+        : undefined;
+    },
   });
 
   const result = await resolveIdClashes(fake.functions, root);

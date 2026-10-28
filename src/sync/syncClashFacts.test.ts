@@ -33,6 +33,7 @@ const gitReplies = (replies: Record<string, string>) => ({
 
     const defaults = {
       'ls-tree -r -z --name-only HEAD -- facts': '',
+      'ls-tree -r -z --name-only HEAD -- tickets': '',
       [`ls-tree -r -z --name-only HEAD -- ${renamedPath}`]: `${renamedPath}\0`,
     };
 
@@ -40,6 +41,24 @@ const gitReplies = (replies: Record<string, string>) => ({
 
     return Promise.resolve(
       reply === undefined ? gitFailure(`no reply for ${command}`) : gitOutput(reply),
+    );
+  },
+  // The fixtures give disk the same content as HEAD, so disk reads answer from the HEAD replies.
+  readFile: (path: string) => {
+    const reply = replies[`show HEAD:${path.slice(root.length + 1)}`];
+
+    return reply === undefined
+      ? Promise.reject(new Error(`no file ${path}`))
+      : Promise.resolve(reply);
+  },
+  readdir: (directory: string) => {
+    const listed = replies[`ls-tree -r -z --name-only HEAD -- ${directory.slice(root.length + 1)}`];
+
+    return Promise.resolve(
+      (listed ?? '')
+        .split('\0')
+        .filter((path) => path !== '')
+        .map((path) => path.split('/').at(-1) ?? ''),
     );
   },
 });
@@ -98,7 +117,7 @@ it('lists nothing when both parents have the renamed file', async () => {
   expect(references).toEqual({ ok: true, value: [] });
 });
 
-it("lists this machine's old-ID lines from HEAD when neither parent has the renamed file yet", async () => {
+it("lists this machine's old-ID lines from disk when neither parent has the renamed file yet", async () => {
   const pending = progressLine('demo-aaaa', 'Pending branch progress');
   const otherTicket = progressLine('demo-zzzz', 'another ticket');
 
@@ -166,6 +185,7 @@ it('leaves out a line an earlier alias already moves when a later clash renames 
     'ls-tree -r -z --name-only HEAD -- facts':
       'facts/second/2026-10.jsonl\0facts/first/2026-10.jsonl\0',
     'ls-tree -r -z --name-only HEAD -- facts/second': 'facts/second/2026-10.jsonl\0',
+    'ls-tree -r -z --name-only HEAD -- tickets': 'tickets/demo/demo-zzzz-x.md\0',
     'show HEAD:facts/second/2026-10.jsonl': `${movedEarlier}\n${newLine}\n`,
     'show HEAD:facts/first/2026-10.jsonl': `${earlierAlias}\n`,
   });
@@ -188,4 +208,40 @@ it("lists this machine's old-ID lines when a fast-forward leaves the renamed fil
   const references = await movedFactReferences(git, root, renamedPath, clashId(), 'second');
 
   expect(references).toEqual({ ok: true, value: [{ path: 'second/2026-10.jsonl', line: 1 }] });
+});
+
+it('does not skip a line that an alias moved when the alias new ticket is not in HEAD', async () => {
+  const newLine = progressLine('demo-aaaa', 'Added after the abandoned alias');
+
+  const abandonedAlias = JSON.stringify({
+    version: 1,
+    ticket: 'demo-zzzz',
+    at: '2026-10-20T10:00:00.000Z',
+    machine: 'first',
+    kind: 'alias',
+    from: 'demo-aaaa',
+    movedFacts: [{ path: 'second/2026-10.jsonl', line: 1 }],
+  });
+
+  const git = gitReplies({
+    'rev-list --first-parent --merges --parents HEAD': 'merge left right\n',
+    [`ls-tree -r -z --name-only left -- ${renamedPath}`]: '',
+    [`ls-tree -r -z --name-only right -- ${renamedPath}`]: '',
+    'ls-tree -r -z --name-only HEAD -- tickets': '',
+    'ls-tree -r -z --name-only HEAD -- facts':
+      'facts/second/2026-10.jsonl\0facts/first/2026-10.jsonl\0',
+    'ls-tree -r -z --name-only HEAD -- facts/second': 'facts/second/2026-10.jsonl\0',
+    'show HEAD:facts/second/2026-10.jsonl': `${progressLine('demo-aaaa', 'Moved by the abandoned alias')}\n${newLine}\n`,
+    'show HEAD:facts/first/2026-10.jsonl': `${abandonedAlias}\n`,
+  });
+
+  const references = await movedFactReferences(git, root, renamedPath, clashId(), 'second');
+
+  expect(references).toEqual({
+    ok: true,
+    value: [
+      { path: 'second/2026-10.jsonl', line: 1 },
+      { path: 'second/2026-10.jsonl', line: 2 },
+    ],
+  });
 });

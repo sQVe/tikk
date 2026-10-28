@@ -249,7 +249,10 @@ it('does not count a folder file in HEAD as the ticket that an alias waits for',
       args.includes('ls-tree')
         ? gitOutput('tickets/demo/demo-qqqq/demo-qqqq-b.md\n')
         : listing([], [factPath])(args),
-    files: { [`/store/${factPath}`]: { text: alias, mtimeMs: 0 } },
+    files: {
+      ...openClashFiles,
+      [`/store/${factPath}`]: { text: alias, mtimeMs: 0 },
+    },
   });
 
   await commitStore(fake.functions, root);
@@ -257,20 +260,22 @@ it('does not count a folder file in HEAD as the ticket that an alias waits for',
   expect(fake.blobs).toEqual([]);
 });
 
-it('holds back an unplaced alias that sits before the committed lines of a fact file', async () => {
+it('holds back every line after an unplaced alias, so the commit stays a prefix of the file', async () => {
   const factPath = 'facts/laptop/2026-10.jsonl';
   const aliasLine = '{"version":1,"kind":"alias","ticket":"demo-qqqq","from":"demo-aaaa"}\n';
-  const committedLine = '{"version":1,"kind":"log"}\n';
+  const laterLine = '{"version":1,"kind":"log"}\n';
 
   const fake = makeSync({
-    git: (args) =>
-      args.includes('show') ? gitOutput(committedLine) : listing([], [factPath])(args),
-    files: { [`/store/${factPath}`]: { text: aliasLine + committedLine, mtimeMs: 0 } },
+    git: (args) => (args.includes('show') ? gitOutput('') : listing([], [factPath])(args)),
+    files: {
+      ...openClashFiles,
+      [`/store/${factPath}`]: { text: aliasLine + laterLine, mtimeMs: 0 },
+    },
   });
 
   await commitStore(fake.functions, root);
 
-  expect(fake.blobs).toEqual([committedLine]);
+  expect(fake.blobs).toEqual([]);
 });
 
 const pathspecs = 'facts logs tickets tikk.json .gitattributes';
@@ -333,13 +338,71 @@ const strictGit = (options: StrictOptions = {}): NonNullable<FakeSyncOptions['gi
 
 const factFile = 'facts/m/2026-10.jsonl';
 
+// Two ticket files with the old ID of the aliases below, so their clash is still open.
+const openClashFiles = {
+  '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
+  '/store/tickets/demo/demo-aaaa-second.md': { text: 'ticket', mtimeMs: 0 },
+};
+
 const aliasLine = (ticket: string | number): string =>
   `${JSON.stringify({ version: 1, kind: 'alias', ticket, from: 'demo-aaaa' })}\n`;
 
 const strictStore = (options: StrictOptions, files: FakeSyncOptions['files'] = {}) =>
   makeSync({ now, git: strictGit(options), files });
 
-it('commits fact lines unchanged except an alias whose rename is not in HEAD yet', async () => {
+// Answers the HEAD fact text and the HEAD tickets, and lists the fact file as changed.
+const headFactGit = (headText: string, headTickets: string[]) => (args: string[]) => {
+  if (args.includes('show')) {
+    return gitOutput(headText);
+  }
+
+  if (args.includes('ls-tree')) {
+    return gitOutput(headTickets.map((path) => `${path}\n`).join(''));
+  }
+
+  return listing([], [factFile])(args);
+};
+
+const placedAlias = aliasLine('demo-qqqq');
+const waitingAlias = aliasLine('demo-rrrr');
+const firstLog = '{"version":1,"kind":"log","text":"first"}\n';
+const lastLog = '{"version":1,"kind":"log","text":"last"}\n';
+const diskFactText = placedAlias + firstLog + waitingAlias + lastLog;
+
+it('commits only a prefix of the fact file when a later alias waits for its rename', async () => {
+  const fake = makeSync({
+    git: headFactGit('', ['tickets/demo/demo-qqqq-b.md']),
+    files: {
+      ...openClashFiles,
+      [`/store/${factFile}`]: { text: diskFactText, mtimeMs: 0 },
+    },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toHaveLength(1);
+  expect(diskFactText.startsWith(fake.blobs[0] ?? '')).toBe(true);
+  expect(fake.blobs).toEqual([placedAlias + firstLog]);
+});
+
+it('commits the held lines in a later sync once their alias can be committed', async () => {
+  const fake = makeSync({
+    git: headFactGit(placedAlias + firstLog, [
+      'tickets/demo/demo-qqqq-b.md',
+      'tickets/demo/demo-rrrr-b.md',
+    ]),
+    files: {
+      ...openClashFiles,
+      [`/store/${factFile}`]: { text: diskFactText, mtimeMs: 0 },
+    },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([diskFactText]);
+});
+
+it('commits the lines before the first alias whose rename is not in HEAD yet', async () => {
   const committedAlias = aliasLine('demo-gone');
   const placed = aliasLine('demo-qqqq');
   const waiting = aliasLine('demo-rrrr');
@@ -363,13 +426,13 @@ it('commits fact lines unchanged except an alias whose rename is not in HEAD yet
       headFacts: { [factFile]: committedAlias },
       headTickets: ['tickets/demo/demo-other-x.md', 'tickets/demo/demo-qqqq-b.md'],
     },
-    { [`/store/${factFile}`]: { text: lines.join(''), mtimeMs: 0 } },
+    { ...openClashFiles, [`/store/${factFile}`]: { text: lines.join(''), mtimeMs: 0 } },
   );
 
   const result = await commitStore(fake.functions, root);
 
   expect(result).toEqual({ ok: true, value: { committed: true, pending: [] } });
-  expect(fake.blobs).toEqual([lines.filter((line) => line !== waiting).join('')]);
+  expect(fake.blobs).toEqual([lines.slice(0, lines.indexOf(waiting)).join('')]);
 });
 
 it('stages an empty fact file, and skips one whose only line waits for its rename', async () => {
@@ -380,7 +443,7 @@ it('stages an empty fact file, and skips one whose only line waits for its renam
 
   const waiting = strictStore(
     { changed: [factFile] },
-    { [`/store/${factFile}`]: { text: aliasLine('demo-rrrr'), mtimeMs: 0 } },
+    { ...openClashFiles, [`/store/${factFile}`]: { text: aliasLine('demo-rrrr'), mtimeMs: 0 } },
   );
 
   await commitStore(empty.functions, root);
@@ -514,5 +577,96 @@ it('leaves a ticket pending when its age cannot be read', async () => {
   const result = await commitStore(functions, root);
 
   expect(result).toEqual({ ok: true, value: { committed: false, pending: ['tickets/demo/a.md'] } });
+  expect(fake.blobs).toEqual([]);
+});
+
+it('commits an alias whose clash is over, with the lines after it', async () => {
+  const abandonedAlias = aliasLine('demo-qqqq');
+  const laterLine = '{"version":1,"kind":"log"}\n';
+
+  const fake = makeSync({
+    git: headFactGit('', []),
+    files: {
+      [`/store/${factFile}`]: { text: abandonedAlias + laterLine, mtimeMs: 0 },
+      '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
+    },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([abandonedAlias + laterLine]);
+});
+
+it('holds back an alias while its old ID is still shared by two ticket files', async () => {
+  const fake = makeSync({
+    git: headFactGit('', []),
+    files: {
+      [`/store/${factFile}`]: { text: placedAlias + firstLog, mtimeMs: 0 },
+      '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
+      '/store/tickets/demo/demo-aaaa-second.md': { text: 'ticket', mtimeMs: 0 },
+    },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([]);
+});
+
+it('keeps an alias open when the clash is in a later project folder', async () => {
+  const alias = aliasLine('demo-qqqq');
+
+  const fake = makeSync({
+    git: headFactGit('', []),
+    files: {
+      '/store/tickets/aaa/notes.md': { text: 'not a ticket', mtimeMs: 0 },
+      '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
+      '/store/tickets/demo/demo-aaaa-second.md': { text: 'ticket', mtimeMs: 0 },
+      [`/store/${factFile}`]: { text: alias + firstLog, mtimeMs: 0 },
+    },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([]);
+});
+
+it('does not count a copy of the old ID in another project folder as a second ticket file', async () => {
+  const alias = aliasLine('demo-qqqq');
+
+  const fake = makeSync({
+    git: headFactGit('', []),
+    files: {
+      '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
+      '/store/tickets/other/demo-aaaa-copy.md': { text: 'copy', mtimeMs: 0 },
+      [`/store/${factFile}`]: { text: alias + firstLog, mtimeMs: 0 },
+    },
+  });
+
+  await commitStore(fake.functions, root);
+
+  expect(fake.blobs).toEqual([alias + firstLog]);
+});
+
+it('fails and commits nothing when a project folder cannot be read while the alias is checked', async () => {
+  const alias = aliasLine('demo-qqqq');
+
+  const fake = makeSync({
+    git: headFactGit('', []),
+    files: {
+      '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
+      [`/store/${factFile}`]: { text: alias + firstLog, mtimeMs: 0 },
+    },
+  });
+
+  const readdir = fake.functions.readdir;
+
+  fake.functions.readdir = (directory) =>
+    directory === '/store/tickets/demo'
+      ? Promise.reject(Object.assign(new Error('denied'), { code: 'EACCES' }))
+      : readdir(directory);
+
+  const result = await commitStore(fake.functions, root);
+
+  expect(result.ok).toBe(false);
   expect(fake.blobs).toEqual([]);
 });

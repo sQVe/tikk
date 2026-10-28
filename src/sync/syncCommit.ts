@@ -1,7 +1,8 @@
 import { join } from 'node:path';
 
 import type { Result } from '../result.ts';
-import { parseTicketFile } from '../ticket/ticket.ts';
+import type { ProjectName } from '../ticket/ticket.ts';
+import { parseProjectName, parseTicketFile, parseTicketFileName } from '../ticket/ticket.ts';
 
 export interface SyncReason {
   kind: 'conflict' | 'locked' | 'failed';
@@ -20,6 +21,7 @@ export interface SyncCommitFunctions {
   stat: (path: string) => Promise<{ mtimeMs: number }>;
   lstat: (path: string) => Promise<unknown>;
   readFile: (path: string) => Promise<string>;
+  readdir: (directory: string) => Promise<string[]>;
   now: () => number;
 }
 
@@ -205,47 +207,164 @@ const isFactPath = (path: string): boolean => path.startsWith('facts/');
 
 const isTextPath = (path: string): boolean => isTicketPath(path) || isFactPath(path);
 
-// A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
-// waits for the clash commit. A line that `HEAD` already holds is never dropped, since facts are
-// append-only.
-const withoutUnplacedAliases = (
-  text: string,
-  headNames: string[],
-  committedLines: Set<string>,
-): string => {
-  const kept = text.split('\n').filter((line) => {
-    if (committedLines.has(line)) {
-      return true;
-    }
+// Lists a folder. A folder that does not exist has no names; any other failure is an error.
+export const readFolderNames = async (
+  functions: Pick<SyncCommitFunctions, 'readdir'>,
+  folder: string,
+): Promise<Result<string[], SyncReason>> => {
+  const listed = await functions.readdir(folder).then(
+    (names) => ({ ok: true as const, value: names }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
 
-    try {
-      const fact: unknown = JSON.parse(line);
-      const fields = new Map<string, unknown>(fact instanceof Object ? Object.entries(fact) : []);
-      const ticket = fields.get('ticket');
-      const isAlias = fields.get('kind') === 'alias' && typeof ticket === 'string';
+  if (listed.ok) {
+    return { ok: true, value: listed.value };
+  }
 
-      return !isAlias || headNames.some((name) => name.startsWith(`${ticket}-`));
-    } catch {
-      return true;
-    }
-  });
+  const missing =
+    listed.error instanceof Error && 'code' in listed.error && listed.error.code === 'ENOENT';
 
-  return kept.join('\n');
+  return missing ? { ok: true, value: [] } : failedReason(`Cannot read ${folder}.`);
 };
 
-// An ordinary commit can land while an alias waits, so the committed lines need not be a prefix
-// of the file.
+// The IDs of the ticket files in one project folder. A file counts only when its name parses as a
+// ticket of that project, the same rule the cache uses for shared IDs.
+const projectTicketIds = async (
+  functions: SyncCommitFunctions,
+  root: string,
+  folder: string,
+  project: ProjectName,
+): Promise<Result<string[], SyncReason>> => {
+  const listed = await readFolderNames(functions, join(root, 'tickets', folder));
+
+  if (!listed.ok) {
+    return listed;
+  }
+
+  const ids: string[] = [];
+
+  for (const name of listed.value) {
+    const parsed = parseTicketFileName(name, project);
+
+    if (parsed.ok) {
+      ids.push(parsed.value.id);
+    }
+  }
+
+  return { ok: true, value: ids };
+};
+
+// The IDs of the ticket files on disk, across every project folder.
+const listDiskTicketIds = async (
+  functions: SyncCommitFunctions,
+  root: string,
+): Promise<Result<string[], SyncReason>> => {
+  const projects = await readFolderNames(functions, join(root, 'tickets'));
+
+  if (!projects.ok) {
+    return projects;
+  }
+
+  const ids: string[] = [];
+
+  for (const folder of projects.value) {
+    const project = parseProjectName(folder);
+
+    if (project.ok) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Folders are read in turn.
+      const listed = await projectTicketIds(functions, root, folder, project.value);
+
+      if (!listed.ok) {
+        return listed;
+      }
+
+      ids.push(...listed.value);
+    }
+  }
+
+  return { ok: true, value: ids };
+};
+
+const aliasLinkOf = (line: string): { ticket: string; from: string } | undefined => {
+  let fact: unknown;
+
+  try {
+    fact = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+
+  const fields = new Map<string, unknown>(fact instanceof Object ? Object.entries(fact) : []);
+  const ticket = fields.get('ticket');
+  const from = fields.get('from');
+
+  if (fields.get('kind') !== 'alias' || typeof ticket !== 'string' || typeof from !== 'string') {
+    return undefined;
+  }
+
+  return { ticket, from };
+};
+
+// A clash is open while its old ID is still on two ticket files, or its new ID has a file that
+// HEAD does not hold yet. An alias for a clash that is over moves nothing, and is committed.
+const isOpenClash = (link: { ticket: string; from: string }, diskIds: string[]): boolean => {
+  const sharedOldId = diskIds.filter((id) => id === link.from).length > 1;
+  const newIdOnDisk = diskIds.includes(link.ticket);
+
+  return sharedOldId || newIdOnDisk;
+};
+
+const isWaitingAlias = (
+  link: { ticket: string; from: string },
+  headNames: string[],
+  diskNames: string[],
+): boolean =>
+  !headNames.some((name) => name.startsWith(`${link.ticket}-`)) && isOpenClash(link, diskNames);
+
+// A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
+// waits for the clash commit while the clash is open. The commit takes only a prefix of the fact
+// file: a waiting line holds back every line after it, so the committed file stays a prefix of the
+// disk file, and the line numbers that references use stay the same on every clone. A line `HEAD`
+// already holds is kept.
+const withoutWaitingAliases = (
+  text: string,
+  headNames: string[],
+  diskNames: string[],
+  committedLines: Set<string>,
+): string => {
+  const lines = text.split('\n');
+
+  // The last piece follows the final newline, so it is a line only once that newline is written.
+  lines.pop();
+
+  const kept: string[] = [];
+
+  for (const line of lines) {
+    const link = committedLines.has(line) ? undefined : aliasLinkOf(line);
+
+    if (link !== undefined && isWaitingAlias(link, headNames, diskNames)) {
+      break;
+    }
+
+    kept.push(`${line}\n`);
+  }
+
+  return kept.join('');
+};
+
+// An ordinary commit can land while an alias waits, so the committed lines are a prefix of the file.
 const filterFactText = async (
   functions: SyncCommitFunctions,
   root: string,
   path: string,
   text: string,
   headNames: string[],
+  diskNames: string[],
 ): Promise<string> => {
   const head = await functions.runGit(['-C', root, 'show', `HEAD:${path}`]);
   const committedLines = new Set(head.ok ? head.value.split('\n') : []);
 
-  return withoutUnplacedAliases(text, headNames, committedLines);
+  return withoutWaitingAliases(text, headNames, diskNames, committedLines);
 };
 
 const listHeadTicketNames = async (
@@ -380,6 +499,11 @@ const stageCandidates = async (
 
   const pending: string[] = [];
   const headNames = await listHeadTicketNames(functions, root);
+  const diskNames = await listDiskTicketIds(functions, root);
+
+  if (!diskNames.ok) {
+    return diskNames;
+  }
 
   for (const [index, path] of candidates.entries()) {
     if (!isTextPath(path)) {
@@ -407,7 +531,7 @@ const stageCandidates = async (
 
     const text = isFactPath(path)
       ? // oxlint-disable-next-line eslint/no-await-in-loop -- Runs with the one-at-a-time staging below.
-        await filterFactText(functions, root, path, checked, headNames)
+        await filterFactText(functions, root, path, checked, headNames, diskNames.value)
       : checked;
 
     if (text === '' && checked !== '') {

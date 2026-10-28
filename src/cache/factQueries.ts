@@ -241,3 +241,15 @@ export const listFactErrors = (database: Database): CachedError[] => {
     return { path: `${row.data.path}:${row.data.line}`, message: row.data.message };
   });
 };
+
+// The new ID that each alias fact names, as written. The projection can move an alias line under a
+// later ID, so this reads the stored `ticket` field, not the projected one.
+export const listAliasDestinations = (database: Database): Result<TicketId[], FactDamage> => {
+  const aliases = readPlacedFacts(database, undefined, "kind = 'alias'");
+
+  if (!aliases.ok) {
+    return aliases;
+  }
+
+  return { ok: true, value: aliases.value.map((item) => item.fact.ticket) };
+};

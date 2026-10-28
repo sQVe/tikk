@@ -19,6 +19,8 @@ import { openCache } from '../src/cache/cache.ts';
 import { parseFactLine } from '../src/fact/fact.ts';
 import type { Fact } from '../src/fact/fact.ts';
 import { invariant } from '../src/invariant.ts';
+import { createOpenSession } from '../src/sessionEffects.ts';
+import { nodeTicketFiles } from '../src/store/storeHarness.ts';
 import { ticketFolderPath } from '../src/store/storePaths.ts';
 import { parseProjectName, parseTicketId } from '../src/ticket/ticket.ts';
 import { createCliFixture, createCloneFixtures, waitForBackgroundSync } from './cliFixture.ts';
@@ -638,6 +640,17 @@ const runJsonError = (stdout: string): string | undefined => {
   const parsed = JSON.parse(stdout) as { error?: { code?: string } };
 
   return parsed.error?.code;
+};
+
+const gitShowOrEmpty = async (root: string, object: string): Promise<string> => {
+  const child = Bun.spawn(['git', '-C', root, 'show', object], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+
+  const [stdout, exitCode] = await Promise.all([child.stdout.text(), child.exited]);
+
+  return exitCode === 0 ? stdout : '';
 };
 
 const readFactFiles = async (fixture: CliFixture): Promise<Map<string, string>> => {
@@ -2010,6 +2023,220 @@ it('a retry after a failed clash commit moves a fact written on the other clone 
 
     expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
   }
+});
+
+it('a second clash after a failed alias commit moves the renamed ticket later facts to it', async () => {
+  const { first, second, remotePath } = clonePair();
+  const third = await createCliFixture('tikk-sync-third-', { machine: 'third', remotePath });
+
+  try {
+    await first.runChecked(['init', '--remote', remotePath]);
+    await second.runChecked(['init', '--remote', remotePath]);
+    await third.runChecked(['init', '--remote', remotePath]);
+
+    const parent = await first.runJson<ShownInstruction>([
+      'new',
+      'slice',
+      'Shared parent',
+      '--status',
+      'draft',
+    ]);
+
+    await ageFile(parent.path);
+    await first.runChecked(['sync']);
+    await second.runChecked(['sync']);
+    await removeOrigin(third);
+
+    // Third keeps an older demo-bbbb offline, so a later merge brings a second clash.
+    await writeClashTicket(third, 'demo-bbbb', 'older-b', parent.id);
+    await third.runChecked(['sync']);
+
+    await writeClashTicket(first, 'demo-aaaa', 'older-a', parent.id);
+    await first.runChecked(['sync']);
+    await Bun.sleep(1100);
+
+    // Second's newer demo-aaaa is renamed, but its clash commit fails after the alias is written.
+    await removeOrigin(second);
+    await writeClashTicket(second, 'demo-aaaa', 'newer-a', parent.id);
+    await second.runChecked(['sync']);
+    await addOrigin(second, remotePath);
+
+    const hook = join(second.storePath, '.git', 'hooks', 'pre-commit');
+
+    await mkdir(dirname(hook), { recursive: true });
+
+    await writeFile(
+      hook,
+      '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+    );
+
+    await chmod(hook, 0o755);
+
+    const failed = await second.run(['sync']);
+
+    expect(failed.exitCode).not.toBe(0);
+    await rm(hook);
+
+    // The ordinary commit leaves the pending alias out, so later facts sit below it on disk.
+    await removeOrigin(second);
+    await writeClashTicket(second, 'demo-bbbb', 'newer-b', parent.id);
+
+    await second.runChecked([
+      'log',
+      'demo-bbbb',
+      '--type',
+      'progress',
+      '--text',
+      'B fact after pending alias',
+    ]);
+
+    await second.runChecked(['sync']);
+
+    // The ordinary sync holds the alias back, so each fact file in HEAD is a prefix of its disk file.
+    for (const [file, diskText] of await readFactFiles(second)) {
+      const headText = await gitShowOrEmpty(second.storePath, `HEAD:facts/${file}`);
+
+      expect(diskText.startsWith(headText)).toBe(true);
+    }
+
+    await addOrigin(third, remotePath);
+    await third.runChecked(['sync']);
+    await addOrigin(second, remotePath);
+
+    const retry = await second.runJson<AliasSyncReport>(['sync']);
+    const alias = retry.aliases.find((entry) => entry.from === 'demo-bbbb');
+
+    invariant(alias !== undefined, 'The retry should rename the newer demo-bbbb.');
+
+    await second.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(second, alias.to))).toEqual(['B fact after pending alias']);
+    expect(logTexts(listTicketFacts(second, 'demo-bbbb'))).toEqual([]);
+  } finally {
+    await third.cleanup();
+  }
+});
+
+it('a later sync commits an alias whose clash was abandoned by hand, with the facts after it', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  const offline = join(first.home, 'offline.git');
+
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', offline]);
+  await writeClashTicket(first, 'demo-aaaa', 'older', parent.id);
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeClashTicket(second, 'demo-aaaa', 'newer', parent.id);
+  await second.runChecked(['sync']);
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', remotePath]);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const abandoned = aliasTicketOf(await readAllFacts(first));
+
+  // The clash is abandoned by hand: the duplicate file is removed, so the old ID is unique.
+  await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-newer.md'));
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A log after the abandoned clash',
+  ]);
+
+  await rm(hook);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  await second.runChecked(['ls']);
+
+  expect(await readAllFacts(second)).toContain('A log after the abandoned clash');
+
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual([
+    'A log after the abandoned clash',
+  ]);
+
+  expect(logTexts(listTicketFacts(second, abandoned))).toEqual([]);
+
+  for (const [file, diskText] of await readFactFiles(first)) {
+    const headText = await gitShowOrEmpty(first.storePath, `HEAD:facts/${file}`);
+
+    expect(diskText.startsWith(headText)).toBe(true);
+  }
+});
+
+it('a new ticket skips an ID that a chained alias hides from the projected fact list', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const factsDirectory = join(fixture.storePath, 'facts', 'desk');
+  const ticketsDirectory = join(fixture.storePath, 'tickets', 'demo');
+  const firstAlias = `${JSON.stringify({ version: 1, ticket: 'demo-bbbb', at: '2026-10-20T10:00:00.000Z', machine: 'desk', kind: 'alias', from: 'demo-aaaa' })}\n`;
+  // The second alias moves the first alias line, so the first alias reads under demo-cccc.
+  const chainedAlias = `${JSON.stringify({ version: 1, ticket: 'demo-cccc', at: '2026-10-20T11:00:00.000Z', machine: 'desk', kind: 'alias', from: 'demo-bbbb', movedFacts: [{ path: 'desk/2026-10.jsonl', line: 1 }] })}\n`;
+
+  await mkdir(factsDirectory, { recursive: true });
+  await mkdir(ticketsDirectory, { recursive: true });
+  await writeFile(join(factsDirectory, '2026-10.jsonl'), firstAlias + chainedAlias);
+
+  await writeFile(
+    join(ticketsDirectory, 'demo-cccc-renamed.md'),
+    '---\nkind: task\ntitle: Renamed\nproject: demo\nstatus: open\n---\n',
+  );
+
+  const suffixes = ['bbbb', 'zzzz'];
+
+  const opened = await createOpenSession(
+    fixture.storePath,
+    join(fixture.home, '.cache', 'tikk', 'index.db'),
+    { ...nodeTicketFiles, randomIdSuffix: () => suffixes.shift() ?? 'zzzz' },
+  )();
+
+  invariant(opened.ok, 'The session should open.');
+
+  const session = opened.value;
+
+  await session.refresh();
+
+  const project = parseProjectName('demo');
+
+  invariant(project.ok, 'The project name should parse.');
+
+  const created = await session.createTicketFile(project.value, 'New', 'New ticket.\n');
+
+  expect(created).toMatchObject({ ok: true, value: { id: 'demo-zzzz' } });
+  session[Symbol.dispose]();
 });
 
 it('an ID clash after a sync merge moves the folder to the new ID', async () => {

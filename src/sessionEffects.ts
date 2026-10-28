@@ -20,7 +20,7 @@ import {
   tryStoreLock,
   writeTicketFile,
 } from './store/store.ts';
-import type { Store } from './store/store.ts';
+import type { Store, TicketFileFunctions } from './store/store.ts';
 import {
   factFiles,
   logFiles,
@@ -94,10 +94,14 @@ const checkIdUnshared = (
       }
     : { ok: true, value: undefined };
 
-const sessionFor = (store: Store, cache: TicketCache): CliSession => {
+const sessionFor = (
+  store: Store,
+  cache: TicketCache,
+  fileFunctions: TicketFileFunctions,
+): CliSession => {
   const files: CacheFiles = {
-    listTicketFiles: () => listTicketFiles(ticketFiles, store),
-    readTicketFile: (path) => readTicketFile(ticketFiles, path),
+    listTicketFiles: () => listTicketFiles(fileFunctions, store),
+    readTicketFile: (path) => readTicketFile(fileFunctions, path),
     listFactFiles: () => listFactFiles(factFiles, store),
     readFactFile: (path, fromByte) => readFactFile(factFiles, path, fromByte),
   };
@@ -134,10 +138,24 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
 
       return stored.ok ? stored : { ok: false, reason: { message: stored.reason.message } };
     },
-    createTicketFile: (project, title, text) =>
-      createTicketFile(ticketFiles, store, project, title, text),
+    createTicketFile: async (project, title, text) => {
+      const destinations = cache.aliasDestinations();
+
+      if (!destinations.ok) {
+        return { ok: false, reason: { kind: 'failed', message: destinations.reason.message } };
+      }
+
+      return createTicketFile(
+        fileFunctions,
+        store,
+        project,
+        title,
+        text,
+        new Set(destinations.value),
+      );
+    },
     writeTicketFile: (path, expectedHash, text) =>
-      writeTicketFile(ticketFiles, path, expectedHash, text),
+      writeTicketFile(fileFunctions, path, expectedHash, text),
     [Symbol.dispose]: () => {
       cache[Symbol.dispose]();
     },
@@ -145,7 +163,11 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
 };
 
 export const createOpenSession =
-  (storeRoot: string, cachePath: string): CliEffects['openSession'] =>
+  (
+    storeRoot: string,
+    cachePath: string,
+    fileFunctions: TicketFileFunctions = ticketFiles,
+  ): CliEffects['openSession'] =>
   async () => {
     const store = await openStore(storeRoot, storeFiles);
 
@@ -156,7 +178,7 @@ export const createOpenSession =
         return { ok: false, reason: { code: 'storeError', message: cache.reason.message } };
       }
 
-      return { ok: true, value: sessionFor(store.value, cache.value) };
+      return { ok: true, value: sessionFor(store.value, cache.value, fileFunctions) };
     }
 
     const code = openFailureCode(storeRoot);

@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
-import { parseProjectName, parseTicketFileName } from '../ticket/ticket.ts';
+import { parseProjectName, parseTicketFileName, parseTicketId } from '../ticket/ticket.ts';
 import { createTicketFile, listTicketFiles, readTicketFile, writeTicketFile } from './store.ts';
 import type { TicketFileFunctions } from './store.ts';
 import { nodeTicketFiles } from './storeHarness.ts';
@@ -533,4 +533,30 @@ it('still reports the write failure when removing the temporary file fails', asy
   const result = await writeTicketFile(failing, created.path, created.hash, 'replacement');
 
   expect(result).toMatchObject({ ok: false, reason: { kind: 'failed' } });
+});
+
+it('does not give a new ticket an ID that an alias already names as its new ID', async () => {
+  const suffixes = ['qqqq', 'zzzz'];
+
+  const files: TicketFileFunctions = {
+    ...nodeTicketFiles,
+    randomIdSuffix: () => suffixes.shift() ?? 'zzzz',
+  };
+
+  const reservedId = parseTicketId('tikk-qqqq');
+
+  if (!reservedId.ok) {
+    throw new Error(reservedId.reason.message);
+  }
+
+  const created = await createTicketFile(
+    files,
+    { root },
+    projectOf('tikk'),
+    'Reserved',
+    'x',
+    new Set([reservedId.value]),
+  );
+
+  expect(created).toMatchObject({ ok: true, value: { id: 'tikk-zzzz' } });
 });
