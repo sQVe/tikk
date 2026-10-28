@@ -43,7 +43,6 @@ const gitReplies = (replies: Record<string, string>) => ({
       reply === undefined ? gitFailure(`no reply for ${command}`) : gitOutput(reply),
     );
   },
-  // The fixtures give disk the same content as HEAD, so disk reads answer from the HEAD replies.
   readFile: (path: string) => {
     const reply = replies[`show HEAD:${path.slice(root.length + 1)}`];
 

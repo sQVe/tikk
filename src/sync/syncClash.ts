@@ -69,8 +69,6 @@ interface Renames extends ClashResolution {
   folders: FolderMove[];
 }
 
-// The IDs a new clash ID must avoid. `reserved` holds every alias destination, so no new ID wakes
-// an alias whose clash was abandoned.
 interface IdSets {
   taken: Set<string>;
   reserved: Set<string>;
@@ -202,9 +200,6 @@ const freeId = (
   return undefined;
 };
 
-// One clash gets one alias, even when an earlier sync wrote the alias and failed to commit the rename.
-// Only that uncommitted alias is reused. A committed alias belongs to a clash that is over, so its
-// ID is never taken again.
 const reusableId = async (
   functions: SyncClashFunctions,
   root: string,

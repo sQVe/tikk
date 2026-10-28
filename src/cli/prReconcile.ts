@@ -31,7 +31,6 @@ export interface ReconcileOutcome {
   checked: TicketId[];
   updated: UpdatedSlice[];
   problems: ReconcileProblem[];
-  // Set when a write refused an ID that two ticket files share.
   sharedId?: string;
 }
 

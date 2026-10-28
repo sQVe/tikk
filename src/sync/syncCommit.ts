@@ -207,7 +207,6 @@ const isFactPath = (path: string): boolean => path.startsWith('facts/');
 
 const isTextPath = (path: string): boolean => isTicketPath(path) || isFactPath(path);
 
-// Lists a folder. A folder that does not exist has no names; any other failure is an error.
 export const readFolderNames = async (
   functions: Pick<SyncCommitFunctions, 'readdir'>,
   folder: string,
@@ -227,8 +226,6 @@ export const readFolderNames = async (
   return missing ? { ok: true, value: [] } : failedReason(`Cannot read ${folder}.`);
 };
 
-// The IDs of the ticket files in one project folder. A file counts only when its name parses as a
-// ticket of that project, the same rule the cache uses for shared IDs.
 const projectTicketIds = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -254,7 +251,6 @@ const projectTicketIds = async (
   return { ok: true, value: ids };
 };
 
-// The IDs of the ticket files on disk, across every project folder.
 const listDiskTicketIds = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -305,8 +301,6 @@ const aliasLinkOf = (line: string): { ticket: string; from: string } | undefined
   return { ticket, from };
 };
 
-// A clash is open while its old ID is still on two ticket files, or its new ID has a file that
-// HEAD does not hold yet. An alias for a clash that is over moves nothing, and is committed.
 const isOpenClash = (link: { ticket: string; from: string }, diskIds: string[]): boolean => {
   const sharedOldId = diskIds.filter((id) => id === link.from).length > 1;
   const newIdOnDisk = diskIds.includes(link.ticket);
@@ -321,11 +315,6 @@ const isWaitingAlias = (
 ): boolean =>
   !headNames.some((name) => name.startsWith(`${link.ticket}-`)) && isOpenClash(link, diskNames);
 
-// A rename is committed with its alias fact, so an alias line whose new ID has no file in `HEAD`
-// waits for the clash commit while the clash is open. The commit takes only a prefix of the fact
-// file: a waiting line holds back every line after it, so the committed file stays a prefix of the
-// disk file, and the line numbers that references use stay the same on every clone. A line `HEAD`
-// already holds is kept.
 const withoutWaitingAliases = (
   text: string,
   headNames: string[],
@@ -352,7 +341,6 @@ const withoutWaitingAliases = (
   return kept.join('');
 };
 
-// An ordinary commit can land while an alias waits, so the committed lines are a prefix of the file.
 const filterFactText = async (
   functions: SyncCommitFunctions,
   root: string,

@@ -22,7 +22,6 @@ interface MergeSides {
 
 interface ClashSides extends MergeSides {
   tip: string;
-  // True when this machine holds the renamed ticket, so its fact files may hold lines Git lacks.
   renamedIsLocal: boolean;
 }
 
@@ -235,8 +234,6 @@ const referencesFrom = (
       : [];
   });
 
-// The machine's own fact files as they are on disk. A held-back alias line is on disk before Git has
-// it, and the clash commit stages these files from disk, so their line numbers are the ones Git gets.
 const isMissing = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
@@ -253,7 +250,6 @@ const ownDiskLines = async (
   );
 
   if (!listed.ok) {
-    // A machine with no fact file yet has no folder. Any other failure leaves its lines unknown.
     return isMissing(listed.error)
       ? { ok: true, value: new Map<string, string[]>() }
       : failed(`Cannot read ${folder}.`);
@@ -290,7 +286,6 @@ const renamedOwnLines = (
     ? ownDiskLines(functions, root, localMachine)
     : Promise.resolve({ ok: true, value: new Map<string, string[]>() });
 
-// The renamed side's lines. Its own fact files come from disk, since they can hold lines Git lacks.
 const renamedLinesOf = (
   functions: GitFunctions,
   root: string,
@@ -396,8 +391,6 @@ const pendingReferences = async (
   };
 };
 
-// The keys one fact line moves. An alias whose new ticket is not in HEAD moves nothing: its clash
-// was abandoned, so its lines are not owned by another ticket.
 const movedKeysOf = (text: string, headTicketPaths: string[]): string[] => {
   const parsed = parseFactLine(text);
 
@@ -523,7 +516,6 @@ const aliasTicketOf = (text: string): string[] => {
   return parsed.ok && parsed.value.kind === 'alias' ? [parsed.value.ticket] : [];
 };
 
-// The new ID of every alias in the store, from every machine's fact files on disk.
 export const aliasDestinations = async (
   functions: GitFunctions,
   root: string,
@@ -590,7 +582,6 @@ export const movedFactReferences = async (
 const namesAlias = (fact: { ticket: string; from: string }, alias: { from: string; to: string }) =>
   fact.ticket === alias.to && fact.from === alias.from;
 
-// True when HEAD's fact file already holds this alias line.
 export const isCommittedAlias = async (
   functions: GitFunctions,
   root: string,

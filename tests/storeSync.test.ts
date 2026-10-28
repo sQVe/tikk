@@ -2047,7 +2047,6 @@ it('a second clash after a failed alias commit moves the renamed ticket later fa
     await second.runChecked(['sync']);
     await removeOrigin(third);
 
-    // Third keeps an older demo-bbbb offline, so a later merge brings a second clash.
     await writeClashTicket(third, 'demo-bbbb', 'older-b', parent.id);
     await third.runChecked(['sync']);
 
@@ -2055,7 +2054,6 @@ it('a second clash after a failed alias commit moves the renamed ticket later fa
     await first.runChecked(['sync']);
     await Bun.sleep(1100);
 
-    // Second's newer demo-aaaa is renamed, but its clash commit fails after the alias is written.
     await removeOrigin(second);
     await writeClashTicket(second, 'demo-aaaa', 'newer-a', parent.id);
     await second.runChecked(['sync']);
@@ -2077,7 +2075,6 @@ it('a second clash after a failed alias commit moves the renamed ticket later fa
     expect(failed.exitCode).not.toBe(0);
     await rm(hook);
 
-    // The ordinary commit leaves the pending alias out, so later facts sit below it on disk.
     await removeOrigin(second);
     await writeClashTicket(second, 'demo-bbbb', 'newer-b', parent.id);
 
@@ -2092,7 +2089,6 @@ it('a second clash after a failed alias commit moves the renamed ticket later fa
 
     await second.runChecked(['sync']);
 
-    // The ordinary sync holds the alias back, so each fact file in HEAD is a prefix of its disk file.
     for (const [file, diskText] of await readFactFiles(second)) {
       const headText = await gitShowOrEmpty(second.storePath, `HEAD:facts/${file}`);
 
@@ -2162,7 +2158,6 @@ it('a later sync commits an alias whose clash was abandoned by hand, with the fa
 
   const abandoned = aliasTicketOf(await readAllFacts(first));
 
-  // The clash is abandoned by hand: the duplicate file is removed, so the old ID is unique.
   await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-newer.md'));
 
   await first.runChecked([
@@ -2203,7 +2198,6 @@ it('a new ticket skips an ID that a chained alias hides from the projected fact 
   const factsDirectory = join(fixture.storePath, 'facts', 'desk');
   const ticketsDirectory = join(fixture.storePath, 'tickets', 'demo');
   const firstAlias = `${JSON.stringify({ version: 1, ticket: 'demo-bbbb', at: '2026-10-20T10:00:00.000Z', machine: 'desk', kind: 'alias', from: 'demo-aaaa' })}\n`;
-  // The second alias moves the first alias line, so the first alias reads under demo-cccc.
   const chainedAlias = `${JSON.stringify({ version: 1, ticket: 'demo-cccc', at: '2026-10-20T11:00:00.000Z', machine: 'desk', kind: 'alias', from: 'demo-bbbb', movedFacts: [{ path: 'desk/2026-10.jsonl', line: 1 }] })}\n`;
 
   await mkdir(factsDirectory, { recursive: true });

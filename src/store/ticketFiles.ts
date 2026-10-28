@@ -55,7 +55,6 @@ interface NewTicket {
   project: ProjectName;
   slug: string;
   text: string;
-  // IDs that an alias already names, so a new ticket must not take them.
   reserved: ReadonlySet<TicketId>;
 }
 

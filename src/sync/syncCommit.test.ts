@@ -338,7 +338,6 @@ const strictGit = (options: StrictOptions = {}): NonNullable<FakeSyncOptions['gi
 
 const factFile = 'facts/m/2026-10.jsonl';
 
-// Two ticket files with the old ID of the aliases below, so their clash is still open.
 const openClashFiles = {
   '/store/tickets/demo/demo-aaaa-first.md': { text: 'ticket', mtimeMs: 0 },
   '/store/tickets/demo/demo-aaaa-second.md': { text: 'ticket', mtimeMs: 0 },
@@ -350,7 +349,6 @@ const aliasLine = (ticket: string | number): string =>
 const strictStore = (options: StrictOptions, files: FakeSyncOptions['files'] = {}) =>
   makeSync({ now, git: strictGit(options), files });
 
-// Answers the HEAD fact text and the HEAD tickets, and lists the fact file as changed.
 const headFactGit = (headText: string, headTickets: string[]) => (args: string[]) => {
   if (args.includes('show')) {
     return gitOutput(headText);
