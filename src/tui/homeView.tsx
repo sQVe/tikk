@@ -7,7 +7,7 @@ const secondsPerMinute = 60;
 const secondsPerHour = 3600;
 const secondsPerDay = 86_400;
 
-const ageLabelOf = (ageSeconds: number): string => {
+export const ageLabelOf = (ageSeconds: number): string => {
   if (ageSeconds < secondsPerMinute) {
     return `${ageSeconds}s`;
   }

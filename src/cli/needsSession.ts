@@ -6,6 +6,8 @@ import type { CliEffects, CliFailure, EditorCleanupFailure } from './cliEffects.
 import { readNeeds } from './needsCommand.ts';
 import type { NeedsReading } from './needsCommand.ts';
 import { refreshSession } from './sessionRefresh.ts';
+import { readTicketDetail } from './ticketDetail.ts';
+import type { TicketDetail } from './ticketDetail.ts';
 import { ticketEditor } from './ticketEditor.ts';
 
 interface FileErrorRow {
@@ -18,6 +20,7 @@ export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
   loadErrors: () => Promise<Result<FileErrorRow[], CliFailure>>;
+  loadDetail: (rawId: string) => Promise<Result<TicketDetail, CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
@@ -139,6 +142,9 @@ export const openNeedsSession = async (
   const loadErrors = () => track(() => Promise.resolve(readErrors()));
   const editTicket = (rawId: string) => track(() => edit(rawId));
 
+  const loadDetail = (rawId: string) =>
+    track(() => readTicketDetail(session, effects.now(), rawId));
+
   const finishClose: NeedsSession['close'] = async () => {
     closing.abort();
     await Promise.allSettled(pending);
@@ -155,8 +161,5 @@ export const openNeedsSession = async (
     return closingResult;
   };
 
-  return {
-    ok: true,
-    value: { load, loadTree, loadErrors, edit: editTicket, close },
-  };
+  return { ok: true, value: { load, loadTree, loadErrors, loadDetail, edit: editTicket, close } };
 };

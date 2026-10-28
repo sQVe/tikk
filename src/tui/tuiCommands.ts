@@ -1,7 +1,11 @@
+import type { DetailStep } from './detailState.ts';
 import type { OverlayMove } from './overlayScroll.ts';
 import type { TuiIntent, TuiSnapshot } from './tuiSession.ts';
 
-type CommandIntent = { kind: 'session'; intent: TuiIntent } | { kind: 'quit' };
+type CommandIntent =
+  | { kind: 'session'; intent: TuiIntent }
+  | { kind: 'scrollDetail'; step: DetailStep }
+  | { kind: 'quit' };
 
 export type CommandScope =
   | 'global'
@@ -49,6 +53,8 @@ export interface KeyChoice {
 type KeyChoices = (command: Command) => readonly KeyChoice[];
 
 export type BindingTable = Readonly<Record<CommandScope, readonly Binding[]>>;
+
+type PaneCommand = Omit<Command, 'scope' | 'hiddenFromHelp'>;
 
 export const commandScopes: readonly CommandScope[] = [
   'global',
@@ -99,6 +105,56 @@ const foldReason = (snapshot: TuiSnapshot): string | undefined => {
 };
 
 const session = (intent: TuiIntent): CommandIntent => ({ kind: 'session', intent });
+
+const paneCommands: readonly PaneCommand[] = [
+  {
+    id: 'previousTab',
+    label: 'Show the previous detail tab',
+    section: 'tickets',
+    keys: ['['],
+    disabledReason: enabled,
+    intent: session({ kind: 'previousTab' }),
+  },
+  {
+    id: 'nextTab',
+    label: 'Show the next detail tab',
+    section: 'tickets',
+    keys: [']'],
+    disabledReason: enabled,
+    intent: session({ kind: 'nextTab' }),
+  },
+  {
+    id: 'toggleAttention',
+    label: 'Expand or shrink what needs you',
+    section: 'tickets',
+    keys: ['x'],
+    disabledReason: enabled,
+    intent: session({ kind: 'toggleAttention' }),
+  },
+  {
+    id: 'scrollDetailHalfDown',
+    label: 'Scroll the detail down half a page',
+    section: 'moving',
+    keys: ['ctrl+d'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'halfPage', direction: 1 } },
+  },
+  {
+    id: 'scrollDetailHalfUp',
+    label: 'Scroll the detail up half a page',
+    section: 'moving',
+    keys: ['ctrl+u'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'halfPage', direction: -1 } },
+  },
+];
+
+// The panel shows beside the list or full-screen, so its commands work in both scopes. Help lists
+// each once.
+const paneCommandsIn = (scope: CommandScope): Command[] =>
+  paneCommands.map((command) =>
+    Object.assign({ scope }, command, scope === 'list' ? {} : { hiddenFromHelp: true as const }),
+  );
 
 export const catalog: readonly Command[] = [
   {
@@ -222,6 +278,26 @@ export const catalog: readonly Command[] = [
     keys: ['return'],
     disabledReason: selectedRowReason,
     intent: session({ kind: 'openDetail' }),
+  },
+  ...paneCommandsIn('list'),
+  ...paneCommandsIn('detail'),
+  {
+    id: 'scrollDetailDown',
+    label: 'Scroll the full-screen detail down',
+    scope: 'detail',
+    section: 'moving',
+    keys: ['j', 'down'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'line', direction: 1 } },
+  },
+  {
+    id: 'scrollDetailUp',
+    label: 'Scroll the full-screen detail up',
+    scope: 'detail',
+    section: 'moving',
+    keys: ['k', 'up'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'line', direction: -1 } },
   },
   {
     id: 'closeDetail',

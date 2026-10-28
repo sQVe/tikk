@@ -45,6 +45,11 @@ const helpTitlesOf = (): string[] => {
     load: () => Promise.resolve({ ok: true, value: { items: [], reconcileProblems: [] } }),
     loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
+    loadDetail: (rawId) =>
+      Promise.resolve({
+        ok: false,
+        reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+      }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: () => () => undefined,
@@ -505,14 +510,14 @@ it('consumes a key that misses a pending sequence, so no later listener receives
     received.push(event.name);
   });
 
-  await press('x');
-  expect(received).toContain('x');
+  await press('w');
+  expect(received).toContain('w');
 
   received.length = 0;
   await press('g');
-  await press('x');
+  await press('w');
 
-  expect(received).not.toContain('x');
+  expect(received).not.toContain('w');
 });
 
 it('shows the position of the recent messages in the messages overlay', async () => {

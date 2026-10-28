@@ -30,7 +30,7 @@ interface TicketEntry {
 
 type NeedCounts = ReadonlyMap<string, number>;
 
-const kindLabels: Record<IconKind, string> = {
+export const kindLabels: Record<IconKind, string> = {
   project: 'Project',
   inbox: 'Inbox',
   plan: 'Plan',

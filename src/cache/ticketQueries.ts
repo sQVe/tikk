@@ -18,7 +18,7 @@ export interface CachedTicket {
 
 export interface TicketOutline {
   id: TicketId;
-  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
+  frontMatter: Pick<TicketFrontMatter, 'kind' | 'title' | 'status' | 'parent' | 'archived'>;
 }
 
 interface ListColumns {
@@ -221,6 +221,7 @@ export const listTickets = (database: Database, options: ListTicketsOptions): Ca
 const outlineRowSchema = z.object({
   id: ticketIdSchema,
   kind: ticketFrontMatterSchema.shape.kind,
+  title: ticketFrontMatterSchema.shape.title,
   status: ticketFrontMatterSchema.shape.status,
   parent: ticketIdSchema.nullable(),
   archived: z.string().nullable(),
@@ -231,8 +232,8 @@ const toOutline = (raw: unknown): TicketOutline => {
 
   invariant(row.success, 'A cached ticket outline row is invalid.');
 
-  const { id, kind, status, parent, archived } = row.data;
-  const frontMatter: TicketOutline['frontMatter'] = { kind, status };
+  const { id, kind, title, status, parent, archived } = row.data;
+  const frontMatter: TicketOutline['frontMatter'] = { kind, title, status };
 
   if (parent !== null) {
     frontMatter.parent = parent;
@@ -250,7 +251,7 @@ const toOutline = (raw: unknown): TicketOutline => {
 export const listTicketOutlines = (database: Database): TicketOutline[] =>
   database
     .query(
-      `SELECT id, kind, status, parent, archived FROM tickets
+      `SELECT id, kind, title, status, parent, archived FROM tickets
       WHERE title IS NOT NULL AND error IS NULL
       ORDER BY project, id`,
     )

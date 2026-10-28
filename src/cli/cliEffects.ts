@@ -13,7 +13,7 @@ export interface CliTicket {
 
 export interface CliTicketOutline {
   id: TicketId;
-  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
+  frontMatter: Pick<TicketFrontMatter, 'kind' | 'title' | 'status' | 'parent' | 'archived'>;
 }
 
 export interface CliFailure {

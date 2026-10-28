@@ -33,6 +33,7 @@ import { ticketWait } from './ticketWait.ts';
 export type { CliEffects, CliFailure, CliSession } from './cliEffects.ts';
 export { openNeedsSession } from './needsSession.ts';
 export type { NeedsSession } from './needsSession.ts';
+export type { TicketDetail } from './ticketDetail.ts';
 export type { ProjectTree, TreeProject, TreeSlice, TreeStateName } from '../fact/fact.ts';
 export { itemSubject } from './needsCommand.ts';
 export type { NeedView, NeedsReading } from './needsCommand.ts';

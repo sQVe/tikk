@@ -4,7 +4,7 @@ import { testRender } from '@opentui/react/test-utils';
 import { act, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import type { NeedView, ProjectTree, TreeProject } from '../cli/cli.ts';
+import type { NeedView, ProjectTree, TicketDetail, TreeProject } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
 import { App, catalog, createTuiSession, defaultBindings } from './tui.tsx';
 import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
@@ -26,6 +26,15 @@ export interface TuiFixture {
   selectedLine: () => string | undefined;
   pressAtNextCommit: (...keys: string[]) => void;
   cleanup: () => void;
+}
+
+type DetailKind = TicketDetail['ticket']['kind'];
+
+interface DetailEntry {
+  kind: DetailKind;
+  title: string;
+  state: TicketDetail['state'];
+  parent: string | null;
 }
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -136,6 +145,140 @@ export const projectTree = (): ProjectTree => ({
   ],
 });
 
+export const ticketDetail = (
+  id: string,
+  entry: DetailEntry,
+  overrides: Partial<Omit<TicketDetail, 'ticket'>> & {
+    ticket?: Partial<TicketDetail['ticket']>;
+  } = {},
+): TicketDetail => {
+  const { ticket, ...rest } = overrides;
+
+  return {
+    ticket: {
+      id,
+      path: `/s/${id}.md`,
+      hash: `hash-${id}`,
+      kind: entry.kind,
+      title: entry.title,
+      project: 'demo',
+      parent: entry.parent,
+      rank: null,
+      blockedBy: [],
+      discoveredFrom: [],
+      related: [],
+      criteria: null,
+      covers: null,
+      status: 'open',
+      archived: null,
+      error: null,
+      ...ticket,
+    },
+    body: '',
+    state: entry.state,
+    pr: null,
+    children: [],
+    ...rest,
+  };
+};
+
+const prOf = (number: number): TicketDetail['pr'] => ({
+  repository: 'acme/app',
+  number,
+  state: 'open',
+  base: 'main',
+  head: 'head1',
+  mergeCommit: null,
+  inTrunk: false,
+  checkedAt: '2026-10-20T11:00:00.000Z',
+});
+
+const treeDetailsOf = (tree: ProjectTree): Map<string, TicketDetail> => {
+  const entries = new Map<string, TicketDetail>();
+
+  const add = (
+    kind: DetailKind,
+    parent: string | null,
+    ticket: { id: string; title: string; state: DetailEntry['state'] },
+  ) => {
+    entries.set(
+      ticket.id,
+      ticketDetail(ticket.id, { kind, title: ticket.title, state: ticket.state, parent }),
+    );
+  };
+
+  const addSlice = (slice: TreeProject['slices'][number], parent: string | null) => {
+    entries.set(
+      slice.id,
+      ticketDetail(
+        slice.id,
+        { kind: 'slice', title: slice.title, state: slice.state, parent },
+        { pr: slice.pr === null ? null : prOf(slice.pr) },
+      ),
+    );
+
+    for (const task of slice.tasks) {
+      add('task', slice.id, task);
+    }
+
+    for (const instruction of slice.instructions) {
+      add('instruction', slice.id, instruction);
+    }
+  };
+
+  for (const project of tree.projects) {
+    for (const task of project.inbox) {
+      add('task', null, task);
+    }
+
+    for (const plan of project.plans) {
+      add('plan', null, plan);
+
+      for (const task of plan.tasks) {
+        add('task', plan.id, task);
+      }
+
+      for (const slice of plan.slices) {
+        addSlice(slice, plan.id);
+      }
+    }
+
+    for (const slice of project.slices) {
+      addSlice(slice, null);
+    }
+  }
+
+  return entries;
+};
+
+// Reads the detail of a ticket from the tree, or of a home item as an open instruction.
+const demoLoadDetail =
+  (items: readonly NeedView[], tree: ProjectTree): TuiEffects['loadDetail'] =>
+  (rawId) => {
+    const item = items.find((candidate) => candidate.id === rawId);
+
+    const itemDetail =
+      item === undefined
+        ? undefined
+        : ticketDetail(rawId, {
+            kind: 'instruction',
+            title: item.title,
+            state: 'open',
+            parent: null,
+          });
+
+    const detail = treeDetailsOf(tree).get(rawId) ?? itemDetail;
+
+    if (detail === undefined) {
+      return Promise.resolve({
+        ok: false,
+        reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+      });
+    }
+
+    return Promise.resolve({ ok: true, value: detail });
+  };
+
 export const createTuiFixture = async (
   items: NeedView[],
   size: { width: number; height: number },
@@ -185,6 +328,7 @@ export const createTuiFixture = async (
       });
     },
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
+    loadDetail: demoLoadDetail(items, tree),
     edit: (rawId) => {
       edited.push(rawId);
 

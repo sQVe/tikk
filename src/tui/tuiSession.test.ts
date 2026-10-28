@@ -41,6 +41,10 @@ const createFake = async (
         : { ok: false, reason: { code: 'storeError', message: homeFailure } },
     loadTree: async () => ({ ok: true, value: structuredClone(tree) }),
     loadErrors: async () => ({ ok: true, value: [...fileErrors] }),
+    loadDetail: async (rawId) => ({
+      ok: false,
+      reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+    }),
     edit: async (rawId) => {
       edited.push(rawId);
 
@@ -232,6 +236,8 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
       return gate.promise;
     },
     loadErrors: async () => ({ ok: true, value: listings.shift() ?? [] }),
+    // Holds the detail load, so only the list loads notify.
+    loadDetail: () => Promise.withResolvers<never>().promise,
   });
 
   fake.session.subscribe(() => {
@@ -522,6 +528,10 @@ it('refreshes the rows when listing the file errors fails', async () => {
 
       return { ok: true, value: [] };
     },
+    loadDetail: async (rawId) => ({
+      ok: false,
+      reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+    }),
     edit: async () => ({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: (listener) => {

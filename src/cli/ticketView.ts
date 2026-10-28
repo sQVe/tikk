@@ -5,6 +5,7 @@ import type {
   InstructionRejection,
   InstructionState,
   InstructionStateName,
+  TreeStateName,
 } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { parseTicketId } from '../ticket/ticket.ts';
@@ -17,7 +18,7 @@ export interface TicketView {
   id: string;
   path: string;
   hash: string;
-  kind: string;
+  kind: CliTicket['frontMatter']['kind'];
   title: string;
   project: string;
   parent: string | null;
@@ -41,6 +42,17 @@ export interface InstructionView extends TicketView {
 }
 
 interface SliceView extends TicketView, SliceState {}
+
+export interface TicketChild {
+  id: TicketId;
+  kind: CliTicket['frontMatter']['kind'];
+  title: string;
+}
+
+export type ShownState =
+  | { kind: 'slice'; derived: SliceState }
+  | { kind: 'instruction'; derived: InstructionState }
+  | { kind: 'status'; state: CliTicket['frontMatter']['status'] };
 
 export const ticketView = (ticket: CliTicket, withBody: boolean): TicketView => {
   const { frontMatter } = ticket;
@@ -117,16 +129,17 @@ export const storeFailure = (message: string): CommandResult => ({
   reason: { code: 'storeError', message },
 });
 
-const showSlice = async (
+const storeError = (message: string): CliFailure => ({ code: 'storeError', message });
+
+const deriveSlice = async (
   session: CliSession,
   now: Date,
   ticket: CliTicket,
-  files: string[],
-): Promise<CommandResult> => {
+): Promise<Result<ShownState, CliFailure>> => {
   const listed = session.listTicketOutlines();
 
   if (!listed.ok) {
-    return storeFailure(listed.reason.message);
+    return { ok: false, reason: storeError(listed.reason.message) };
   }
 
   const outlines = listed.value;
@@ -138,13 +151,76 @@ const showSlice = async (
   const facts = await session.listStateFacts([ticket.id, ...instructionIds]);
 
   if (!facts.ok) {
-    return storeFailure(facts.reason.message);
+    return { ok: false, reason: storeError(facts.reason.message) };
   }
 
   const derived = deriveSliceState(ticket, buildSliceIndex(outlines, facts.value), now);
-  const view: SliceView = { ...ticketView(ticket, true), ...derived };
 
-  return { ok: true, value: { json: { ...view, files }, text: ticketText(ticket, derived.state) } };
+  return { ok: true, value: { kind: 'slice', derived } };
+};
+
+export const deriveShownState = async (
+  session: CliSession,
+  now: Date,
+  ticket: CliTicket,
+): Promise<Result<ShownState, CliFailure>> => {
+  const { kind, status } = ticket.frontMatter;
+
+  if (kind === 'slice' && status === 'open') {
+    return deriveSlice(session, now, ticket);
+  }
+
+  if (kind !== 'instruction') {
+    return { ok: true, value: { kind: 'status', state: status } };
+  }
+
+  const facts = await session.listStateFacts([ticket.id]);
+
+  if (!facts.ok) {
+    return { ok: false, reason: storeError(facts.reason.message) };
+  }
+
+  return {
+    ok: true,
+    value: { kind: 'instruction', derived: deriveInstructionState(ticket, facts.value, now) },
+  };
+};
+
+export const shownStateName = (shown: ShownState): TreeStateName =>
+  shown.kind === 'status' ? shown.state : shown.derived.state;
+
+export const ticketChildrenOf = (
+  session: CliSession,
+  id: TicketId,
+): Result<TicketChild[], CliFailure> => {
+  const listed = session.listTicketOutlines();
+
+  if (!listed.ok) {
+    return { ok: false, reason: storeError(listed.reason.message) };
+  }
+
+  const children = listed.value
+    .filter((outline) => outline.frontMatter.parent === id)
+    .filter((outline) => outline.frontMatter.archived === undefined)
+    .map((outline) => ({
+      id: outline.id,
+      kind: outline.frontMatter.kind,
+      title: outline.frontMatter.title,
+    }));
+
+  return { ok: true, value: children };
+};
+
+const shownView = (ticket: CliTicket, shown: ShownState): TicketView => {
+  if (shown.kind === 'slice') {
+    const view: SliceView = { ...ticketView(ticket, true), ...shown.derived };
+
+    return view;
+  }
+
+  return shown.kind === 'instruction'
+    ? instructionView(ticket, shown.derived)
+    : ticketView(ticket, true);
 };
 
 const showKind = async (
@@ -153,30 +229,29 @@ const showKind = async (
   ticket: CliTicket,
   files: string[],
 ): Promise<CommandResult> => {
-  if (ticket.frontMatter.kind === 'slice' && ticket.frontMatter.status === 'open') {
-    return showSlice(session, now, ticket, files);
+  const shown = await deriveShownState(session, now, ticket);
+
+  if (!shown.ok) {
+    return shown;
   }
 
-  if (ticket.frontMatter.kind !== 'instruction') {
-    return {
-      ok: true,
-      value: {
-        json: { ...ticketView(ticket, true), files },
-        text: ticketText(ticket, ticket.frontMatter.status),
+  const children = ticketChildrenOf(session, ticket.id);
+
+  if (!children.ok) {
+    return children;
+  }
+
+  return {
+    ok: true,
+    value: {
+      json: {
+        ...shownView(ticket, shown.value),
+        children: children.value,
+        files,
       },
-    };
-  }
-
-  const facts = await session.listStateFacts([ticket.id]);
-
-  if (!facts.ok) {
-    return storeFailure(facts.reason.message);
-  }
-
-  const derived = deriveInstructionState(ticket, facts.value, now);
-  const view = { ...instructionView(ticket, derived), files };
-
-  return { ok: true, value: { json: view, text: ticketText(ticket, derived.state) } };
+      text: ticketText(ticket, shownStateName(shown.value)),
+    },
+  };
 };
 
 export const showOutput = async (

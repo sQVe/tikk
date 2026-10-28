@@ -1,8 +1,19 @@
 import type { CliFailure, NeedView, NeedsReading, ProjectTree } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
+import {
+  createDetailLoader,
+  detailAfter,
+  detailAfterLoad,
+  detailAfterReload,
+  detailAfterSelect,
+  noDetail,
+} from './detailState.ts';
+import type { DetailIntent, DetailState, LoadDetail } from './detailState.ts';
 import { strayErrorsOf } from './fileErrors.ts';
 import type { TicketFileError } from './fileErrors.ts';
 import { homeRowsOf } from './homeView.tsx';
+import { emptyView, followedSelection, listAt, listWithRows } from './listView.ts';
+import type { ListView } from './listView.ts';
 import { topAfter } from './overlayScroll.ts';
 import type { OverlayMove } from './overlayScroll.ts';
 import { foldsAfter, foldsAfterLoad, noFolds, projectRowsOf } from './projectTree.ts';
@@ -13,6 +24,7 @@ export interface TuiEffects {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
   loadErrors: () => Promise<Result<TicketFileError[], CliFailure>>;
+  loadDetail: LoadDetail;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
   onChange: (listener: () => void) => () => void;
@@ -20,21 +32,6 @@ export interface TuiEffects {
 }
 
 type ViewName = 'home' | 'tree';
-
-interface Selection {
-  index: number;
-  key: string | undefined;
-  id: string | null | undefined;
-}
-
-interface ListView {
-  requested: boolean;
-  loaded: boolean;
-  rows: readonly ListRow[];
-  selection: Selection;
-  failure: string | undefined;
-  problems: readonly string[];
-}
 
 type Overlay = { kind: 'none' } | { kind: 'help'; top: number } | { kind: 'messages'; top: number };
 
@@ -54,6 +51,7 @@ export interface TuiSnapshot {
   needs: readonly NeedView[];
   projectTree: ProjectTree | undefined;
   folds: FoldState;
+  detail: DetailState;
 }
 
 type OverlayIntent =
@@ -72,6 +70,7 @@ export type TuiIntent =
   | { kind: 'openDetail' }
   | { kind: 'closeDetail' }
   | { kind: 'fold'; fold: FoldIntent }
+  | DetailIntent
   | OverlayIntent;
 
 type LocalIntent = Exclude<TuiIntent, { kind: 'switchView' } | { kind: 'edit' }>;
@@ -88,15 +87,6 @@ type LoadOutcome =
   | { ok: true; name: 'tree'; tree: ProjectTree }
   | { ok: false; message: string };
 
-const emptyView: ListView = {
-  requested: false,
-  loaded: false,
-  rows: [],
-  selection: { index: 0, key: undefined, id: undefined },
-  failure: undefined,
-  problems: [],
-};
-
 const initialSnapshot: TuiSnapshot = {
   view: 'home',
   views: { home: { ...emptyView, requested: true }, tree: emptyView },
@@ -108,6 +98,7 @@ const initialSnapshot: TuiSnapshot = {
   needs: [],
   projectTree: undefined,
   folds: noFolds,
+  detail: noDetail,
 };
 
 const messageLimit = 100;
@@ -116,30 +107,6 @@ const errorKeyOf = (error: TicketFileError): string => JSON.stringify([error.pat
 
 const errorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
-
-const clampedIndex = (index: number, count: number): number =>
-  Math.max(0, Math.min(count - 1, index));
-
-const selectionAt = (rows: readonly ListRow[], index: number): Selection => ({
-  index,
-  key: rows[index]?.key,
-  id: rows[index]?.id,
-});
-
-const indexOfTicket = (rows: readonly ListRow[], id: Selection['id']): number =>
-  rows.findIndex((row) => row.id === id);
-
-const repairedIndex = (selection: Selection, rows: readonly ListRow[]): number => {
-  const byKey = rows.findIndex((row) => row.key === selection.key);
-
-  if (byKey !== -1) {
-    return byKey;
-  }
-
-  const byTicket = indexOfTicket(rows, selection.id);
-
-  return byTicket === -1 ? clampedIndex(selection.index, rows.length) : byTicket;
-};
 
 const withView = (snapshot: TuiSnapshot, name: ViewName, view: ListView): TuiSnapshot => ({
   ...snapshot,
@@ -151,18 +118,7 @@ const withRows = (
   name: ViewName,
   rows: ListRow[],
   problems: readonly string[],
-): TuiSnapshot => {
-  const view = snapshot.views[name];
-  const selection = selectionAt(rows, repairedIndex(view.selection, rows));
-
-  return withView(snapshot, name, {
-    ...view,
-    loaded: true,
-    rows,
-    selection,
-    problems,
-  });
-};
+): TuiSnapshot => withView(snapshot, name, listWithRows(snapshot.views[name], rows, problems));
 
 const withoutFailure = (snapshot: TuiSnapshot, name: ViewName): TuiSnapshot =>
   withView(snapshot, name, { ...snapshot.views[name], failure: undefined });
@@ -205,13 +161,9 @@ const fold = (snapshot: TuiSnapshot, intent: FoldIntent): TuiSnapshot => {
 
 const selectRow = (snapshot: TuiSnapshot, target: number): TuiSnapshot => {
   const view = snapshot.views[snapshot.view];
-  const index = clampedIndex(target, view.rows.length);
+  const next = listAt(view, target);
 
-  if (index === view.selection.index) {
-    return snapshot;
-  }
-
-  return withView(snapshot, snapshot.view, { ...view, selection: selectionAt(view.rows, index) });
+  return next === view ? snapshot : withView(snapshot, snapshot.view, next);
 };
 
 const moveSelection = (snapshot: TuiSnapshot, step: number): TuiSnapshot =>
@@ -233,6 +185,22 @@ const overlayAfter = (overlay: Overlay, intent: OverlayIntent): Overlay => {
   return overlay.kind === 'none'
     ? overlay
     : { ...overlay, top: topAfter(overlay.top, intent.move, intent.maximumTop) };
+};
+
+const detailIntentKinds = new Set<TuiIntent['kind']>([
+  'previousTab',
+  'nextTab',
+  'toggleAttention',
+  'scrollDetail',
+]);
+
+const isDetailIntent = (intent: TuiIntent): intent is DetailIntent =>
+  detailIntentKinds.has(intent.kind);
+
+const selectedTicketOf = (snapshot: TuiSnapshot): string | undefined => {
+  const { id } = snapshot.views[snapshot.view].selection;
+
+  return typeof id === 'string' ? id : undefined;
 };
 
 const snapshotAfter = (snapshot: TuiSnapshot, intent: LocalIntent): TuiSnapshot => {
@@ -260,17 +228,11 @@ const snapshotAfter = (snapshot: TuiSnapshot, intent: LocalIntent): TuiSnapshot 
     return { ...snapshot, detailOpen: intent.kind === 'openDetail' };
   }
 
-  return { ...snapshot, overlay: overlayAfter(snapshot.overlay, intent) };
-};
-
-const followedSelection = (target: ListView, id: Selection['id']): Selection => {
-  if (!target.loaded) {
-    return { ...target.selection, key: undefined, id };
+  if (isDetailIntent(intent)) {
+    return { ...snapshot, detail: detailAfter(snapshot.detail, intent) };
   }
 
-  const index = indexOfTicket(target.rows, id);
-
-  return index === -1 ? target.selection : selectionAt(target.rows, index);
+  return { ...snapshot, overlay: overlayAfter(snapshot.overlay, intent) };
 };
 
 const switchView = (snapshot: TuiSnapshot): TuiSnapshot => {
@@ -320,15 +282,44 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
   let stopped = false;
   let lastMessageId = 0;
 
+  const publish = (next: TuiSnapshot) => {
+    snapshot = next;
+
+    for (const listener of listeners) {
+      listener();
+    }
+  };
+
+  const detailLoader = createDetailLoader(effects.loadDetail, (id, outcome) => {
+    publish({ ...snapshot, detail: detailAfterLoad(snapshot.detail, id, outcome) });
+  });
+
   const update = (next: TuiSnapshot) => {
     if (stopped || next === snapshot) {
       return;
     }
 
-    snapshot = next;
+    const id = selectedTicketOf(next);
 
-    for (const listener of listeners) {
-      listener();
+    if (id === next.detail.id) {
+      publish(next);
+
+      return;
+    }
+
+    publish({ ...next, detail: detailAfterSelect(next.detail, id) });
+
+    if (id !== undefined) {
+      detailLoader.request(id);
+    }
+  };
+
+  const reloadDetail = () => {
+    const { id } = snapshot.detail;
+
+    if (!stopped && id !== undefined) {
+      publish({ ...snapshot, detail: detailAfterReload(snapshot.detail) });
+      detailLoader.request(id);
     }
   };
 
@@ -403,8 +394,13 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
 
       const isLatest = reload === latestReload;
       const publishesErrors = isLatest && fileErrors !== undefined;
+      const shownId = snapshot.detail.id;
 
       update(publishesErrors ? withFileErrors(next, fileErrors) : next);
+
+      if (snapshot.detail.id === shownId) {
+        reloadDetail();
+      }
     });
   };
 
@@ -475,6 +471,7 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
 
   const stop = () => {
     stopped = true;
+    detailLoader.stop();
     stopChanges();
   };
 

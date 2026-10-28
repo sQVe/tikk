@@ -121,6 +121,11 @@ const start = async (options: StartOptions = {}) => {
     },
     loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
+    loadDetail: (rawId) =>
+      Promise.resolve({
+        ok: false,
+        reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+      }),
     edit:
       options.edit ??
       (() => {
