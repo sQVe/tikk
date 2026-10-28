@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, beforeEach, expect, it } from 'bun:test';
+import { stat } from 'node:fs/promises';
 
 import { deriveInstructionState } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
@@ -13,6 +14,7 @@ import {
   factText,
   idsOf,
   makeGate,
+  okValueOf,
   openTestCache,
   runSql,
   ticketPath,
@@ -61,7 +63,7 @@ const expectRebuiltAfter = async (sql: string): Promise<void> => {
   const refreshed = await cache.refresh(fake.files);
 
   expect(refreshed.ok).toBe(true);
-  expect(idsOf(cache.listTickets({ includeArchived: true }))).toEqual(['tikk-3a4b']);
+  expect(idsOf(okValueOf(cache.listTickets({ includeArchived: true })))).toEqual(['tikk-3a4b']);
   expect(fake.reads()).toBe(2);
 };
 
@@ -78,7 +80,7 @@ it('keeps a valid error-only row without reading its file again', async () => {
   await cache.refresh(fake.files);
 
   expect(fake.reads()).toBe(1);
-  expect(cache.listErrors()).toHaveLength(1);
+  expect(okValueOf(cache.listErrors())).toHaveLength(1);
 });
 
 it('rebuilds from the files when an error-only row has no error', async () => {
@@ -99,14 +101,14 @@ it('rebuilds from the files when an error-only row has no error', async () => {
   await cache.refresh(fake.files);
 
   expect(fake.reads()).toBe(2);
-  expect(cache.listErrors()).toHaveLength(1);
+  expect(okValueOf(cache.listErrors())).toHaveLength(1);
 });
 
 it('fails the refresh when the rebuilt rows are still unreadable', async () => {
   {
     using cache = openTestCache(databasePath);
 
-    expect(cache.listTickets({ includeArchived: true })).toEqual([]);
+    expect(okValueOf(cache.listTickets({ includeArchived: true }))).toEqual([]);
   }
 
   runSql(
@@ -661,4 +663,52 @@ it('does not report success when another handle damages a ticket row during an a
   });
 
   expect(refreshed.ok).toBe(false);
+});
+
+const lockDatabase = (databaseFile: string): Database => {
+  const holder = new Database(databaseFile);
+
+  holder.run('BEGIN EXCLUSIVE');
+
+  return holder;
+};
+
+it('returns a failed result for a query that stays busy and keeps the database file', async () => {
+  await seedOneTicket();
+
+  using cache = openTestCache(databasePath, 10);
+
+  const inode = (await stat(databasePath)).ino;
+  const holder = lockDatabase(databasePath);
+  const busy = cache.getTicket(tikkId());
+
+  holder.run('ROLLBACK');
+  holder.close();
+
+  expect(busy.ok).toBe(false);
+
+  if (!busy.ok) {
+    expect(busy.reason.kind).toBe('failed');
+  }
+
+  expect((await stat(databasePath)).ino).toBe(inode);
+  expect(cache.getTicket(tikkId()).ok).toBe(true);
+});
+
+it('reports a fact query that stays busy as failed, not as damaged', async () => {
+  await seedOneTicket();
+
+  using cache = openTestCache(databasePath, 10);
+
+  const holder = lockDatabase(databasePath);
+  const busy = cache.listStateFacts();
+
+  holder.run('ROLLBACK');
+  holder.close();
+
+  expect(busy.ok).toBe(false);
+
+  if (!busy.ok) {
+    expect(busy.reason.kind).toBe('failed');
+  }
 });

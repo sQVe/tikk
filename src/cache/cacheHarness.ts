@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
+import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { openCache } from './cache.ts';
 import type { CacheFiles, TicketCache } from './cache.ts';
@@ -182,12 +183,21 @@ export const createDatabaseFixture = async (): Promise<{
   };
 };
 
-export const openTestCache = (databasePath: string): TicketCache => {
-  const opened = openCache(databasePath);
+export const openTestCache = (
+  databasePath: string,
+  busyTimeoutMilliseconds?: number,
+): TicketCache => {
+  const opened = openCache(databasePath, busyTimeoutMilliseconds);
 
   invariant(opened.ok, 'The test cache must open.');
 
   return opened.value;
+};
+
+export const okValueOf = <Value>(result: Result<Value, unknown>): Value => {
+  invariant(result.ok, 'The test query must succeed.');
+
+  return result.value;
 };
 
 export const factsOf = (cache: TicketCache, ticketIds?: TicketId[]): Fact[] => {

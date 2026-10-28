@@ -114,7 +114,8 @@ it('shows no file error in the detail of the row without a plan', async () => {
   const groups: TreeGroup[] = [{ plan: null, slices: [] }];
 
   const { setup, press, selectedLine } = await mount([], { width: 120, height: 20 }, [], groups, {
-    loadErrors: () => Promise.resolve([{ path: 'broken.md', id: null, message: 'Broken' }]),
+    loadErrors: () =>
+      Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
   });
 
   await press('s');
@@ -128,7 +129,8 @@ it('counts a file error with no ticket row as a file error on the tree', async (
   const groups: TreeGroup[] = [{ plan: null, slices: [] }];
 
   const { setup, press } = await mount([], { width: 120, height: 20 }, [], groups, {
-    loadErrors: () => Promise.resolve([{ path: 'broken.md', id: null, message: 'Broken' }]),
+    loadErrors: () =>
+      Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
   });
 
   await press('s');

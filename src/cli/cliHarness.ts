@@ -205,7 +205,10 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       const ticket = tickets.get(id);
 
       if (ticket === undefined) {
-        return { ok: false, reason: { message: `Ticket ${id} is not in the cache.` } };
+        return {
+          ok: false,
+          reason: { kind: 'notFound', message: `Ticket ${id} is not in the cache.` },
+        };
       }
 
       return { ok: true, value: ticket };
@@ -214,7 +217,10 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
       const ticket = tickets.get(id);
 
       if (ticket === undefined) {
-        return { ok: false, reason: { message: `Ticket ${id} is not in the cache.` } };
+        return {
+          ok: false,
+          reason: { kind: 'notFound', message: `Ticket ${id} is not in the cache.` },
+        };
       }
 
       return { ok: true, value: ticket.path };
@@ -222,13 +228,18 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     listTickets: (listing) => {
       listOptions.push(listing);
 
-      return [...tickets.values()].filter(
+      const listed = [...tickets.values()].filter(
         (ticket) => listing.includeArchived || ticket.frontMatter.archived === undefined,
       );
+
+      return { ok: true, value: listed };
     },
-    mayHaveArchiveWork: () => true,
-    listTicketOutlines: () => [...tickets.values()].filter((ticket) => ticket.error === null),
-    listErrors: () => options.errors ?? [],
+    mayHaveArchiveWork: () => ({ ok: true, value: true }),
+    listTicketOutlines: () => ({
+      ok: true,
+      value: [...tickets.values()].filter((ticket) => ticket.error === null),
+    }),
+    listErrors: () => ({ ok: true, value: options.errors ?? [] }),
     listTicketFolderFiles: (_project, id) =>
       Promise.resolve({ ok: true, value: options.folderFiles?.[id] ?? [] }),
     listFacts: (ticketIds) =>

@@ -41,7 +41,7 @@ const createFake = async (
         ? reading(items)
         : { ok: false, reason: { code: 'storeError', message: homeFailure } },
     loadTree: async () => ({ ok: true, value: structuredClone(groups) }),
-    loadErrors: async () => [...fileErrors],
+    loadErrors: async () => ({ ok: true, value: [...fileErrors] }),
     edit: async (rawId) => {
       edited.push(rawId);
 
@@ -231,7 +231,7 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
 
       return gate.promise;
     },
-    loadErrors: async () => listings.shift() ?? [],
+    loadErrors: async () => ({ ok: true, value: listings.shift() ?? [] }),
   });
 
   fake.session.subscribe(() => {
@@ -273,7 +273,7 @@ it('starts no effect after stop, neither for a queued reload nor after the runni
     loadErrors: async () => {
       calls.push('loadErrors');
 
-      return [];
+      return { ok: true, value: [] };
     },
   });
 
@@ -393,7 +393,9 @@ it('keeps the previous ticket file errors when listing them fails', async () => 
     loadErrors: () => {
       listings += 1;
 
-      return listings === 1 ? Promise.resolve([fileError]) : Promise.reject(new Error('Gone.'));
+      return listings === 1
+        ? Promise.resolve({ ok: true, value: [fileError] })
+        : Promise.reject(new Error('Gone.'));
     },
   });
 
@@ -517,7 +519,7 @@ it('refreshes the rows when listing the file errors fails', async () => {
         throw new Error('Listing failed.');
       }
 
-      return [];
+      return { ok: true, value: [] };
     },
     edit: async () => ({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),

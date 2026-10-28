@@ -16,6 +16,10 @@ export const ticketEditor = async (input: CommandInput, rawId: string): Promise<
 
   const path = input.session.findTicketPath(id.value);
 
+  if (!path.ok && path.reason.kind === 'failed') {
+    return storeFailure(path.reason.message);
+  }
+
   if (!path.ok) {
     return missingTicket(rawId);
   }

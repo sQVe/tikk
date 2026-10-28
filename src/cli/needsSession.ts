@@ -8,10 +8,16 @@ import type { NeedsReading } from './needsCommand.ts';
 import { refreshSession } from './sessionRefresh.ts';
 import { ticketEditor } from './ticketEditor.ts';
 
+interface FileErrorRow {
+  path: string;
+  message: string;
+  id: TicketId | null;
+}
+
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
-  loadErrors: () => Promise<{ path: string; message: string; id: TicketId | null }[]>;
+  loadErrors: () => Promise<Result<FileErrorRow[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
@@ -63,14 +69,19 @@ export const openNeedsSession = async (
       return refreshed;
     }
 
-    const tickets = session.listTickets({ includeArchived: true });
+    const listed = session.listTickets({ includeArchived: true });
+
+    if (!listed.ok) {
+      return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+    }
+
     const facts = await session.listFacts();
 
     if (!facts.ok) {
       return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
     }
 
-    return { ok: true, value: buildPlanTree(tickets, facts.value, effects.now()) };
+    return { ok: true, value: buildPlanTree(listed.value, facts.value, effects.now()) };
   };
 
   const edit = async (rawId: string): Promise<Result<undefined, CliFailure>> => {
@@ -96,14 +107,27 @@ export const openNeedsSession = async (
   const load = () => track(read);
   const loadTree = () => track(readTree);
 
-  const readErrors = () => {
-    const tickets = session.listTickets({ includeArchived: true });
+  const readErrors = (): Result<FileErrorRow[], CliFailure> => {
+    const listed = session.listTickets({ includeArchived: true });
 
-    return session.listErrors().map((error) => {
-      const owner = tickets.find((ticket) => ticket.path === error.path);
+    if (!listed.ok) {
+      return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+    }
 
-      return { path: error.path, message: error.message, id: owner?.id ?? null };
-    });
+    const errors = session.listErrors();
+
+    if (!errors.ok) {
+      return { ok: false, reason: { code: 'storeError', message: errors.reason.message } };
+    }
+
+    return {
+      ok: true,
+      value: errors.value.map((error) => {
+        const owner = listed.value.find((ticket) => ticket.path === error.path);
+
+        return { path: error.path, message: error.message, id: owner?.id ?? null };
+      }),
+    };
   };
 
   const loadErrors = () => track(() => Promise.resolve(readErrors()));

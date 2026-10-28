@@ -7,6 +7,7 @@ import {
   idsOf,
   ticketPath,
   ticketText,
+  okValueOf,
   openTestCache,
   runSql,
 } from './cacheHarness.ts';
@@ -30,8 +31,8 @@ it('leaves out an archived ticket unless includeArchived is true', async () => {
   fake.set(ticketPath('tikk-3a4c'), ticketText({ title: 'Old', archived: '2026-01-02' }));
   await cache.refresh(fake.files);
 
-  const visible = idsOf(cache.listTickets({ includeArchived: false }));
-  const all = idsOf(cache.listTickets({ includeArchived: true }));
+  const visible = idsOf(okValueOf(cache.listTickets({ includeArchived: false })));
+  const all = idsOf(okValueOf(cache.listTickets({ includeArchived: true })));
 
   expect(visible).toEqual(['tikk-3a4b']);
   expect(all).toEqual(['tikk-3a4b', 'tikk-3a4c']);
@@ -53,7 +54,7 @@ it('outlines archived tickets with their parent and leaves out a file with an er
   fake.set(ticketPath('tikk-3a4d'), '---\nkind: [\n---\n');
   await cache.refresh(fake.files);
 
-  const outlines: unknown = cache.listTicketOutlines();
+  const outlines: unknown = okValueOf(cache.listTicketOutlines());
 
   expect(outlines).toEqual([
     { id: 'tikk-3a4b', frontMatter: { kind: 'instruction', status: 'open' } },
@@ -78,7 +79,7 @@ it('sorts tickets by project, then ID, and reports path, hash, and error', async
   fake.set(ticketPath('tikk-3a4b'), ticketText({ title: 'A' }));
   await cache.refresh(fake.files);
 
-  const tickets = cache.listTickets({ includeArchived: false });
+  const tickets = okValueOf(cache.listTickets({ includeArchived: false }));
 
   expect(idsOf(tickets)).toEqual(['tikk-3a4b', 'tikk-3a4c', 'zeta-3a4b']);
 
@@ -117,7 +118,7 @@ it('finds the path of a ticket that has never parsed, and hides it from getTicke
 
   expect(cache.findTicketPath(id.value)).toEqual({ ok: true, value: ticketPath('tikk-3a4b') });
   expect(cache.getTicket(id.value)).toMatchObject({ ok: false });
-  expect(cache.listTickets({ includeArchived: true })).toEqual([]);
+  expect(okValueOf(cache.listTickets({ includeArchived: true }))).toEqual([]);
 });
 
 it('returns a notFound result for the path of an unknown ID', () => {

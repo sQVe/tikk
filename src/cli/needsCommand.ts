@@ -102,14 +102,19 @@ export const readNeeds = async (
     return reconciled;
   }
 
-  const tickets = session.listTickets({ includeArchived: true });
+  const listed = session.listTickets({ includeArchived: true });
+
+  if (!listed.ok) {
+    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+  }
+
   const facts = await session.listFacts();
 
   if (!facts.ok) {
     return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
-  const items = selectNeeds(tickets, facts.value, effects.now());
+  const items = selectNeeds(listed.value, facts.value, effects.now());
 
   return { ok: true, value: { items: items.map(itemView), reconcileProblems: reconciled.value } };
 };

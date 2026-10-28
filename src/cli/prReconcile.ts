@@ -9,6 +9,7 @@ import type {
   CliEffects,
   CliFailure,
   CliSession,
+  CliTicketOutline,
   CommandInput,
   CommandResult,
 } from './cliEffects.ts';
@@ -47,8 +48,6 @@ interface Change extends PullRequestRef {
   seen: PullRequestObservation;
 }
 
-type TicketOutline = ReturnType<CliSession['listTicketOutlines']>[number];
-
 const reconcileUsage = 'Usage: tikk reconcile [--json]';
 
 const globalProblem = (message: string): ReconcileProblem => ({
@@ -61,7 +60,7 @@ const globalProblem = (message: string): ReconcileProblem => ({
 export const problemLines = (problems: ReconcileProblem[]): string =>
   problems.map((problem) => `problem: ${problem.message}\n`).join('');
 
-const isOpenSlice = ({ frontMatter }: TicketOutline): boolean =>
+const isOpenSlice = ({ frontMatter }: CliTicketOutline): boolean =>
   frontMatter.kind === 'slice' &&
   frontMatter.status === 'open' &&
   frontMatter.archived === undefined;
@@ -219,16 +218,21 @@ const collectChanges = async (
 };
 
 // All gh calls run before the store lock, which is taken only to append.
-export const reconcilePullRequests = async (input: ReconcileInput): Promise<ReconcileOutcome> => {
+export const reconcilePullRequests = async (
+  input: ReconcileInput,
+): Promise<Result<ReconcileOutcome, CliFailure>> => {
   const outcome: ReconcileOutcome = { checked: [], updated: [], problems: [] };
 
-  const slices = input.session
-    .listTicketOutlines()
-    .filter(isOpenSlice)
-    .map((outline) => outline.id);
+  const outlines = input.session.listTicketOutlines();
+
+  if (!outlines.ok) {
+    return { ok: false, reason: { code: 'storeError', message: outlines.reason.message } };
+  }
+
+  const slices = outlines.value.filter(isOpenSlice).map((outline) => outline.id);
 
   if (slices.length === 0) {
-    return outcome;
+    return { ok: true, value: outcome };
   }
 
   const facts = await input.session.listStateFacts(slices);
@@ -236,7 +240,7 @@ export const reconcilePullRequests = async (input: ReconcileInput): Promise<Reco
   if (!facts.ok) {
     outcome.problems.push(globalProblem(facts.reason.message));
 
-    return outcome;
+    return { ok: true, value: outcome };
   }
 
   const changes = await collectChanges(input, slices, facts.value, outcome);
@@ -249,13 +253,19 @@ export const reconcilePullRequests = async (input: ReconcileInput): Promise<Reco
     await input.effects.scheduleSync();
   }
 
-  return outcome;
+  return { ok: true, value: outcome };
 };
 
 export const reconcileBeforeRead = async (
   input: ReconcileInput,
 ): Promise<Result<ReconcileProblem[], CliFailure>> => {
-  const outcome = await reconcilePullRequests(input);
+  const reconciled = await reconcilePullRequests(input);
+
+  if (!reconciled.ok) {
+    return { ok: false, reason: reconciled.reason };
+  }
+
+  const outcome = reconciled.value;
 
   if (outcome.updated.length === 0) {
     return { ok: true, value: outcome.problems };
@@ -281,7 +291,13 @@ export const reconcileCommand = async (input: CommandInput): Promise<CommandResu
     return invalidArguments(reconcileUsage);
   }
 
-  const outcome = await reconcilePullRequests(input);
+  const reconciled = await reconcilePullRequests(input);
+
+  if (!reconciled.ok) {
+    return { ok: false, reason: reconciled.reason };
+  }
+
+  const outcome = reconciled.value;
   const updatedLines = outcome.updated.map((slice) => `${slice.id}  ${slice.state}\n`).join('');
 
   return {

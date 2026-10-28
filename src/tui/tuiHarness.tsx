@@ -163,7 +163,7 @@ export const createTuiFixture = async (
         return result;
       });
     },
-    loadErrors: () => Promise.resolve([]),
+    loadErrors: () => Promise.resolve({ ok: true, value: [] }),
     edit: (rawId) => {
       edited.push(rawId);
 

@@ -91,7 +91,7 @@ it('does not look up the path of an invalid ID', async () => {
       findTicketPath: (id) => {
         lookups.push(id);
 
-        return { ok: false, reason: { message: 'missing' } };
+        return { ok: false, reason: { kind: 'notFound', message: 'missing' } };
       },
     },
   });

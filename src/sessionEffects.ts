@@ -32,16 +32,17 @@ import {
 import type { TicketId } from './ticket/ticket.ts';
 
 // A stored fact that does not decode means the cache is damaged. The fact tables are cleared and
-// indexed again from the files once. A second failure is reported, not retried.
-const listFactsRecovering = async (
-  cache: TicketCache,
+// indexed again from the files once. A second failure is reported, not retried. A query that fails
+// for another reason, such as a busy database, does not mean damage, so it is reported as it is.
+export const listFactsRecovering = async (
+  cache: Pick<TicketCache, 'rebuildFacts'>,
   files: CacheFiles,
   read: (ticketIds?: TicketId[]) => ReturnType<TicketCache['listFacts']>,
   ticketIds?: TicketId[],
 ): ReturnType<CliSession['listFacts']> => {
   const first = read(ticketIds);
 
-  if (first.ok) {
+  if (first.ok || first.reason.kind === 'failed') {
     return first;
   }
 

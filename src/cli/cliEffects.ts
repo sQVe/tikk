@@ -11,7 +11,7 @@ export interface CliTicket {
   body: string;
 }
 
-interface CliTicketOutline {
+export interface CliTicketOutline {
   id: TicketId;
   frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
 }
@@ -57,16 +57,21 @@ interface FileWriteReason {
   message: string;
 }
 
+interface CliLookupReason {
+  kind: 'notFound' | 'failed';
+  message: string;
+}
+
 export interface CliSession extends Disposable {
   refresh: () => Promise<Result<undefined, CliMessage>>;
-  getTicket: (id: TicketId) => Result<CliTicket, CliMessage>;
-  findTicketPath: (id: TicketId) => Result<string, CliMessage>;
-  listTickets: (options: { includeArchived: boolean }) => CliTicket[];
+  getTicket: (id: TicketId) => Result<CliTicket, CliLookupReason>;
+  findTicketPath: (id: TicketId) => Result<string, CliLookupReason>;
+  listTickets: (options: { includeArchived: boolean }) => Result<CliTicket[], CliMessage>;
   // Tickets whose files parse, with only the fields that place them in their tree.
-  listTicketOutlines: () => CliTicketOutline[];
+  listTicketOutlines: () => Result<CliTicketOutline[], CliMessage>;
   // False only when the archive sweep surely has nothing to do.
-  mayHaveArchiveWork: (now: Date) => boolean;
-  listErrors: () => { path: string; message: string }[];
+  mayHaveArchiveWork: (now: Date) => Result<boolean, CliMessage>;
+  listErrors: () => Result<{ path: string; message: string }[], CliMessage>;
   listTicketFolderFiles: (
     project: ProjectName,
     id: TicketId,

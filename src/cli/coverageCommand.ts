@@ -35,9 +35,13 @@ const scopedGaps = (
   session: CliSession,
   rawId: string | undefined,
 ): Result<CoverageGap[], CliFailure> => {
-  const tickets = session
-    .listTickets({ includeArchived: false })
-    .filter((ticket) => ticket.error === null);
+  const listed = session.listTickets({ includeArchived: false });
+
+  if (!listed.ok) {
+    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+  }
+
+  const tickets = listed.value.filter((ticket) => ticket.error === null);
 
   const gaps = findCoverageGaps(tickets);
 

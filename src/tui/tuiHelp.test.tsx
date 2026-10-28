@@ -39,7 +39,7 @@ const helpTitlesOf = (): string[] => {
   const session = createTuiSession({
     load: () => Promise.resolve({ ok: true, value: { items: [], reconcileProblems: [] } }),
     loadTree: () => Promise.resolve({ ok: true, value: [] }),
-    loadErrors: () => Promise.resolve([]),
+    loadErrors: () => Promise.resolve({ ok: true, value: [] }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: () => () => undefined,

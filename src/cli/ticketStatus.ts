@@ -41,10 +41,16 @@ export const checkSessionTree = (
   session: CliSession,
   frontMatter: TicketFrontMatter,
 ): Result<undefined, CliFailure> => {
+  let lookupFailure: string | undefined;
+
   const lookup: TicketLookup = (id) => {
     const found = session.getTicket(id);
 
     if (!found.ok) {
+      if (found.reason.kind === 'failed') {
+        lookupFailure = found.reason.message;
+      }
+
       return undefined;
     }
 
@@ -52,6 +58,10 @@ export const checkSessionTree = (
   };
 
   const checked = checkTicketTree(frontMatter, lookup);
+
+  if (lookupFailure !== undefined) {
+    return { ok: false, reason: { code: 'storeError', message: lookupFailure } };
+  }
 
   if (!checked.ok) {
     return invalidArguments(checked.reason.message);
@@ -65,8 +75,13 @@ export const checkWaitCycle = (
   id: TicketId,
   target: TicketId,
 ): Result<undefined, CliFailure> => {
-  const tickets = session.listTickets({ includeArchived: true });
-  const cycle = findWaitCycle(tickets, id, target);
+  const listed = session.listTickets({ includeArchived: true });
+
+  if (!listed.ok) {
+    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+  }
+
+  const cycle = findWaitCycle(listed.value, id, target);
 
   if (cycle !== undefined) {
     return invalidArguments(
@@ -94,6 +109,10 @@ export const checkCovers = (
   }
 
   const found = session.getTicket(parent);
+
+  if (!found.ok && found.reason.kind === 'failed') {
+    return { ok: false, reason: { code: 'storeError', message: found.reason.message } };
+  }
 
   if (!found.ok) {
     return invalidArguments(found.reason.message);
