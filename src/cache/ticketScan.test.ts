@@ -9,6 +9,7 @@ import {
   makeGate,
   ticketPath,
   ticketText,
+  okValueOf,
   openTestCache,
   runSql,
 } from './cacheHarness.ts';
@@ -53,12 +54,12 @@ it('keeps the last good title for a broken file and clears the error when it is 
   expect((await cache.refresh(fake.files)).ok).toBe(true);
 
   expect(titleOf(cache, 'tikk-3a4b')).toBe('Good title');
-  expect(cache.listErrors().map((error) => error.path)).toEqual([path]);
+  expect(okValueOf(cache.listErrors()).map((error) => error.path)).toEqual([path]);
 
   fake.set(path, good);
   await cache.refresh(fake.files);
 
-  expect(cache.listErrors()).toEqual([]);
+  expect(okValueOf(cache.listErrors())).toEqual([]);
   expect(titleOf(cache, 'tikk-3a4b')).toBe('Good title');
 });
 
@@ -85,7 +86,7 @@ it('removes a deleted file from the list', async () => {
   fake.remove(ticketPath('tikk-3a4b'));
   await cache.refresh(fake.files);
 
-  const ids = idsOf(cache.listTickets({ includeArchived: false }));
+  const ids = idsOf(okValueOf(cache.listTickets({ includeArchived: false })));
 
   expect(ids).toEqual(['tikk-3a4c']);
 });
@@ -112,7 +113,7 @@ it('drops a file that vanishes between list and read', async () => {
   const result = await cache.refresh(vanishing);
 
   expect(result.ok).toBe(true);
-  expect(cache.listTickets({ includeArchived: false })).toEqual([]);
+  expect(okValueOf(cache.listTickets({ includeArchived: false }))).toEqual([]);
 });
 
 it('does not read a file whose mtime and size are unchanged', async () => {
@@ -140,7 +141,7 @@ it('keeps the parsed state when only the mtime changes', async () => {
 
   expect(fake.reads()).toBe(2);
   expect(titleOf(cache, 'tikk-3a4b')).toBe('One');
-  expect(cache.listErrors()).toEqual([]);
+  expect(okValueOf(cache.listErrors())).toEqual([]);
 });
 
 it('records an error-only row for a file name without an ID', async () => {
@@ -151,8 +152,8 @@ it('records an error-only row for a file name without an ID', async () => {
   fake.set(path, ticketText({ title: 'One' }));
   await cache.refresh(fake.files);
 
-  expect(cache.listTickets({ includeArchived: true })).toEqual([]);
-  expect(cache.listErrors().map((error) => error.path)).toEqual([path]);
+  expect(okValueOf(cache.listTickets({ includeArchived: true }))).toEqual([]);
+  expect(okValueOf(cache.listErrors()).map((error) => error.path)).toEqual([path]);
 });
 
 it('gives the later path an error that names the duplicate', async () => {
@@ -166,7 +167,7 @@ it('gives the later path an error that names the duplicate', async () => {
   await cache.refresh(fake.files);
 
   expect(titleOf(cache, 'tikk-3a4b')).toBe('First');
-  const errors = cache.listErrors();
+  const errors = okValueOf(cache.listErrors());
 
   expect(errors.map((error) => error.path)).toEqual([second]);
   expect(errors[0]?.message).toContain(first);
@@ -175,7 +176,7 @@ it('gives the later path an error that names the duplicate', async () => {
   await cache.refresh(fake.files);
 
   expect(titleOf(cache, 'tikk-3a4b')).toBe('Second');
-  expect(cache.listErrors()).toEqual([]);
+  expect(okValueOf(cache.listErrors())).toEqual([]);
 });
 
 it('fails the refresh when the file list fails', async () => {
@@ -259,7 +260,7 @@ it('records an error for a file that cannot be read and reads it again next time
   const refreshed = await cache.refresh(failing);
 
   expect(refreshed.ok).toBe(true);
-  const errors = cache.listErrors();
+  const errors = okValueOf(cache.listErrors());
 
   expect(errors.map((error) => error.path)).toEqual([path]);
   expect(errors[0]?.message).toContain(path);
@@ -270,7 +271,7 @@ it('records an error for a file that cannot be read and reads it again next time
 
   await cache.refresh(fake.files);
 
-  expect(cache.listErrors()).toEqual([]);
+  expect(okValueOf(cache.listErrors())).toEqual([]);
   expect(titleOf(cache, 'tikk-3a4b')).toBe('One');
 });
 
@@ -282,12 +283,12 @@ it('records an error that names a project folder that is not a valid name', asyn
   fake.set(path, ticketText({ title: 'One' }));
 
   const refreshed = await cache.refresh(fake.files);
-  const errors = cache.listErrors();
+  const errors = okValueOf(cache.listErrors());
 
   expect(refreshed.ok).toBe(true);
   expect(errors.map((error) => error.path)).toEqual([path]);
   expect(errors[0]?.message).toContain('Bad Name');
-  expect(cache.listTickets({ includeArchived: true })).toEqual([]);
+  expect(okValueOf(cache.listTickets({ includeArchived: true }))).toEqual([]);
 });
 
 it('gives no addressable ticket for a file in an invalid project folder', async () => {
@@ -364,7 +365,7 @@ it('keeps a row that a newer refresh added when an older refresh listed no file'
   gate.open();
   await olderRefresh;
 
-  expect(idsOf(newer.listTickets({ includeArchived: true }))).toEqual(['tikk-3a4b']);
+  expect(idsOf(okValueOf(newer.listTickets({ includeArchived: true })))).toEqual(['tikk-3a4b']);
 });
 
 it('fails the refresh when the row keeps changing under every read', async () => {

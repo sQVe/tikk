@@ -1,6 +1,6 @@
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { ticketView } from './ticketView.ts';
+import { storeFailure, ticketView } from './ticketView.ts';
 
 export const ticketList = ({ args, session }: CommandInput): CommandResult => {
   const parsed = parseCommandArguments(args, {
@@ -20,11 +20,19 @@ export const ticketList = ({ args, session }: CommandInput): CommandResult => {
   const includeArchived = parsed.value.values['archived'] === true;
   const listed = session.listTickets({ includeArchived });
 
-  const tickets = listed.filter(
+  if (!listed.ok) {
+    return storeFailure(listed.reason.message);
+  }
+
+  const tickets = listed.value.filter(
     (ticket) => project === undefined || ticket.frontMatter.project === project,
   );
 
   const errors = session.listErrors();
+
+  if (!errors.ok) {
+    return storeFailure(errors.reason.message);
+  }
 
   const lines = tickets.map((ticket) => {
     const { kind, status, title } = ticket.frontMatter;
@@ -32,12 +40,12 @@ export const ticketList = ({ args, session }: CommandInput): CommandResult => {
     return `${ticket.id}  ${kind}  ${status}  ${title}\n`;
   });
 
-  const errorLines = errors.map((error) => `error: ${error.path}: ${error.message}\n`);
+  const errorLines = errors.value.map((error) => `error: ${error.path}: ${error.message}\n`);
 
   return {
     ok: true,
     value: {
-      json: { tickets: tickets.map((ticket) => ticketView(ticket, false)), errors },
+      json: { tickets: tickets.map((ticket) => ticketView(ticket, false)), errors: errors.value },
       text: [...lines, ...errorLines].join(''),
     },
   };

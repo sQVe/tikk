@@ -164,9 +164,16 @@ export const readyCommand = async ({
   // Archived tickets stay in the list so a blocker that was archived is not reported as missing.
   const listed = session.listTickets({ includeArchived: true });
 
+  if (!listed.ok) {
+    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+  }
+
   // A ticket whose file does not parse cannot be claimed, so it is never a candidate.
-  const unreadable = listed.filter((ticket) => isUnreadable(ticket, kind.value, project, parent));
-  const tickets = listed.filter((ticket) => ticket.error === null);
+  const unreadable = listed.value.filter((ticket) =>
+    isUnreadable(ticket, kind.value, project, parent),
+  );
+
+  const tickets = listed.value.filter((ticket) => ticket.error === null);
 
   const facts = await session.listStateFacts();
 

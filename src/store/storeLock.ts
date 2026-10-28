@@ -1,3 +1,5 @@
+import { basename, dirname } from 'node:path';
+
 import type { Result } from '../result.ts';
 import { breakerFilePath, lockFilePath } from './storePaths.ts';
 import type { Store } from './storePaths.ts';
@@ -9,6 +11,7 @@ export interface StoreLockFunctions {
   randomSuffix: () => string;
   readFile: (path: string) => Promise<string>;
   unlink: (path: string) => Promise<void>;
+  readdir: (directory: string) => Promise<string[]>;
   isProcessAlive: (pid: number) => boolean;
   sleep: (milliseconds: number) => Promise<void>;
   now: () => number;
@@ -60,7 +63,7 @@ const failed = (message: string): Result<never, StoreLockReason> => ({
 });
 
 // The file appears under its name only through `link`, which fails with EEXIST when the name is
-// taken. So a reader never sees the lock or the breaker without the PID of its holder.
+// taken. So a reader never sees the lock or a breaker generation without the PID of its holder.
 const publishExclusive = async (functions: StoreLockFunctions, path: string): Promise<void> => {
   const temporaryPath = `${path}.${functions.pid}.${functions.randomSuffix()}`;
 
@@ -131,46 +134,131 @@ const removeStaleLock = async (
 const isStale = (functions: StoreLockFunctions, holder: number | undefined): boolean =>
   holder === undefined || !functions.isProcessAlive(holder);
 
-// An owner that died while clearing leaves its breaker behind. A breaker of a live owner stays,
-// however old it is, because that owner may still remove the lock it read as stale.
-const removeDeadBreaker = async (
+const generationPath = (breaker: string, generation: number): string => `${breaker}.${generation}`;
+
+const releasePath = (generation: string): string => `${generation}.released`;
+
+// Temporary files share the prefix, so only an exact number, alone or with the release suffix,
+// names a generation. A marker counts even without its generation file, so no number is reused.
+const generationNumber = (name: string, prefix: string): number | undefined => {
+  if (!name.startsWith(prefix)) {
+    return undefined;
+  }
+
+  const match = /^(0|[1-9][0-9]*)(\.released)?$/.exec(name.slice(prefix.length));
+
+  return match === null ? undefined : Number(match[1]);
+};
+
+const latestGeneration = async (
   functions: StoreLockFunctions,
   breaker: string,
-): Promise<Result<undefined, StoreLockReason>> => {
-  const owner = await readHolder(functions, breaker);
+): Promise<Result<{ generation: number; released: boolean } | undefined, StoreLockReason>> => {
+  const directory = dirname(breaker);
+  let names: string[];
+
+  try {
+    names = await functions.readdir(directory);
+  } catch {
+    return failed(`Cannot list ${directory}.`);
+  }
+
+  const prefix = `${basename(breaker)}.`;
+
+  const generations = names
+    .map((name) => generationNumber(name, prefix))
+    .filter((generation) => generation !== undefined);
+
+  if (generations.length === 0) {
+    return { ok: true, value: undefined };
+  }
+
+  const generation = Math.max(...generations);
+  const released = names.includes(basename(releasePath(generationPath(breaker, generation))));
+
+  return { ok: true, value: { generation, released } };
+};
+
+// No process removes a generation, so only one process can link the one after it. A generation of a
+// live owner stays held however old it is, because that owner may still remove the lock it read as
+// stale.
+const nextGeneration = async (
+  functions: StoreLockFunctions,
+  breaker: string,
+): Promise<Result<number | 'busy', StoreLockReason>> => {
+  const latest = await latestGeneration(functions, breaker);
+
+  if (!latest.ok) {
+    return latest;
+  }
+
+  if (latest.value === undefined) {
+    return { ok: true, value: 0 };
+  }
+
+  const { generation, released } = latest.value;
+
+  if (released) {
+    return { ok: true, value: generation + 1 };
+  }
+
+  const owner = await readHolder(functions, generationPath(breaker, generation));
 
   if (!owner.ok) {
     return owner;
   }
 
   if (owner.value === 'gone' || !isStale(functions, owner.value)) {
-    return { ok: true, value: undefined };
+    return { ok: true, value: 'busy' };
   }
 
-  return removeStaleLock(functions, breaker, owner.value);
+  return { ok: true, value: generation + 1 };
 };
 
-// Only the owner of the breaker may remove a stale lock, and only while the lock still holds the
-// stale PID. Without it, a second process could remove the lock a first process just took.
+const releaseGeneration = async (
+  functions: StoreLockFunctions,
+  generation: string,
+): Promise<Result<undefined, StoreLockReason>> => {
+  try {
+    await publishExclusive(functions, releasePath(generation));
+  } catch {
+    return failed(`Cannot release ${generation}.`);
+  }
+
+  return { ok: true, value: undefined };
+};
+
+// Only the owner of a breaker generation may remove a stale lock, and only while the lock still
+// holds the stale PID. Without it, a second process could remove the lock a first process just took.
 const clearStaleLock = async (
   functions: StoreLockFunctions,
   { path, breaker }: { path: string; breaker: string },
   stale: number | undefined,
 ): Promise<Result<Clearing, StoreLockReason>> => {
+  const next = await nextGeneration(functions, breaker);
+
+  if (!next.ok) {
+    return next;
+  }
+
+  if (next.value === 'busy') {
+    return { ok: true, value: 'busy' };
+  }
+
+  const generation = generationPath(breaker, next.value);
+
   try {
-    await publishExclusive(functions, breaker);
+    await publishExclusive(functions, generation);
   } catch (error) {
     if (errorCode(error) !== 'EEXIST') {
-      return failed(`Cannot create ${breaker}.`);
+      return failed(`Cannot create ${generation}.`);
     }
 
-    const abandoned = await removeDeadBreaker(functions, breaker);
-
-    return abandoned.ok ? { ok: true, value: 'busy' } : abandoned;
+    return { ok: true, value: 'busy' };
   }
 
   const removed = await removeStaleLock(functions, path, stale);
-  const released = await removeLock(functions, breaker);
+  const released = await releaseGeneration(functions, generation);
 
   if (!removed.ok) {
     return removed;

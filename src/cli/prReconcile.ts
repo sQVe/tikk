@@ -9,6 +9,7 @@ import type {
   CliEffects,
   CliFailure,
   CliSession,
+  CliTicketOutline,
   CommandInput,
   CommandResult,
 } from './cliEffects.ts';
@@ -47,8 +48,6 @@ interface Change extends PullRequestRef {
   seen: PullRequestObservation;
 }
 
-type TicketOutline = ReturnType<CliSession['listTicketOutlines']>[number];
-
 const reconcileUsage = 'Usage: tikk reconcile [--json]';
 
 const globalProblem = (message: string): ReconcileProblem => ({
@@ -61,7 +60,7 @@ const globalProblem = (message: string): ReconcileProblem => ({
 export const problemLines = (problems: ReconcileProblem[]): string =>
   problems.map((problem) => `problem: ${problem.message}\n`).join('');
 
-const isOpenSlice = ({ frontMatter }: TicketOutline): boolean =>
+const isOpenSlice = ({ frontMatter }: CliTicketOutline): boolean =>
   frontMatter.kind === 'slice' &&
   frontMatter.status === 'open' &&
   frontMatter.archived === undefined;
@@ -84,17 +83,17 @@ const isStillSelected = (change: Change, index: SliceIndex): boolean => {
 const readCurrentIndex = async (
   session: CliSession,
   sliceIds: TicketId[],
-): Promise<Result<SliceIndex, { message: string }>> => {
+): Promise<Result<SliceIndex, CliFailure>> => {
   const refreshed = await session.refresh();
 
   if (!refreshed.ok) {
-    return refreshed;
+    return { ok: false, reason: { code: 'storeError', message: refreshed.reason.message } };
   }
 
   const facts = await session.listStateFacts(sliceIds);
 
   if (!facts.ok) {
-    return facts;
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
   return { ok: true, value: buildSliceIndex([], facts.value) };
@@ -105,16 +104,14 @@ const appendSelected = async (
   changes: Change[],
   machine: string,
   outcome: ReconcileOutcome,
-): Promise<void> => {
+): Promise<Result<undefined, CliFailure>> => {
   const index = await readCurrentIndex(
     session,
     changes.map((change) => change.ticket),
   );
 
   if (!index.ok) {
-    outcome.problems.push(globalProblem(index.reason.message));
-
-    return;
+    return index;
   }
 
   const selected = changes.filter((change) => isStillSelected(change, index.value));
@@ -135,20 +132,22 @@ const appendSelected = async (
       outcome.problems.push(changeProblem(change, appended.reason.message));
     }
   }
+
+  return { ok: true, value: undefined };
 };
 
 const appendChanges = async (
   input: ReconcileInput,
   changes: Change[],
   outcome: ReconcileOutcome,
-): Promise<void> => {
+): Promise<Result<undefined, CliFailure>> => {
   const { effects, session } = input;
   const machine = await effects.resolveMachine();
 
   if (!machine.ok) {
     outcome.problems.push(globalProblem(machine.reason.message));
 
-    return;
+    return { ok: true, value: undefined };
   }
 
   const lock = await session.lockStore();
@@ -156,11 +155,11 @@ const appendChanges = async (
   if (!lock.ok) {
     outcome.problems.push(globalProblem(lock.reason.message));
 
-    return;
+    return { ok: true, value: undefined };
   }
 
   try {
-    await appendSelected(input, changes, machine.value, outcome);
+    return await appendSelected(input, changes, machine.value, outcome);
   } finally {
     await lock.value.release();
   }
@@ -219,43 +218,56 @@ const collectChanges = async (
 };
 
 // All gh calls run before the store lock, which is taken only to append.
-export const reconcilePullRequests = async (input: ReconcileInput): Promise<ReconcileOutcome> => {
+export const reconcilePullRequests = async (
+  input: ReconcileInput,
+): Promise<Result<ReconcileOutcome, CliFailure>> => {
   const outcome: ReconcileOutcome = { checked: [], updated: [], problems: [] };
 
-  const slices = input.session
-    .listTicketOutlines()
-    .filter(isOpenSlice)
-    .map((outline) => outline.id);
+  const outlines = input.session.listTicketOutlines();
+
+  if (!outlines.ok) {
+    return { ok: false, reason: { code: 'storeError', message: outlines.reason.message } };
+  }
+
+  const slices = outlines.value.filter(isOpenSlice).map((outline) => outline.id);
 
   if (slices.length === 0) {
-    return outcome;
+    return { ok: true, value: outcome };
   }
 
   const facts = await input.session.listStateFacts(slices);
 
   if (!facts.ok) {
-    outcome.problems.push(globalProblem(facts.reason.message));
-
-    return outcome;
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
   const changes = await collectChanges(input, slices, facts.value, outcome);
 
   if (changes.length > 0) {
-    await appendChanges(input, changes, outcome);
+    const appended = await appendChanges(input, changes, outcome);
+
+    if (!appended.ok) {
+      return appended;
+    }
   }
 
   if (outcome.updated.length > 0) {
     await input.effects.scheduleSync();
   }
 
-  return outcome;
+  return { ok: true, value: outcome };
 };
 
 export const reconcileBeforeRead = async (
   input: ReconcileInput,
 ): Promise<Result<ReconcileProblem[], CliFailure>> => {
-  const outcome = await reconcilePullRequests(input);
+  const reconciled = await reconcilePullRequests(input);
+
+  if (!reconciled.ok) {
+    return { ok: false, reason: reconciled.reason };
+  }
+
+  const outcome = reconciled.value;
 
   if (outcome.updated.length === 0) {
     return { ok: true, value: outcome.problems };
@@ -281,7 +293,13 @@ export const reconcileCommand = async (input: CommandInput): Promise<CommandResu
     return invalidArguments(reconcileUsage);
   }
 
-  const outcome = await reconcilePullRequests(input);
+  const reconciled = await reconcilePullRequests(input);
+
+  if (!reconciled.ok) {
+    return { ok: false, reason: reconciled.reason };
+  }
+
+  const outcome = reconciled.value;
   const updatedLines = outcome.updated.map((slice) => `${slice.id}  ${slice.state}\n`).join('');
 
   return {

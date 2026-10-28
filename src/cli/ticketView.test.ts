@@ -164,7 +164,7 @@ it('returns parseError with the path and cached detail for a file that did not p
       { path, message: 'Bad YAML.' },
     ],
     overrides: {
-      getTicket: () => ({ ok: false, reason: { message: 'missing' } }),
+      getTicket: () => ({ ok: false, reason: { kind: 'notFound', message: 'missing' } }),
       findTicketPath: () => ({ ok: true, value: path }),
     },
   });
@@ -186,7 +186,7 @@ it('returns parseError with the path when no cached detail exists', () => {
 
   const { session } = makeSession({
     overrides: {
-      getTicket: () => ({ ok: false, reason: { message: 'missing' } }),
+      getTicket: () => ({ ok: false, reason: { kind: 'notFound', message: 'missing' } }),
       findTicketPath: () => ({ ok: true, value: path }),
     },
   });
@@ -209,7 +209,7 @@ it('does not look up an invalid ID', () => {
       getTicket: (id) => {
         lookups.push(id);
 
-        return { ok: false, reason: { message: 'missing' } };
+        return { ok: false, reason: { kind: 'notFound', message: 'missing' } };
       },
     },
   });

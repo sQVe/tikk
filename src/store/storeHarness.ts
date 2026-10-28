@@ -78,6 +78,7 @@ export const nodeStoreLock: StoreLockFunctions = {
   randomSuffix: () => crypto.randomUUID(),
   readFile: (path) => readFile(path, 'utf8'),
   unlink: (path) => unlink(path),
+  readdir: nodeTicketFiles.readdir,
   isProcessAlive: (pid) => {
     try {
       process.kill(pid, 0);

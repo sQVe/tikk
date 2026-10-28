@@ -2,12 +2,16 @@ import { expect, it } from 'bun:test';
 
 import { buildSliceIndex, selectSlicePr } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
-import type { CliEffects } from './cliEffects.ts';
+import { invariant } from '../invariant.ts';
+import type { Result } from '../result.ts';
+import { runCli } from './cli.ts';
+import type { CliEffects, CliFailure, CliSession } from './cliEffects.ts';
 import {
   fakeGh,
   makeEffects,
   makeFact,
   makeKindTicket,
+  failed,
   failureOf,
   makeSession,
   stalledGh,
@@ -15,7 +19,9 @@ import {
   ticketIdOf,
   withExpiredTimeouts,
 } from './cliHarness.ts';
+import type { FakeSession } from './cliHarness.ts';
 import { reconcileBeforeRead, reconcileCommand, reconcilePullRequests } from './prReconcile.ts';
+import type { ReconcileOutcome } from './prReconcile.ts';
 
 const prFact = (ticket: string, fields: Record<string, unknown>): Fact =>
   makeFact({
@@ -31,6 +37,12 @@ const prFact = (ticket: string, fields: Record<string, unknown>): Fact =>
     ...fields,
   });
 
+const outcomeOf = (result: Result<ReconcileOutcome, CliFailure>): ReconcileOutcome => {
+  invariant(result.ok, 'The reconcile should read the outlines.');
+
+  return result.value;
+};
+
 const reconcile = async (
   slices: string[],
   facts: Fact[],
@@ -44,13 +56,15 @@ const reconcile = async (
 
   const fakeEffects = makeEffects({ session: fakeSession, runGh: fakeGh(gh), ...overrides });
 
-  const outcome = await reconcilePullRequests({
+  const result = await reconcilePullRequests({
     effects: fakeEffects.effects,
     session: fakeSession.session,
   });
 
+  invariant(result.ok, 'The reconcile should read the outlines.');
+
   return {
-    outcome,
+    outcome: result.value,
     appends: fakeSession.appends,
     ghCalls: fakeEffects.ghCalls,
     scheduleCalls: fakeEffects.scheduleCalls,
@@ -162,8 +176,10 @@ it('returns one problem and appends nothing when gh does not answer before its t
 
   const { effects } = makeEffects({ session: fakeSession, runGh: stalledGh });
 
-  const outcome = await withExpiredTimeouts(async () =>
-    reconcilePullRequests({ effects, session: fakeSession.session }),
+  const outcome = outcomeOf(
+    await withExpiredTimeouts(async () =>
+      reconcilePullRequests({ effects, session: fakeSession.session }),
+    ),
   );
 
   expect(outcome.updated).toEqual([]);
@@ -172,7 +188,7 @@ it('returns one problem and appends nothing when gh does not answer before its t
   expect(fakeSession.appends).toEqual([]);
 });
 
-it('returns one problem and appends nothing when the store cannot be read again', async () => {
+it('fails with a storeError and appends nothing when the store cannot be read again', async () => {
   const fakeSession = makeSession({
     tickets: [makeKindTicket('demo-3467', 'slice')],
     facts: [prFact('demo-3467', {})],
@@ -186,15 +202,11 @@ it('returns one problem and appends nothing when the store cannot be read again'
     runGh: fakeGh({ 7: { state: 'CLOSED' } }),
   });
 
-  const outcome = await reconcilePullRequests({ effects, session: fakeSession.session });
+  const result = await reconcilePullRequests({ effects, session: fakeSession.session });
 
-  expect(outcome.updated).toEqual([]);
-
-  expect(outcome.problems).toEqual([
-    { ticket: null, repository: null, number: null, message: 'Cache is gone.' },
-  ]);
-
+  expect(result).toEqual({ ok: false, reason: { code: 'storeError', message: 'Cache is gone.' } });
   expect(fakeSession.appends).toEqual([]);
+  expect(fakeSession.lockHeld()).toBe(false);
 });
 
 it('keeps a PR linked by another process while gh reads the old PR', async () => {
@@ -214,16 +226,15 @@ it('keeps a PR linked by another process while gh reads the old PR', async () =>
   };
 
   const { effects } = makeEffects({ session: fakeSession, runGh });
-  const outcome = await reconcilePullRequests({ effects, session: fakeSession.session });
+  const outcome = outcomeOf(await reconcilePullRequests({ effects, session: fakeSession.session }));
 
   await fakeSession.session.refresh();
 
   const facts = await fakeSession.session.listStateFacts();
 
-  const index = buildSliceIndex(
-    fakeSession.session.listTicketOutlines(),
-    facts.ok ? facts.value : [],
-  );
+  const outlines = fakeSession.session.listTicketOutlines();
+
+  const index = buildSliceIndex(outlines.ok ? outlines.value : [], facts.ok ? facts.value : []);
 
   expect(outcome.updated).toEqual([]);
   expect(selectSlicePr(ticketIdOf('demo-3467'), index)?.number).toBe(8);
@@ -286,7 +297,7 @@ it('returns one problem without ticket and appends nothing when the store is loc
     runGh: fakeGh({ 7: { state: 'CLOSED' } }),
   });
 
-  const outcome = await reconcilePullRequests({ effects, session: fakeSession.session });
+  const outcome = outcomeOf(await reconcilePullRequests({ effects, session: fakeSession.session }));
 
   expect(outcome.updated).toEqual([]);
 
@@ -349,6 +360,130 @@ it('does not refresh the session after a reconcile that appended nothing', async
 
   expect(result).toEqual({ ok: true, value: [] });
   expect(refreshes()).toBe(0);
+});
+
+it('exits 1 with a JSON storeError when the ticket outlines cannot be read', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: {
+      listTicketOutlines: () => ({
+        ok: false,
+        reason: { message: 'The cache failed: database is locked' },
+      }),
+    },
+  });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'OPEN' } }),
+  });
+
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+
+  const exitCode = await runCli(['reconcile', '--json'], fakeEffects.effects, {
+    stdout: (text) => stdout.push(text),
+    stderr: (text) => stderr.push(text),
+  });
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toEqual([]);
+
+  expect(JSON.parse(stdout.join(''))).toEqual({
+    error: { code: 'storeError', message: 'The cache failed: database is locked' },
+  });
+});
+
+it('exits 1 with a JSON storeError when the state facts cannot be read', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: {
+      listStateFacts: () => failed('The cache failed: database is locked'),
+    },
+  });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'OPEN' } }),
+  });
+
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+
+  const exitCode = await runCli(['reconcile', '--json'], fakeEffects.effects, {
+    stdout: (text) => stdout.push(text),
+    stderr: (text) => stderr.push(text),
+  });
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+
+  expect(JSON.parse(stdout.join(''))).toEqual({
+    error: { code: 'storeError', message: 'The cache failed: database is locked' },
+  });
+});
+
+// The fake reads the lock state at call time, so a read can fail only while the store lock is held.
+const runReconcileJson = async (overrides: (lockHeld: () => boolean) => Partial<CliSession>) => {
+  const fakeSession: FakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: overrides(() => fakeSession.lockHeld()),
+  });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'CLOSED' } }),
+  });
+
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+
+  const exitCode = await runCli(['reconcile', '--json'], fakeEffects.effects, {
+    stdout: (text) => stdout.push(text),
+    stderr: (text) => stderr.push(text),
+  });
+
+  return { exitCode, stdout: stdout.join(''), stderr, fakeSession };
+};
+
+it('exits 1 with a JSON storeError when the store cannot be read again under the lock', async () => {
+  const { exitCode, stdout, stderr, fakeSession } = await runReconcileJson((lockHeld) => ({
+    refresh: () =>
+      Promise.resolve(
+        lockHeld()
+          ? { ok: false, reason: { message: 'Cache is gone.' } }
+          : { ok: true, value: undefined },
+      ),
+  }));
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+  expect(fakeSession.lockHeld()).toBe(false);
+
+  expect(JSON.parse(stdout)).toEqual({ error: { code: 'storeError', message: 'Cache is gone.' } });
+});
+
+it('exits 1 with a JSON storeError when the facts cannot be read again under the lock', async () => {
+  const { exitCode, stdout, stderr, fakeSession } = await runReconcileJson((lockHeld) => ({
+    listStateFacts: () =>
+      lockHeld()
+        ? failed('The cache failed: database is locked')
+        : Promise.resolve({ ok: true, value: [prFact('demo-3467', {})] }),
+  }));
+
+  expect(exitCode).toBe(1);
+  expect(stderr).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+  expect(fakeSession.lockHeld()).toBe(false);
+
+  expect(JSON.parse(stdout)).toEqual({
+    error: { code: 'storeError', message: 'The cache failed: database is locked' },
+  });
 });
 
 const reconcileArguments = async (args: string[]) => {

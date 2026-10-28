@@ -11,7 +11,7 @@ import { treeRowsOf } from './treeView.tsx';
 export interface TuiEffects {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
   loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
-  loadErrors: () => Promise<TicketFileError[]>;
+  loadErrors: () => Promise<Result<TicketFileError[], CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
   onChange: (listener: () => void) => () => void;
@@ -257,7 +257,9 @@ const readView = async (effects: TuiEffects, name: ViewName): Promise<LoadOutcom
 
 const readFileErrors = async (effects: TuiEffects): Promise<TicketFileError[] | undefined> => {
   try {
-    return await effects.loadErrors();
+    const loaded = await effects.loadErrors();
+
+    return loaded.ok ? loaded.value : undefined;
   } catch {
     return undefined;
   }

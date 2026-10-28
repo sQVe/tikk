@@ -11,6 +11,7 @@ import {
   idsOf,
   ticketPath,
   ticketText,
+  okValueOf,
   openTestCache,
   rewriteDatabaseText,
   runSql,
@@ -39,7 +40,7 @@ const listIds = async (): Promise<string[]> => {
   fake.set(ticketPath('tikk-3a4c'), ticketText({ title: 'Two' }));
   await cache.refresh(fake.files);
 
-  return idsOf(cache.listTickets({ includeArchived: true }));
+  return idsOf(okValueOf(cache.listTickets({ includeArchived: true })));
 };
 
 it('rebuilds a database with an unknown version and returns the same tickets', async () => {
@@ -111,7 +112,7 @@ it('returns a failure instead of throwing when SQLite fails during refresh', asy
 const listWithoutRefresh = (): string[] => {
   using cache = openTestCache(databasePath);
 
-  return idsOf(cache.listTickets({ includeArchived: true }));
+  return idsOf(okValueOf(cache.listTickets({ includeArchived: true })));
 };
 
 it('keeps an intact database and its tickets across opens, and can still write', async () => {
@@ -127,7 +128,7 @@ it('keeps an intact database and its tickets across opens, and can still write',
   const refreshed = await cache.refresh(fake.files);
 
   expect(refreshed.ok).toBe(true);
-  expect(idsOf(cache.listTickets({ includeArchived: true }))).toEqual(['tikk-3a4d']);
+  expect(idsOf(okValueOf(cache.listTickets({ includeArchived: true })))).toEqual(['tikk-3a4d']);
 });
 
 const brokenSchemas: [string, string][] = [
@@ -254,7 +255,8 @@ import { openCache } from ${JSON.stringify(join(import.meta.dir, 'cache.ts'))};
 const databasePath = process.argv[2];
 parentPort.postMessage('entering');
 const opened = openCache(databasePath);
-const ids = opened.ok ? opened.value.listTickets({ includeArchived: true }).map((ticket) => ticket.id) : null;
+const listed = opened.ok ? opened.value.listTickets({ includeArchived: true }) : null;
+const ids = listed?.ok ? listed.value.map((ticket) => ticket.id) : null;
 parentPort.postMessage(JSON.stringify(ids));`;
 
 const openerScript = `import { Worker } from 'node:worker_threads';

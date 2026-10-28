@@ -123,7 +123,13 @@ const showSlice = async (
   ticket: CliTicket,
   files: string[],
 ): Promise<CommandResult> => {
-  const outlines = session.listTicketOutlines();
+  const listed = session.listTicketOutlines();
+
+  if (!listed.ok) {
+    return storeFailure(listed.reason.message);
+  }
+
+  const outlines = listed.value;
 
   const instructionIds = outlines
     .filter((outline) => outline.frontMatter.parent === ticket.id)
@@ -221,13 +227,27 @@ export const findTicket = (session: CliSession, rawId: string): Result<CliTicket
     return ticket;
   }
 
+  if (ticket.reason.kind === 'failed') {
+    return { ok: false, reason: { code: 'storeError', message: ticket.reason.message } };
+  }
+
   const path = session.findTicketPath(id.value);
+
+  if (!path.ok && path.reason.kind === 'failed') {
+    return { ok: false, reason: { code: 'storeError', message: path.reason.message } };
+  }
 
   if (!path.ok) {
     return { ok: false, reason: notFound };
   }
 
-  const cached = session.listErrors().find((error) => error.path === path.value);
+  const errors = session.listErrors();
+
+  if (!errors.ok) {
+    return { ok: false, reason: { code: 'storeError', message: errors.reason.message } };
+  }
+
+  const cached = errors.value.find((error) => error.path === path.value);
   const detail = cached?.message ?? 'The file did not parse.';
 
   return {

@@ -14,12 +14,21 @@ const changedTickets = (
   input: CommandInput,
   root: CliTicket,
   command: ArchiveCommand,
-): CliTicket[] => {
-  const children = groupTicketChildren(input.session.listTickets({ includeArchived: true }));
+): Result<CliTicket[], CliFailure> => {
+  const listed = input.session.listTickets({ includeArchived: true });
+
+  if (!listed.ok) {
+    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+  }
+
+  const children = groupTicketChildren(listed.value);
   const tree = collectTicketTree(root, children);
   const archiving = command === 'archive';
 
-  return tree.filter((ticket) => (ticket.frontMatter.archived === undefined) === archiving);
+  return {
+    ok: true,
+    value: tree.filter((ticket) => (ticket.frontMatter.archived === undefined) === archiving),
+  };
 };
 
 const writeArchived = async (
@@ -126,7 +135,13 @@ const changeLocked = async (
   root: CliTicket,
   command: ArchiveCommand,
 ): Promise<CommandResult> => {
-  const tickets = changedTickets(input, root, command);
+  const changedTree = changedTickets(input, root, command);
+
+  if (!changedTree.ok) {
+    return changedTree;
+  }
+
+  const tickets = changedTree.value;
   const broken = tickets.find((ticket) => ticket.error !== null);
 
   if (broken !== undefined) {

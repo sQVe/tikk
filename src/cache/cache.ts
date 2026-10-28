@@ -34,6 +34,11 @@ import type {
 import { hasValidScanRows, refresh } from './ticketScan.ts';
 import type { CacheFileReason, CacheFiles } from './ticketScan.ts';
 
+interface CacheQueryFailure {
+  kind: 'failed';
+  message: string;
+}
+
 export type {
   CacheOpenReason,
   FactDamage,
@@ -67,6 +72,30 @@ const writeMarker = (database: Database): string => {
 
 const isSqliteError = (error: unknown): error is Error =>
   error instanceof Error && 'code' in error && String(error.code).startsWith('SQLITE');
+
+const queryFailure = (error: unknown): CacheQueryFailure => {
+  invariant(isSqliteError(error), 'A cache query failed for a reason other than SQLite.');
+
+  return { kind: 'failed', message: `The cache failed: ${error.message}` };
+};
+
+const readValue = <Value>(read: () => Value): Result<Value, CacheQueryFailure> => {
+  try {
+    return { ok: true, value: read() };
+  } catch (error) {
+    return { ok: false, reason: queryFailure(error) };
+  }
+};
+
+const readResult = <Value, Reason>(
+  read: () => Result<Value, Reason>,
+): Result<Value, Reason | CacheQueryFailure> => {
+  try {
+    return read();
+  } catch (error) {
+    return { ok: false, reason: queryFailure(error) };
+  }
+};
 
 export class TicketCache implements Disposable {
   readonly #database: Database;
@@ -121,45 +150,40 @@ export class TicketCache implements Disposable {
 
       return refreshed;
     } catch (error) {
-      invariant(isSqliteError(error), 'A refresh failed for a reason other than SQLite.');
-
-      return {
-        ok: false,
-        reason: { kind: 'failed', message: `The cache failed: ${error.message}` },
-      };
+      return { ok: false, reason: queryFailure(error) };
     }
   }
 
-  getTicket(id: TicketId): Result<CachedTicket, TicketNotFound> {
-    return getTicket(this.#database, id);
+  getTicket(id: TicketId): Result<CachedTicket, TicketNotFound | CacheQueryFailure> {
+    return readResult(() => getTicket(this.#database, id));
   }
 
-  findTicketPath(id: TicketId): Result<string, TicketNotFound> {
-    return findTicketPath(this.#database, id);
+  findTicketPath(id: TicketId): Result<string, TicketNotFound | CacheQueryFailure> {
+    return readResult(() => findTicketPath(this.#database, id));
   }
 
-  listTickets(options: ListTicketsOptions): CachedTicket[] {
-    return listTickets(this.#database, options);
+  listTickets(options: ListTicketsOptions): Result<CachedTicket[], CacheQueryFailure> {
+    return readValue(() => listTickets(this.#database, options));
   }
 
-  listTicketOutlines(): TicketOutline[] {
-    return listTicketOutlines(this.#database);
+  listTicketOutlines(): Result<TicketOutline[], CacheQueryFailure> {
+    return readValue(() => listTicketOutlines(this.#database));
   }
 
-  mayHaveArchiveWork(now: Date): boolean {
-    return mayHaveArchiveWork(this.#database, now);
+  mayHaveArchiveWork(now: Date): Result<boolean, CacheQueryFailure> {
+    return readValue(() => mayHaveArchiveWork(this.#database, now));
   }
 
-  listFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
-    return listFacts(this.#database, ticketIds);
+  listFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage | CacheQueryFailure> {
+    return readResult(() => listFacts(this.#database, ticketIds));
   }
 
-  listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
-    return listStateFacts(this.#database, ticketIds);
+  listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage | CacheQueryFailure> {
+    return readResult(() => listStateFacts(this.#database, ticketIds));
   }
 
-  listArchiveFacts(): Result<Fact[], FactDamage> {
-    return listArchiveFacts(this.#database);
+  listArchiveFacts(): Result<Fact[], FactDamage | CacheQueryFailure> {
+    return readResult(() => listArchiveFacts(this.#database));
   }
 
   // Replaces every fact row from the files in one transaction.
@@ -167,17 +191,12 @@ export class TicketCache implements Disposable {
     try {
       return await rebuildFacts(this.#database, files);
     } catch (error) {
-      invariant(isSqliteError(error), 'A rebuild failed for a reason other than SQLite.');
-
-      return {
-        ok: false,
-        reason: { kind: 'failed', message: `The cache failed: ${error.message}` },
-      };
+      return { ok: false, reason: queryFailure(error) };
     }
   }
 
-  listErrors(): CachedError[] {
-    return [...listErrors(this.#database), ...listFactErrors(this.#database)];
+  listErrors(): Result<CachedError[], CacheQueryFailure> {
+    return readValue(() => [...listErrors(this.#database), ...listFactErrors(this.#database)]);
   }
 
   [Symbol.dispose](): void {

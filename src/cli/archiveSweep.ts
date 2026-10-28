@@ -12,11 +12,11 @@ const findDue = async (
   const tickets = session.listTicketOutlines();
   const facts = await session.listArchiveFacts();
 
-  if (!facts.ok) {
+  if (!tickets.ok || !facts.ok) {
     return undefined;
   }
 
-  return findArchiveDue(tickets, facts.value, effects.now());
+  return findArchiveDue(tickets.value, facts.value, effects.now());
 };
 
 const appendStatusFacts = async (
@@ -84,7 +84,9 @@ const sweepLocked = async (effects: CliEffects, session: CliSession): Promise<vo
 // Archives finished work before a command runs. The sweep never fails the command: anything it
 // cannot do now, a later command does.
 export const sweepArchive = async (effects: CliEffects, session: CliSession): Promise<void> => {
-  if (!session.mayHaveArchiveWork(effects.now())) {
+  const mayHaveWork = session.mayHaveArchiveWork(effects.now());
+
+  if (!mayHaveWork.ok || !mayHaveWork.value) {
     return;
   }
 

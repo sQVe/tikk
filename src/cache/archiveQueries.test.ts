@@ -7,6 +7,7 @@ import {
   createFakeFiles,
   factPath,
   factText,
+  okValueOf,
   openTestCache,
   ticketPath,
 } from './cacheHarness.ts';
@@ -85,10 +86,10 @@ const answersFor = async (tickets: StoreTicket[], facts: StoreFact[]): Promise<A
 
   invariant(listed.ok, 'The archive facts must decode.');
 
-  const due = findArchiveDue(cache.listTicketOutlines(), listed.value, now);
+  const due = findArchiveDue(okValueOf(cache.listTicketOutlines()), listed.value, now);
   const rules = due.archive.length > 0 || due.statusFacts.length > 0;
 
-  return { precheck: cache.mayHaveArchiveWork(now), rules };
+  return { precheck: okValueOf(cache.mayHaveArchiveWork(now)), rules };
 };
 
 const canceledPlan: StoreTicket = { id: 'tikk-3a4b', kind: 'plan', status: 'canceled' };

@@ -108,10 +108,15 @@ const isSibling = (candidate: CliTicket, ticket: CliTicket): boolean =>
   candidate.frontMatter.parent === ticket.frontMatter.parent &&
   candidate.frontMatter.kind === ticket.frontMatter.kind;
 
-const siblingsOf = (input: CommandInput, ticket: CliTicket): CliTicket[] =>
-  input.session
-    .listTickets({ includeArchived: false })
-    .filter((candidate) => isSibling(candidate, ticket));
+const siblingsOf = (input: CommandInput, ticket: CliTicket): Result<CliTicket[], CliFailure> => {
+  const listed = input.session.listTickets({ includeArchived: false });
+
+  if (!listed.ok) {
+    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+  }
+
+  return { ok: true, value: listed.value.filter((candidate) => isSibling(candidate, ticket)) };
+};
 
 const orderSiblings = (
   siblings: CliTicket[],
@@ -208,7 +213,13 @@ const rankTicket = async (
     return invalidArguments(`Ticket ${ticket.id} is archived, so it cannot be ranked.`);
   }
 
-  const ordered = orderSiblings(siblingsOf(input, ticket), ticket, placement);
+  const siblings = siblingsOf(input, ticket);
+
+  if (!siblings.ok) {
+    return siblings;
+  }
+
+  const ordered = orderSiblings(siblings.value, ticket, placement);
 
   if (!ordered.ok) {
     return ordered;

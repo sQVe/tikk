@@ -250,7 +250,7 @@ it('lists the ticket files that failed to parse once the pending load settles', 
   }
 
   const loading = opened.value.load();
-  let listed: { path: string; message: string; id: string | null }[] | undefined;
+  let listed: unknown;
 
   const listing = (async () => {
     listed = await opened.value.loadErrors();
@@ -265,9 +265,10 @@ it('lists the ticket files that failed to parse once the pending load settles', 
   await Promise.all([loading, listing]);
   await opened.value.close();
 
-  expect(listed).toEqual([
-    { path: 'tickets/demo-3467.md', message: 'Front matter is invalid.', id: null },
-  ]);
+  expect(listed).toEqual({
+    ok: true,
+    value: [{ path: 'tickets/demo-3467.md', message: 'Front matter is invalid.', id: null }],
+  });
 });
 
 it('tags each file error with the ID of the ticket at its exact path, or null when none has that path', async () => {
@@ -294,10 +295,13 @@ it('tags each file error with the ID of the ticket at its exact path, or null wh
 
   await opened.value.close();
 
-  expect(listed).toEqual([
-    { path: exactPath, message: 'Front matter is invalid.', id: 'demo-3467' as TicketId },
-    { path: prefixPath, message: 'Front matter is invalid.', id: null },
-  ]);
+  expect(listed).toEqual({
+    ok: true,
+    value: [
+      { path: exactPath, message: 'Front matter is invalid.', id: 'demo-3467' as TicketId },
+      { path: prefixPath, message: 'Front matter is invalid.', id: null },
+    ],
+  });
 });
 
 it('opens the editor on the ticket file and waits for it before it closes', async () => {
@@ -501,7 +505,10 @@ it('tags a file error with the ID of an archived ticket at its path', async () =
 
   await opened.value.close();
 
-  expect(listed).toEqual([
-    { path: archivedPath, message: 'Front matter is invalid.', id: 'demo-3468' as TicketId },
-  ]);
+  expect(listed).toEqual({
+    ok: true,
+    value: [
+      { path: archivedPath, message: 'Front matter is invalid.', id: 'demo-3468' as TicketId },
+    ],
+  });
 });

@@ -9,6 +9,7 @@ import {
   factsOf,
   factText,
   makeGate,
+  okValueOf,
   openTestCache,
   runSql,
 } from './cacheHarness.ts';
@@ -84,13 +85,13 @@ it('skips an incomplete last line until it ends in a newline', async () => {
   await cache.refresh(fake.files);
 
   expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b']);
-  expect(cache.listErrors()).toEqual([]);
+  expect(okValueOf(cache.listErrors())).toEqual([]);
 
   fake.setFactFile(path, factText('me-3a4b') + whole);
   await cache.refresh(fake.files);
 
   expect(ticketsOf(factsOf(cache))).toEqual(['me-3a4b', 'me-3a4c']);
-  expect(cache.listErrors()).toEqual([]);
+  expect(okValueOf(cache.listErrors())).toEqual([]);
 });
 
 it('reports a bad line as path:line:message and indexes the other lines', async () => {
@@ -101,7 +102,7 @@ it('reports a bad line as path:line:message and indexes the other lines', async 
   fake.setFactFile(path, `${factText('me-3a4b')}not json\n${factText('me-3a4c')}`);
   await cache.refresh(fake.files);
 
-  const errors = cache.listErrors();
+  const errors = okValueOf(cache.listErrors());
 
   expect(errors).toHaveLength(1);
   expect(errors[0]?.path).toBe(`${path}:2`);

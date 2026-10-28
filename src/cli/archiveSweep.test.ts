@@ -238,7 +238,7 @@ it('loads no tickets or facts when the cache says no archive work is possible', 
     tickets: [plan],
     facts: [statusFact('demo-3467', 'canceled', '2026-10-06T12:00:00.000Z')],
     overrides: {
-      mayHaveArchiveWork: () => false,
+      mayHaveArchiveWork: () => ({ ok: true, value: false }),
       listArchiveFacts: () => {
         loads.push('facts');
 
