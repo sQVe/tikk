@@ -2,7 +2,7 @@ import { criterionFingerprint, validateFact } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
-import type { CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
 import { withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
@@ -11,6 +11,7 @@ type AuditFact = Extract<Fact, { kind: 'audit' }>;
 
 interface AuditArguments {
   rawId: string;
+  hash: string;
   repository: string;
   head: string;
   base: string;
@@ -21,7 +22,7 @@ interface AuditArguments {
 type QaFact = Extract<Fact, { kind: 'qa' }>;
 
 const usage =
-  'Usage: tikk audit <slice> --repository <owner/name> --head <sha> --base <sha> --change-hash <hash> --verdicts-file <path> [--json]';
+  'Usage: tikk audit <slice> --hash <hash> --repository <owner/name> --head <sha> --base <sha> --change-hash <hash> --verdicts-file <path> [--json]';
 
 const ownerNamePattern = /^[^/\s]+\/[^/\s]+$/;
 
@@ -49,6 +50,11 @@ const readVerdictsFile = async (
 
   return { ok: true, value: verdicts };
 };
+
+const changedSinceRead = (slice: CliTicket): { ok: false; reason: CliFailure } => ({
+  ok: false,
+  reason: { code: 'changedOnDisk', message: `${slice.path} changed since it was read.` },
+});
 
 const checkCriteria = (slice: CliTicket, audit: AuditFact): string | undefined => {
   const known = (slice.frontMatter.criteria ?? []).map((criterion) => criterion.id);
@@ -182,6 +188,7 @@ const parseAuditArguments = (
   args: string[],
 ): { ok: true; value: AuditArguments } | ReturnType<typeof invalidArguments> => {
   const parsed = parseCommandArguments(args, {
+    hash: { type: 'string' },
     repository: { type: 'string' },
     head: { type: 'string' },
     base: { type: 'string' },
@@ -195,6 +202,7 @@ const parseAuditArguments = (
 
   const { values, positionals } = parsed.value;
   const [rawId, ...extra] = positionals;
+  const hash = stringValue(values, 'hash');
   const repository = stringValue(values, 'repository');
   const head = stringValue(values, 'head');
   const base = stringValue(values, 'base');
@@ -209,7 +217,7 @@ const parseAuditArguments = (
     return invalidArguments(usage);
   }
 
-  if (changeHash === undefined || path === undefined) {
+  if (changeHash === undefined || path === undefined || hash === undefined) {
     return invalidArguments(usage);
   }
 
@@ -217,7 +225,7 @@ const parseAuditArguments = (
     return invalidArguments(`"${repository}" is not a repository. Use owner/name.`);
   }
 
-  return { ok: true, value: { rawId, repository, head, base, changeHash, path } };
+  return { ok: true, value: { rawId, hash, repository, head, base, changeHash, path } };
 };
 
 export const sliceAudit = async (input: CommandInput): Promise<CommandResult> => {
@@ -227,7 +235,7 @@ export const sliceAudit = async (input: CommandInput): Promise<CommandResult> =>
     return parsed;
   }
 
-  const { rawId, repository, head, base, changeHash, path } = parsed.value;
+  const { rawId, hash, repository, head, base, changeHash, path } = parsed.value;
 
   const found = findTicket(input.session, rawId);
 
@@ -280,6 +288,12 @@ export const sliceAudit = async (input: CommandInput): Promise<CommandResult> =>
     input,
     rawId,
     { fileErrors: 'refuse', requireInstruction: false },
-    (locked) => appendAudit(input, locked, fact, machine.value),
+    async (locked) => {
+      if (locked.hash !== hash) {
+        return changedSinceRead(locked);
+      }
+
+      return appendAudit(input, locked, fact, machine.value);
+    },
   );
 };

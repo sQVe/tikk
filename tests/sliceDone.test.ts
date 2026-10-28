@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
 import { createCliFixture } from './cliFixture.ts';
-import type { CliFixture } from './cliFixture.ts';
+import type { CliFixture, CliRun } from './cliFixture.ts';
 import { createFakeGh } from './fakeGh.ts';
 import type { FakeGh, FakePullRequest } from './fakeGh.ts';
 
@@ -74,23 +74,36 @@ const createSlice = async (): Promise<string> => {
 
 const showSlice = (id: string): Promise<SliceShow> => cli().runJson<SliceShow>(['show', id]);
 
+const auditFactCount = async (): Promise<number> => {
+  const files = await Array.fromAsync(new Bun.Glob('**/*.jsonl').scan({ cwd: cli().storePath }));
+
+  const texts = await Promise.all(
+    files.map((file) => Bun.file(join(cli().storePath, file)).text()),
+  );
+
+  const lines = texts.join('').split('\n');
+
+  return lines.filter((line) => line.includes('"kind":"audit"')).length;
+};
+
 const editSlice = async (id: string, change: string[]): Promise<void> => {
   const { hash } = await cli().runJson<{ hash: string }>(['show', id]);
 
   await cli().runJson(['edit', id, '--hash', hash, ...change]);
 };
 
-const auditAllMet = async (
+const auditWithHash = async (
   id: string,
+  hash: string,
   head: string,
   repository = 'acme/app',
-): Promise<SliceShow> => {
+): Promise<CliRun> => {
   const verdicts = await writeFixtureFile(
     'verdicts.yaml',
     '- criterion: works\n  verdict: met\n  evidence: The check passed\n',
   );
 
-  return cli().runJson<SliceShow>([
+  return cli().run([
     'audit',
     id,
     '--repository',
@@ -101,9 +114,25 @@ const auditAllMet = async (
     'main',
     '--change-hash',
     'hash1',
+    '--hash',
+    hash,
     '--verdicts-file',
     verdicts,
+    '--json',
   ]);
+};
+
+const auditAllMet = async (
+  id: string,
+  head: string,
+  repository = 'acme/app',
+): Promise<SliceShow> => {
+  const { hash } = await cli().runJson<{ hash: string }>(['show', id]);
+  const result = await auditWithHash(id, hash, head, repository);
+
+  invariant(result.exitCode === 0, `The audit should succeed: ${result.stderr}${result.stdout}`);
+
+  return showSlice(id);
 };
 
 beforeEach(async () => {
@@ -166,6 +195,29 @@ it('voids the audit when a criterion expected text changes and keeps its ID', as
 
   await editSlice(id, ['--criteria-file', criteria]);
 
+  expect((await showSlice(id)).state).toBe('mergedUnverified');
+});
+
+it('refuses an audit whose hash was read before a criterion changed and appends nothing', async () => {
+  const id = await createSlice();
+
+  await cli().runJson(['pr', 'link', id, prUrl]);
+
+  const { hash } = await cli().runJson<{ hash: string }>(['show', id]);
+
+  const criteria = await writeFixtureFile(
+    'reworded.yaml',
+    '- id: works\n  check: Run it\n  expected: It works faster\n',
+  );
+
+  await editSlice(id, ['--criteria-file', criteria]);
+
+  const audits = await auditFactCount();
+  const result = await auditWithHash(id, hash, 'head1');
+
+  expect(result.exitCode).not.toBe(0);
+  expect(JSON.parse(result.stdout)).toMatchObject({ error: { code: 'changedOnDisk' } });
+  expect(await auditFactCount()).toBe(audits);
   expect((await showSlice(id)).state).toBe('mergedUnverified');
 });
 

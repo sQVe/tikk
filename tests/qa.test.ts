@@ -59,6 +59,7 @@ const addRun = async (id: string, verdict = 'pass'): Promise<string> => {
 const audit = async (id: string, run: string) => {
   const verdictsFile = join(cli().home, `verdicts-${run}.yaml`);
   const citation = JSON.stringify(run);
+  const { hash } = await cli().runJson<{ hash: string }>(['show', id]);
 
   await Bun.write(
     verdictsFile,
@@ -68,6 +69,8 @@ const audit = async (id: string, run: string) => {
   return cli().run([
     'audit',
     id,
+    '--hash',
+    hash,
     '--repository',
     'acme/app',
     '--head',

@@ -92,6 +92,8 @@ const fullArguments = [
   'main',
   '--change-hash',
   'hash1',
+  '--hash',
+  'hash-demo-3467',
   '--verdicts-file',
   verdictsPath,
 ];
@@ -136,7 +138,7 @@ it('stores the fingerprint of each criterion text that the verdict judged', asyn
   ]);
 });
 
-it.each(['--repository', '--head', '--base', '--change-hash', '--verdicts-file'])(
+it.each(['--repository', '--head', '--base', '--change-hash', '--hash', '--verdicts-file'])(
   'refuses a missing %s with the usage',
   async (flag) => {
     const at = fullArguments.indexOf(flag);
@@ -149,6 +151,19 @@ it.each(['--repository', '--head', '--base', '--change-hash', '--verdicts-file']
     expect(appends).toEqual([]);
   },
 );
+
+it('refuses an audit when the ticket changed since the given hash and appends nothing', async () => {
+  const args = fullArguments.map((value) => (value === 'hash-demo-3467' ? 'hash-old' : value));
+  const { result, appends } = await audit(args);
+  const failure = failureOf(result);
+
+  expect(failure).toMatchObject({
+    code: 'changedOnDisk',
+    message: '/store/demo/demo-3467-slug.md changed since it was read.',
+  });
+
+  expect(appends).toEqual([]);
+});
 
 it('refuses a malformed repository and appends nothing', async () => {
   const args = fullArguments.map((value) => (value === 'acme/app' ? 'app' : value));
