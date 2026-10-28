@@ -1,15 +1,19 @@
+import { RGBA } from '@opentui/core';
+
 export interface Palette {
-  text: string;
-  dim: string;
-  key: string;
-  heading: string;
-  overlayBackground: string;
+  text: RGBA;
+  key: RGBA;
+  heading: RGBA;
+  overlayBackground: RGBA;
 }
 
+const ansiYellow = 3;
+const ansiBlue = 4;
+
+// OpenTUI draws an unset color as fixed white, so every color names the terminal's own slot.
 export const palette: Palette = {
-  text: '#d7dae0',
-  dim: '#4f5866',
-  key: '#e5c07b',
-  heading: '#61afef',
-  overlayBackground: '#1c2029',
+  text: RGBA.defaultForeground(),
+  key: RGBA.fromIndex(ansiYellow),
+  heading: RGBA.fromIndex(ansiBlue),
+  overlayBackground: RGBA.defaultBackground(),
 };

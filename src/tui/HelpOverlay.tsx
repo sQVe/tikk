@@ -1,3 +1,4 @@
+import { TextAttributes } from '@opentui/core';
 import type { ReactNode } from 'react';
 
 import { boxChromeColumns, footerOf } from './helpWindow.ts';
@@ -16,7 +17,7 @@ const lineOf = (line: HelpLine, index: number, palette: Palette): ReactNode => {
 
   if (line.kind === 'reason') {
     return (
-      <text key={index} fg={palette.dim}>
+      <text key={index} fg={palette.text} attributes={TextAttributes.DIM}>
         {line.text}
       </text>
     );
@@ -64,7 +65,11 @@ export const HelpOverlay = (props: {
       paddingRight={1}
     >
       {visible.map((line, index) => lineOf(line, index, palette))}
-      {overflows ? <text fg={palette.dim}>{footer}</text> : null}
+      {overflows ? (
+        <text fg={palette.text} attributes={TextAttributes.DIM}>
+          {footer}
+        </text>
+      ) : null}
     </box>
   );
 };

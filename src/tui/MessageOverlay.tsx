@@ -1,3 +1,4 @@
+import { TextAttributes } from '@opentui/core';
 import type { ReactNode } from 'react';
 
 import type { MessageWindow } from './messageWindow.ts';
@@ -34,13 +35,21 @@ export const MessageOverlay = (props: {
       paddingLeft={1}
       paddingRight={1}
     >
-      {visible.length === 0 ? <text fg={palette.dim}>No messages yet</text> : null}
+      {visible.length === 0 ? (
+        <text fg={palette.text} attributes={TextAttributes.DIM}>
+          No messages yet
+        </text>
+      ) : null}
       {visible.map((row) => (
         <text key={row.key} fg={palette.text} wrapMode="none">
           {row.text}
         </text>
       ))}
-      {overflows ? <text fg={palette.dim}>{position}</text> : null}
+      {overflows ? (
+        <text fg={palette.text} attributes={TextAttributes.DIM}>
+          {position}
+        </text>
+      ) : null}
     </box>
   );
 };

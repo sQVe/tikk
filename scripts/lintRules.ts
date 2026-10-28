@@ -74,7 +74,7 @@ const packagePolicies = new Map<string, PackagePolicy>([
     'tui',
     {
       builtins: false,
-      packages: ['react', '@opentui/keymap', '@opentui/react'],
+      packages: ['react', '@opentui/core', '@opentui/keymap', '@opentui/react'],
     },
   ],
   [
