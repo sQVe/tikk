@@ -582,10 +582,11 @@ const writeClashTicket = async (
   slug: string,
   parentId: string,
   aged = true,
+  kind = 'instruction',
 ): Promise<void> => {
   const directory = join(fixture.storePath, 'tickets', 'demo');
   const path = join(directory, `${id}-${slug}.md`);
-  const text = `---\nkind: instruction\ntitle: ${slug}\nproject: demo\nparent: ${parentId}\nblockedBy: []\nstatus: open\n---\n`;
+  const text = `---\nkind: ${kind}\ntitle: ${slug}\nproject: demo\nparent: ${parentId}\nblockedBy: []\nstatus: open\n---\n`;
 
   await mkdir(directory, { recursive: true });
   await writeFile(path, text);
@@ -632,6 +633,12 @@ const commitOn = async (root: string, date: string): Promise<void> => {
 
 const aliasLinesOf = (facts: string): string[] =>
   facts.split('\n').filter((line) => line.includes('"kind":"alias"'));
+
+const runJsonError = (stdout: string): string | undefined => {
+  const parsed = JSON.parse(stdout) as { error?: { code?: string } };
+
+  return parsed.error?.code;
+};
 
 const readFactFiles = async (fixture: CliFixture): Promise<Map<string, string>> => {
   const factsDirectory = join(fixture.storePath, 'facts');
@@ -1265,7 +1272,7 @@ it('a clash retry after a newer merge keeps the pre-clash facts with the renamed
   }
 });
 
-it('a clash retry after the renamed clone logs again keeps that progress with the renamed ticket and the surviving ticket on the old ID', async () => {
+it('a clash retry refuses writes under the shared ID and keeps the pre-clash facts with the renamed ticket', async () => {
   const { first, second, remotePath } = clonePair();
 
   await first.runChecked(['init', '--remote', remotePath]);
@@ -1313,26 +1320,23 @@ it('a clash retry after the renamed clone logs again keeps that progress with th
   expect(failed.exitCode).not.toBe(0);
   expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
 
-  // A keeps its old ID and logs again, and the surviving clone logs in the same window.
-  await first.runChecked([
-    'log',
-    'demo-aaaa',
-    '--type',
-    'progress',
-    '--text',
-    'A progress after failed read',
-  ]);
+  // The surviving clone has both ticket files, so its write under the shared ID is refused.
+  {
+    const refused = await second.run([
+      'log',
+      'demo-aaaa',
+      '--type',
+      'progress',
+      '--text',
+      'Written in the window',
+      '--json',
+    ]);
+
+    expect(refused.exitCode).not.toBe(0);
+    expect(runJsonError(refused.stdout)).toBe('idShared');
+  }
 
   await first.runChecked(['sync']);
-
-  await second.runChecked([
-    'log',
-    'demo-aaaa',
-    '--type',
-    'progress',
-    '--text',
-    'B progress in window',
-  ]);
 
   const retry = await second.runJson<AliasSyncReport>(['sync']);
   const alias = retry.aliases[0];
@@ -1348,12 +1352,683 @@ it('a clash retry after the renamed clone logs again keeps that progress with th
 
     expect(renamed.claim?.holder).toBe('first-agent');
 
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual(['A progress before clash']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
+  }
+});
+
+it('a pending renamed ticket keeps its own facts when the other clone merged facts it pushed before the ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  // B's ticket stays pending, but its progress is committed and pushed before the ticket.
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B log published before its ticket',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+
+  // A's ticket is settled and has the same ID, and A merges B's facts before B's ticket exists.
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A log for surviving ticket',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  // B merges A's history while its ticket is still pending, so the clash renames that ticket.
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+
+  await second.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(second, alias.to))).toEqual([
+    'B log published before its ticket',
+  ]);
+
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A log for surviving ticket']);
+
+  // The renamed file settles and is committed, and A receives it.
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    await fixture.runChecked(['ls']);
+
     expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual([
-      'A progress before clash',
-      'A progress after failed read',
+      'B log published before its ticket',
     ]);
 
-    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual(['B progress in window']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual(['A log for surviving ticket']);
+  }
+});
+
+it('a fact write refuses a ticket ID that two ticket files share and appends no fact', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await writeClashTicket(fixture, 'demo-aaaa', 'first', parent.id);
+  await writeClashTicket(fixture, 'demo-aaaa', 'second', parent.id);
+
+  const before = await readAllFacts(fixture).catch(() => '');
+
+  const logged = await fixture.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written under a shared ID',
+    '--json',
+  ]);
+
+  expect(logged.exitCode).not.toBe(0);
+  expect(runJsonError(logged.stdout)).toBe('idShared');
+  expect(logged.stdout).toContain('demo-aaaa');
+  expect(await readAllFacts(fixture).catch(() => '')).toBe(before);
+});
+
+it('a fact write accepts an ID when the other file with it sits in another project folder', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await writeClashTicket(fixture, 'demo-aaaa', 'first', parent.id);
+
+  const misplaced = join(fixture.storePath, 'tickets', 'other', 'demo-aaaa-second.md');
+
+  const text = await readFile(
+    join(fixture.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'),
+    'utf8',
+  );
+
+  await mkdir(dirname(misplaced), { recursive: true });
+  await writeFile(misplaced, text);
+
+  const logged = await fixture.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written under an ID only one demo ticket has',
+    '--json',
+  ]);
+
+  expect(logged.stdout).not.toContain('idShared');
+  expect(logged.exitCode).toBe(0);
+  expect(await readAllFacts(fixture)).toContain('Written under an ID only one demo ticket has');
+});
+
+const sharedIdPaths = (fixture: CliFixture): [string, string] => [
+  join(fixture.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'),
+  join(fixture.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'),
+];
+
+const createSharedIdStore = async (kind = 'instruction'): Promise<CliFixture> => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await writeClashTicket(fixture, 'demo-aaaa', 'first', parent.id, true, kind);
+  await writeClashTicket(fixture, 'demo-aaaa', 'second', parent.id, true, kind);
+
+  return fixture;
+};
+
+// Runs a command that writes a ticket file and a fact, and checks that it wrote neither.
+const expectSharedRefusalWithoutWrites = async (
+  fixture: CliFixture,
+  args: string[],
+): Promise<void> => {
+  const paths = sharedIdPaths(fixture);
+  const textsBefore = await Promise.all(paths.map((path) => readFile(path, 'utf8')));
+  const factsBefore = await readAllFacts(fixture).catch(() => '');
+
+  const refused = await fixture.run([...args, '--json']);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+  expect(await Promise.all(paths.map((path) => readFile(path, 'utf8')))).toEqual(textsBefore);
+  expect(await readAllFacts(fixture).catch(() => '')).toBe(factsBefore);
+};
+
+it('done refuses a shared ID before it writes the ticket file or a status fact', async () => {
+  const fixture = await createSharedIdStore('task');
+
+  await expectSharedRefusalWithoutWrites(fixture, ['done', 'demo-aaaa']);
+});
+
+it('cancel refuses a shared ID before it writes the ticket file or a status fact', async () => {
+  const fixture = await createSharedIdStore();
+
+  await expectSharedRefusalWithoutWrites(fixture, ['cancel', 'demo-aaaa']);
+});
+
+it('unarchive refuses a shared ID before it writes the ticket file or an unarchive fact', async () => {
+  const fixture = await createSharedIdStore('task');
+  const [first, second] = sharedIdPaths(fixture);
+  const parent = (await readFile(second, 'utf8')).match(/^parent: (\S+)$/m)?.[1] ?? '';
+
+  // The first file is the one the command picks, so it is archived here.
+  await writeFile(
+    first,
+    `---\nkind: task\ntitle: first\nproject: demo\nparent: ${parent}\nblockedBy: []\nstatus: done\narchived: 2026-10-01\n---\n`,
+  );
+
+  await expectSharedRefusalWithoutWrites(fixture, ['unarchive', 'demo-aaaa']);
+});
+
+it('a log refuses an ID whose second ticket file does not parse, and appends no fact', async () => {
+  const fixture = await createSharedIdStore();
+  const [, second] = sharedIdPaths(fixture);
+
+  // The second file keeps its name, so the ID is still shared even though its front matter is broken.
+  await writeFile(second, '---\nkind: broken\n---\n');
+
+  const before = await readAllFacts(fixture).catch(() => '');
+
+  const refused = await fixture.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written under a shared ID with a broken file',
+    '--json',
+  ]);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+  expect(await readAllFacts(fixture).catch(() => '')).toBe(before);
+});
+
+it('a pending renamed ticket keeps its pre-clash facts when the sync that renames it fast-forwards', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  // B's ticket stays pending while its progress is pushed. A imports that progress before it has a ticket.
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B pending progress',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  // A's settled ticket shares the ID and gets its own progress. The remote has no merge commit.
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A survivor progress',
+  ]);
+
+  await first.runChecked(['sync']);
+
+  // B's sync fast-forwards to A's history while B's ticket is still pending.
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+
+  await second.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(second, alias.to))).toEqual(['B pending progress']);
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A survivor progress']);
+});
+
+it('a pending clash that a failed resolution left shared keeps the write refused and each ticket its own facts', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  // B's ticket stays pending while its progress is pushed, and A's settled ticket shares the ID.
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B pending-ticket progress',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A surviving-ticket progress',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  // The clash resolution fails after the merge, so both ticket files share the ID.
+  const failingPath = await failNextTreeRead(second, 'demo-aaaa-second.md');
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const failed = await second.run(['sync'], { path: failingPath });
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const refused = await second.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress for surviving A after merge',
+    '--json',
+  ]);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should write one alias.');
+  await second.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(second, alias.to))).toEqual(['B pending-ticket progress']);
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A surviving-ticket progress']);
+});
+
+it('a write refused after a failed clash commit leaves the retry with each ticket its own facts', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  const offline = join(first.home, 'offline.git');
+
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', offline]);
+  await writeClashTicket(first, 'demo-aaaa', 'older', parent.id);
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeClashTicket(second, 'demo-aaaa', 'newer', parent.id);
+  await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  await second.runChecked(['sync']);
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', remotePath]);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const refused = await first.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written after the failed commit',
+    '--json',
+  ]);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+
+  await rm(hook);
+  await first.runChecked(['sync']);
+  await first.runChecked(['ls']);
+
+  const aliasTicket = aliasTicketOf(await readAllFacts(first));
+
+  expect(logTexts(listTicketFacts(first, aliasTicket))).toEqual(['B progress before clash']);
+  expect(logTexts(listTicketFacts(first, 'demo-aaaa'))).toEqual([]);
+});
+
+it('a second pending clash leaves a fact that an earlier alias moved with the earlier renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  // First clash: B's ticket is pending, and B's progress is pushed before the ticket.
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B log published before its ticket',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A log for surviving ticket',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const firstReport = await second.runJson<AliasSyncReport>(['sync']);
+  const firstAlias = firstReport.aliases[0];
+
+  invariant(firstAlias !== undefined, 'The first clash should write one alias.');
+
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+
+  // The surviving ticket is deleted, so its ID is free for a second clash.
+  await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'));
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  // Second clash: B's new ticket is pending and its progress is pushed, and A's new ticket is settled.
+  await writeClashTicket(second, 'demo-aaaa', 'third', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B second pending progress',
+  ]);
+
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'fourth', parent.id);
+  await first.runChecked(['log', 'demo-aaaa', '--type', 'progress', '--text', 'A second survivor']);
+  await first.runChecked(['sync']);
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-third.md'));
+  const secondReport = await second.runJson<AliasSyncReport>(['sync']);
+  const secondAlias = secondReport.aliases[0];
+
+  invariant(secondAlias !== undefined, 'The second clash should write one alias.');
+
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    await fixture.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(fixture, firstAlias.to))).toEqual([
+      'B log published before its ticket',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, secondAlias.to))).toEqual([
+      'B second pending progress',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([
+      'A log for surviving ticket',
+      'A second survivor',
+    ]);
+  }
+});
+
+it('a retry after a failed clash commit moves a fact written on the other clone after the failure to the renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  // B's ticket is older. A's newer ticket is renamed, and A logs before the failed resolution.
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['claim', 'demo-aaaa', '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+
+  // The clash commit fails after the alias fact is written.
+  const hook = join(second.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await second.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  // A has only its own ticket file, so A's write is accepted and lands on the old ID.
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress after failed commit',
+  ]);
+
+  await first.runChecked(['sync']);
+
+  await rm(hook);
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should reuse the alias.');
+  expect(alias.from).toBe('demo-aaaa');
+
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    await fixture.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual([
+      'A progress before clash',
+      'A progress after failed commit',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
   }
 });
 

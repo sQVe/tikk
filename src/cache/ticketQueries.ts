@@ -1,10 +1,17 @@
 import type { Database } from 'bun:sqlite';
+import { basename, dirname } from 'node:path';
 
 import { z } from 'zod';
 
 import { invariant } from '../invariant.ts';
 import type { Result } from '../result.ts';
-import { parseTicketId, ticketFrontMatterSchema, ticketIdSchema } from '../ticket/ticket.ts';
+import {
+  parseProjectName,
+  parseTicketFileName,
+  parseTicketId,
+  ticketFrontMatterSchema,
+  ticketIdSchema,
+} from '../ticket/ticket.ts';
 import type { TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
 
 export interface CachedTicket {
@@ -269,4 +276,27 @@ export const listErrors = (database: Database): CachedError[] => {
 
     return { path: row.data.path, message: row.data.error };
   });
+};
+
+// Two ticket files whose names give one ID share it. The name decides, so a file that does not
+// parse still counts.
+export const isIdShared = (database: Database, id: TicketId): boolean => {
+  const project = parseProjectName(id.slice(0, -'-XXXX'.length));
+
+  if (!project.ok) {
+    return false;
+  }
+
+  const rows = z
+    .array(z.object({ path: z.string() }))
+    .parse(database.query('SELECT path FROM tickets WHERE path LIKE ?').all(`%/${id}-%`));
+
+  const named = rows.filter((row) => {
+    const inProjectFolder = basename(dirname(row.path)) === project.value;
+    const fileName = parseTicketFileName(basename(row.path), project.value);
+
+    return inProjectFolder && fileName.ok && fileName.value.id === id;
+  });
+
+  return named.length > 1;
 };

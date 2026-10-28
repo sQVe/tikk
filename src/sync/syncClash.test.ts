@@ -201,6 +201,8 @@ const strictCommands = {
   logOlder: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-a.md',
   logNewer: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-b.md',
   parents: 'rev-list --first-parent --merges --parents HEAD',
+  headFacts: 'ls-tree -r -z --name-only HEAD -- facts',
+  headRenamed: 'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa-b.md',
   head: 'rev-parse --verify --quiet HEAD',
   readTree: 'read-tree HEAD',
   blob: 'ls-tree HEAD -- tickets/demo/demo-aaaa-b.md',
@@ -213,6 +215,8 @@ const strictReplies: Record<string, string> = {
   [strictCommands.logOlder]: '900\n',
   [strictCommands.logNewer]: '1000\n2000\n',
   [strictCommands.parents]: '',
+  [strictCommands.headFacts]: '',
+  [strictCommands.headRenamed]: 'tickets/demo/demo-aaaa-b.md\0',
   [strictCommands.head]: '',
   [strictCommands.readTree]: '',
   [strictCommands.blob]: '100644 blob abc123\ttickets/demo/demo-aaaa-b.md\n',
@@ -285,6 +289,8 @@ it('runs exactly the expected Git calls for a tracked clash, and commits with si
   expect(nonConfigCommands(fake).filter((command) => !command.startsWith('commit'))).toEqual([
     strictCommands.logOlder,
     strictCommands.logNewer,
+    strictCommands.headFacts,
+    strictCommands.headRenamed,
     strictCommands.parents,
     strictCommands.head,
     strictCommands.readTree,
@@ -697,6 +703,12 @@ const mergeGit =
 it('stops before the alias and the rename when a fact listing fails', async () => {
   const fake = twoTickets({
     git: mergeGit({
+      'ls-tree -r -z --name-only left -- tickets/demo/demo-aaaa-b.md': gitOutput(
+        'tickets/demo/demo-aaaa-b.md\0',
+      ),
+      'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa-b.md': gitOutput(
+        'tickets/demo/demo-aaaa-b.md\0',
+      ),
       'rev-list --first-parent --merges --parents HEAD': gitOutput('merge left right\n'),
       'ls-tree -r -z --name-only left -- facts': gitFailure('listing failed'),
     }),
@@ -712,6 +724,12 @@ it('stops before the alias and the rename when a fact listing fails', async () =
 it('stops before the alias and the rename when a fact file that exists cannot be read', async () => {
   const fake = twoTickets({
     git: mergeGit({
+      'ls-tree -r -z --name-only left -- tickets/demo/demo-aaaa-b.md': gitOutput(
+        'tickets/demo/demo-aaaa-b.md\0',
+      ),
+      'ls-tree -r -z --name-only HEAD -- tickets/demo/demo-aaaa-b.md': gitOutput(
+        'tickets/demo/demo-aaaa-b.md\0',
+      ),
       'rev-list --first-parent --merges --parents HEAD': gitOutput('merge left right\n'),
       'ls-tree -r -z --name-only left -- facts': gitOutput('facts/fake/2026-10.jsonl\0'),
       'show left:facts/fake/2026-10.jsonl': gitFailure('read failed'),

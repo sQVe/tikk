@@ -1,4 +1,4 @@
-import { relative } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { parseFactLine } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
@@ -96,7 +96,7 @@ const readMerge = async (
   root: string,
   parents: string[],
   renamedPath: string,
-): Promise<Result<MergeSides | undefined | 'skip', SyncReason>> => {
+): Promise<Result<MergeSides | undefined | 'skip' | 'pending', SyncReason>> => {
   const [local, remote] = parents;
 
   if (local === undefined || remote === undefined) {
@@ -122,6 +122,10 @@ const readMerge = async (
     return { ok: true, value: 'skip' };
   }
 
+  if (!localHas && !remoteHas) {
+    return { ok: true, value: 'pending' };
+  }
+
   if (remoteHas) {
     return { ok: true, value: { renamed: remote, surviving: local } };
   }
@@ -133,7 +137,7 @@ const clashSides = async (
   functions: GitFunctions,
   root: string,
   renamedPath: string,
-): Promise<Result<ClashSides | undefined, SyncReason>> => {
+): Promise<Result<ClashSides | 'pending' | undefined, SyncReason>> => {
   const merges = await firstParentMerges(functions, root);
 
   if (!merges.ok) {
@@ -154,8 +158,8 @@ const clashSides = async (
       continue;
     }
 
-    if (reading.value === undefined) {
-      return { ok: true, value: undefined };
+    if (reading.value === undefined || reading.value === 'pending') {
+      return { ok: true, value: reading.value };
     }
 
     const sideIndex = parents[0] === reading.value.renamed ? 0 : 1;
@@ -210,6 +214,21 @@ const commonPrefixLength = (left: string[], right: string[]): number => {
   return length;
 };
 
+// The lines from `start` on that have the clashing ID, named by file and 1-based line.
+const referencesFrom = (
+  path: string,
+  lines: string[],
+  from: TicketId,
+  start: number,
+): MovedFactReference[] =>
+  lines.flatMap((text, index) => {
+    const parsed = parseFactLine(text);
+
+    return index >= start && parsed.ok && parsed.value.ticket === from
+      ? [{ path: relative(factsFolder, path), line: index + 1 }]
+      : [];
+  });
+
 // Lines on the newest parent of the renamed side that come after the lines both sides shared at the
 // merge that brought the file in, and that have the clashing ID.
 const movedLinesOf = async (
@@ -245,25 +264,119 @@ const movedLinesOf = async (
   }
 
   const shared = commonPrefixLength(renamedLines.value, survivingLines.value);
+
+  return { ok: true, value: referencesFrom(path, tipLines.value, from, shared) };
+};
+
+const collectReferences = (
+  perFile: Result<MovedFactReference[], SyncReason>[],
+): Result<MovedFactReference[], SyncReason> => {
   const references: MovedFactReference[] = [];
 
-  for (const [index, text] of tipLines.value.entries()) {
-    const parsed = parseFactLine(text);
-
-    if (index >= shared && parsed.ok && parsed.value.ticket === from) {
-      references.push({ path: relative(factsFolder, path), line: index + 1 });
+  for (const file of perFile) {
+    if (!file.ok) {
+      return file;
     }
+
+    references.push(...file.value);
   }
 
   return { ok: true, value: references };
 };
 
-export const movedFactReferences = async (
+// An uncommitted ticket file exists only on this machine. Its facts are the old-ID lines this
+// machine wrote, read from HEAD, because a merge parent can be the other clone's side. Lines that
+// this machine wrote after it merged the other ticket, and before the rename, are included too.
+const pendingReferences = async (
+  functions: GitFunctions,
+  root: string,
+  from: TicketId,
+  localMachine: string | undefined,
+): Promise<Result<MovedFactReference[], SyncReason>> => {
+  if (localMachine === undefined) {
+    return failed("Cannot read this machine's name for the pending ticket's facts.");
+  }
+
+  const machinePaths = await listPaths(functions, root, 'HEAD', join(factsFolder, localMachine));
+
+  if (!machinePaths.ok) {
+    return machinePaths;
+  }
+
+  const jsonlPaths = machinePaths.value.filter((path) => path.endsWith('.jsonl'));
+
+  const perFile = await Promise.all(
+    jsonlPaths.map(async (path) => {
+      const lines = await readLines(functions, root, 'HEAD', path);
+
+      return lines.ok
+        ? { ok: true as const, value: referencesFrom(path, lines.value, from, 0) }
+        : lines;
+    }),
+  );
+
+  return collectReferences(perFile);
+};
+
+// The `path:line` keys that one fact line moves, when it is an alias.
+const movedKeysOf = (text: string): string[] => {
+  const parsed = parseFactLine(text);
+
+  if (!parsed.ok || parsed.value.kind !== 'alias') {
+    return [];
+  }
+
+  return (parsed.value.movedFacts ?? []).map((reference) => `${reference.path}:${reference.line}`);
+};
+
+// Lines an alias on HEAD already moves belong to that alias's ticket now. A later clash must not
+// move them again, or the earlier renamed ticket would lose them.
+const alreadyMovedKeys = async (
+  functions: GitFunctions,
+  root: string,
+): Promise<Result<Set<string>, SyncReason>> => {
+  const paths = await listPaths(functions, root, 'HEAD', factsFolder);
+
+  if (!paths.ok) {
+    return paths;
+  }
+
+  const moved = new Set<string>();
+
+  for (const path of paths.value.filter((entry) => entry.endsWith('.jsonl'))) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each fact file is read in turn.
+    const lines = await readLines(functions, root, 'HEAD', path);
+
+    if (!lines.ok) {
+      return lines;
+    }
+
+    for (const key of lines.value.flatMap(movedKeysOf)) {
+      moved.add(key);
+    }
+  }
+
+  return { ok: true, value: moved };
+};
+
+const ownedReferences = async (
   functions: GitFunctions,
   root: string,
   renamedPath: string,
   from: TicketId,
+  localMachine: string | undefined,
 ): Promise<Result<MovedFactReference[], SyncReason>> => {
+  // A ticket file that HEAD lacks is uncommitted, so it is pending even when no merge is on HEAD.
+  const inHead = await listPaths(functions, root, 'HEAD', renamedPath);
+
+  if (!inHead.ok) {
+    return inHead;
+  }
+
+  if (inHead.value.length === 0) {
+    return pendingReferences(functions, root, from, localMachine);
+  }
+
   const sides = await clashSides(functions, root, renamedPath);
 
   if (!sides.ok) {
@@ -272,6 +385,10 @@ export const movedFactReferences = async (
 
   if (sides.value === undefined) {
     return { ok: true, value: [] };
+  }
+
+  if (sides.value === 'pending') {
+    return pendingReferences(functions, root, from, localMachine);
   }
 
   const clashSidesValue = sides.value;
@@ -300,15 +417,32 @@ export const movedFactReferences = async (
     jsonlPaths.map((path) => movedLinesOf(functions, root, clashSidesValue, paths, path, from)),
   );
 
-  const references: MovedFactReference[] = [];
+  return collectReferences(perFile);
+};
 
-  for (const file of perFile) {
-    if (!file.ok) {
-      return file;
-    }
+export const movedFactReferences = async (
+  functions: GitFunctions,
+  root: string,
+  renamedPath: string,
+  from: TicketId,
+  localMachine: string | undefined,
+): Promise<Result<MovedFactReference[], SyncReason>> => {
+  const moved = await alreadyMovedKeys(functions, root);
 
-    references.push(...file.value);
+  if (!moved.ok) {
+    return moved;
   }
 
-  return { ok: true, value: references };
+  const owned = await ownedReferences(functions, root, renamedPath, from, localMachine);
+
+  if (!owned.ok) {
+    return owned;
+  }
+
+  return {
+    ok: true,
+    value: owned.value.filter(
+      (reference) => !moved.value.has(`${reference.path}:${reference.line}`),
+    ),
+  };
 };

@@ -263,6 +263,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
         value: { hash: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef' },
       });
     },
+    checkIdUnshared: () => ({ ok: true, value: undefined }),
     appendFact: (machine, fact) => {
       appends.push({ machine, fact });
       diskFacts.push(fact);

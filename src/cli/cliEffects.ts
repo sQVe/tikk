@@ -26,7 +26,8 @@ export interface CliFailure {
     | 'storeError'
     | 'conflict'
     | 'locked'
-    | 'ghError';
+    | 'ghError'
+    | 'idShared';
   message: string;
 }
 
@@ -47,8 +48,8 @@ interface CreatedFile {
   hash: string;
 }
 
-interface FactAppendReason {
-  kind: 'invalid' | 'failed';
+export interface FactAppendReason {
+  kind: 'invalid' | 'failed' | 'shared';
   message: string;
 }
 
@@ -82,6 +83,8 @@ export interface CliSession extends Disposable {
   lockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
   // One attempt that never waits for another holder.
   tryLockStore: () => Promise<Result<StoreLock, StoreLockReason>>;
+  // Refuses an ID that two ticket files share, so a command can check before it writes a file.
+  checkIdUnshared: (id: TicketId) => Result<undefined, FactAppendReason>;
   appendFact: (machine: string, fact: Fact) => Promise<Result<{ path: string }, FactAppendReason>>;
   storeLog: (text: string) => Promise<Result<{ hash: string }, CliMessage>>;
   createTicketFile: (

@@ -4,6 +4,7 @@ import type { Result } from '../result.ts';
 import { collectTicketTree, groupTicketChildren, serializeTicketFile } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { unsharedIdFailure } from './factAppendFailure.ts';
 import { fileErrorFailure, refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { showAfterRefresh } from './ticketView.ts';
@@ -116,6 +117,14 @@ const unarchiveTree = async (
 
   if (!machine.ok) {
     return machine;
+  }
+
+  for (const ticket of tickets) {
+    const unshared = unsharedIdFailure(input.session, ticket.id);
+
+    if (!unshared.ok) {
+      return unshared;
+    }
   }
 
   for (const ticket of tickets) {

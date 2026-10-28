@@ -80,6 +80,21 @@ const listTicketFolderFiles = async (
   }
 };
 
+// Two ticket files with one ID make a fact for it ambiguous, so the write waits for `tikk sync`.
+const checkIdUnshared = (
+  cache: TicketCache,
+  id: TicketId,
+): ReturnType<CliSession['checkIdUnshared']> =>
+  cache.isIdShared(id)
+    ? {
+        ok: false,
+        reason: {
+          kind: 'shared',
+          message: `Ticket ID ${id} is shared by two ticket files. Run tikk sync to resolve it.`,
+        },
+      }
+    : { ok: true, value: undefined };
+
 const sessionFor = (store: Store, cache: TicketCache): CliSession => {
   const files: CacheFiles = {
     listTicketFiles: () => listTicketFiles(ticketFiles, store),
@@ -105,7 +120,16 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     listArchiveFacts: () => listFactsRecovering(cache, files, () => cache.listArchiveFacts()),
     lockStore: () => acquireStoreLock(storeLock, store),
     tryLockStore: () => tryStoreLock(storeLock, store),
-    appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
+    checkIdUnshared: (id) => checkIdUnshared(cache, id),
+    appendFact: async (machine, fact) => {
+      const unshared = checkIdUnshared(cache, fact.ticket);
+
+      if (!unshared.ok) {
+        return unshared;
+      }
+
+      return appendFact(factFiles, store, machine, fact);
+    },
     storeLog: async (text) => {
       const stored = await storeLog(logFiles, store, text);
 

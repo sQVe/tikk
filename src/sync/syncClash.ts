@@ -16,6 +16,7 @@ export interface SyncClashFunctions extends SyncCommitFunctions {
   unlink: (path: string) => Promise<void>;
   randomIdSuffix: () => string;
   appendAlias: (alias: AliasRecord) => Promise<Result<{ path: string }, { message: string }>>;
+  localMachine: () => string | undefined;
   // The alias facts this machine has written.
   listAliases: () => Promise<{ from: string; to: string; path: string }[]>;
 }
@@ -215,7 +216,8 @@ const reusableId = async (
   return undefined;
 };
 
-// A reused alias already has its fact, so only a new alias appends one.
+// A reused alias has its fact already. A retry still looks for facts that were added after the
+// alias was written, and a fact found that way gets its own alias line with the same IDs.
 const aliasFactPath = async (
   functions: SyncClashFunctions,
   root: string,
@@ -226,16 +228,23 @@ const aliasFactPath = async (
     reusedPath: string | undefined;
   },
 ): Promise<Result<string, SyncReason>> => {
-  if (record.reusedPath !== undefined) {
-    return { ok: true, value: record.reusedPath };
-  }
-
-  const at = new Date(functions.now()).toISOString();
-  const movedFacts = await movedFactReferences(functions, root, record.renamedPath, record.from);
+  const movedFacts = await movedFactReferences(
+    functions,
+    root,
+    record.renamedPath,
+    record.from,
+    functions.localMachine(),
+  );
 
   if (!movedFacts.ok) {
     return movedFacts;
   }
+
+  if (record.reusedPath !== undefined && movedFacts.value.length === 0) {
+    return { ok: true, value: record.reusedPath };
+  }
+
+  const at = new Date(functions.now()).toISOString();
 
   const appended = await functions.appendAlias({
     ticket: record.ticket,

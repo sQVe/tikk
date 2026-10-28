@@ -3,6 +3,7 @@ import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { appendFailure } from './factAppendFailure.ts';
 import { withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
 import { findTicket, showAfterRefresh, storeFailure } from './ticketView.ts';
@@ -176,9 +177,7 @@ const appendAudit = async (
   const appended = await input.session.appendFact(machine, audit);
 
   if (!appended.ok) {
-    const { kind, message } = appended.reason;
-
-    return kind === 'invalid' ? invalidArguments(message) : storeFailure(message);
+    return appendFailure(appended.reason);
   }
 
   return showAfterRefresh(input.session, input.effects.now(), slice.id);

@@ -139,6 +139,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
         ? unsigned
         : [...unsigned, '-c', 'user.name=tikk', '-c', 'user.email=tikk@localhost'];
     },
+    localMachine: () => 'fake',
     writeBlob: (_root, text) => {
       if (options.blobFails !== undefined) {
         return Promise.resolve({ ok: false, reason: { message: options.blobFails } });

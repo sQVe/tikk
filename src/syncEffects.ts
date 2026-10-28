@@ -171,6 +171,11 @@ export const createSyncEffects = (
     link: (existingPath, newPath) => link(existingPath, newPath),
     unlink: (path) => unlink(path),
     randomIdSuffix: () => newIdSuffix(),
+    localMachine: () => {
+      const machine = resolveMachine(projectEffects);
+
+      return machine.ok ? machine.value : undefined;
+    },
     appendAlias: async (alias) => {
       const machine = resolveMachine(projectEffects);
 

@@ -20,6 +20,7 @@ import {
   findTicketPath,
   getTicket,
   hasValidRows,
+  isIdShared,
   listErrors,
   listTicketOutlines,
   listTickets,
@@ -160,6 +161,10 @@ export class TicketCache implements Disposable {
 
   findTicketPath(id: TicketId): Result<string, TicketNotFound | CacheQueryFailure> {
     return readResult(() => findTicketPath(this.#database, id));
+  }
+
+  isIdShared(id: TicketId): boolean {
+    return isIdShared(this.#database, id);
   }
 
   listTickets(options: ListTicketsOptions): Result<CachedTicket[], CacheQueryFailure> {
