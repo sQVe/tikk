@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import { criterionFingerprint } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import {
   failureOf,
@@ -91,6 +92,8 @@ const fullArguments = [
   'main',
   '--change-hash',
   'hash1',
+  '--hash',
+  'hash-demo-3467',
   '--verdicts-file',
   verdictsPath,
 ];
@@ -115,7 +118,27 @@ it('appends one audit fact and shows the slice as done', async () => {
   });
 });
 
-it.each(['--repository', '--head', '--base', '--change-hash', '--verdicts-file'])(
+it('stores the fingerprint of each criterion text that the verdict judged', async () => {
+  const { appends } = await audit(fullArguments);
+  const verdicts = appends[0]?.fact.kind === 'audit' ? appends[0].fact.verdicts : [];
+
+  expect(verdicts).toEqual([
+    {
+      criterion: 'first',
+      verdict: 'met',
+      evidence: 'Test passes',
+      definition: criterionFingerprint({ check: 'Run it', expected: 'First works' }),
+    },
+    {
+      criterion: 'second',
+      verdict: 'met',
+      evidence: 'Test passes',
+      definition: criterionFingerprint({ check: 'Run it', expected: 'Second works' }),
+    },
+  ]);
+});
+
+it.each(['--repository', '--head', '--base', '--change-hash', '--hash', '--verdicts-file'])(
   'refuses a missing %s with the usage',
   async (flag) => {
     const at = fullArguments.indexOf(flag);
@@ -128,6 +151,19 @@ it.each(['--repository', '--head', '--base', '--change-hash', '--verdicts-file']
     expect(appends).toEqual([]);
   },
 );
+
+it('refuses an audit when the ticket changed since the given hash and appends nothing', async () => {
+  const args = fullArguments.map((value) => (value === 'hash-demo-3467' ? 'hash-old' : value));
+  const { result, appends } = await audit(args);
+  const failure = failureOf(result);
+
+  expect(failure).toMatchObject({
+    code: 'changedOnDisk',
+    message: '/store/demo/demo-3467-slug.md changed since it was read.',
+  });
+
+  expect(appends).toEqual([]);
+});
 
 it('refuses a malformed repository and appends nothing', async () => {
   const args = fullArguments.map((value) => (value === 'acme/app' ? 'app' : value));
