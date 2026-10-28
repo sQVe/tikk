@@ -86,6 +86,8 @@ const runGh: CliEffects['runGh'] = async (args, signal) => {
 
 const editorKillDelayMilliseconds = 2000;
 const editorReapDelayMilliseconds = 50;
+// A cleanup failure waits this long for the editor to exit and be reaped, so the caller never sees a process that a signal has already ended. A process that refuses signals is not waited for longer than this.
+const editorExitWaitMilliseconds = 1000;
 
 const processRowSchema = z.tuple([
   z.coerce.number().int().positive(),
@@ -225,6 +227,8 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
     const cleanup = await stopping;
 
     if (cleanup !== undefined && !cleanup.ok) {
+      await Promise.race([child.exited, Bun.sleep(editorExitWaitMilliseconds)]);
+
       return cleanup;
     }
 
