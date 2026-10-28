@@ -1,6 +1,7 @@
 import { expect, it } from 'bun:test';
 
 import {
+  failed,
   makeEffects,
   makeFact,
   makeKindTicket,
@@ -71,6 +72,47 @@ it('loads a slice with its body, derived state, PR, and unarchived children', as
       pr: { repository: 'sqve/tikk', number: 7 },
       children: [{ id: 'demo-3478', kind: 'instruction', title: 'Child demo-3478' }],
     },
+  });
+
+  await needs.close();
+});
+
+it('loads the facts of the ticket, newest first, as history lists them', async () => {
+  const question = makeFact({
+    kind: 'log',
+    type: 'question',
+    text: 'Which store?',
+    item: '0123456789ab',
+    at: '2026-10-20T10:00:00.000Z',
+  });
+
+  const progress = makeFact({
+    kind: 'log',
+    type: 'progress',
+    text: 'Wrote the parser',
+    at: '2026-10-20T11:00:00.000Z',
+  });
+
+  const needs = await openWith({ tickets: [makeTicket('demo-3467')], facts: [question, progress] });
+
+  const loaded = await needs.loadDetail('demo-3467');
+
+  expect(loaded).toMatchObject({ ok: true, value: { facts: [progress, question] } });
+
+  await needs.close();
+});
+
+it('reports a store read failure instead of a detail without facts', async () => {
+  const needs = await openWith({
+    tickets: [makeTicket('demo-3467')],
+    overrides: { listFacts: () => failed('The store is locked.') },
+  });
+
+  const loaded = await needs.loadDetail('demo-3467');
+
+  expect(loaded).toEqual({
+    ok: false,
+    reason: { code: 'storeError', message: 'The store is locked.' },
   });
 
   await needs.close();

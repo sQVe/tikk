@@ -1,6 +1,7 @@
-import type { SliceState, TreeStateName } from '../fact/fact.ts';
+import type { Fact, SliceState, TreeStateName } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { CliFailure, CliSession } from './cliEffects.ts';
+import { readTicketFacts } from './ticketFacts.ts';
 import {
   deriveShownState,
   findTicket,
@@ -16,6 +17,7 @@ export interface TicketDetail {
   state: TreeStateName;
   pr: SliceState['pr'];
   children: TicketChild[];
+  facts: Fact[];
 }
 
 export const readTicketDetail = async (
@@ -42,6 +44,12 @@ export const readTicketDetail = async (
     return children;
   }
 
+  const facts = await readTicketFacts(session, ticket.id);
+
+  if (!facts.ok) {
+    return facts;
+  }
+
   return {
     ok: true,
     value: {
@@ -50,6 +58,7 @@ export const readTicketDetail = async (
       state: shownStateName(shown.value),
       pr: shown.value.kind === 'slice' ? shown.value.derived.pr : null,
       children: children.value,
+      facts: facts.value,
     },
   };
 };

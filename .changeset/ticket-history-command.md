@@ -15,5 +15,6 @@ The detail panel reads any ticket. A header shows its title, kind, state, and wh
 it, an attention block lists what the ticket needs from you, at most four lines; `x` expands it.
 Tabs Overview, Criteria, Activity, and Links follow, with counts. `[` and `]` switch tabs. Overview
 shows the body, or the Outcome, Files, and First test sections of an instruction. Criteria is hidden
-for instructions. `ctrl+d` and `ctrl+u` scroll the tab half a page, and `j` and `k` scroll it one
-line in the full-screen detail.
+for instructions. Activity lists every fact of the ticket, newest first, with its time, kind, and
+text; its count is the number of facts. `ctrl+d` and `ctrl+u` scroll the tab half a page, and `j`
+and `k` scroll it one line in the full-screen detail.

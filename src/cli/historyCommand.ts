@@ -1,28 +1,12 @@
-import { selectTicketHistory } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
-import { findTicket, storeFailure } from './ticketView.ts';
+import { factDetailOf, factKindOf, readTicketFacts } from './ticketFacts.ts';
+import { findTicket } from './ticketView.ts';
 
-const kindOf = (fact: Fact): string => ('type' in fact ? `${fact.kind}/${fact.type}` : fact.kind);
+const firstLineOf = (fact: Fact): string => factDetailOf(fact).split('\n')[0] ?? '';
 
-const detailOf = (fact: Fact): string => {
-  if ('text' in fact && fact.text !== undefined) {
-    return fact.text;
-  }
-
-  if ('reason' in fact) {
-    return fact.reason;
-  }
-
-  return '';
-};
-
-const lineOf = (fact: Fact): string => {
-  const firstLine = detailOf(fact).split('\n')[0] ?? '';
-
-  return `${fact.at}  ${kindOf(fact)}  ${firstLine}\n`;
-};
+const lineOf = (fact: Fact): string => `${fact.at}  ${factKindOf(fact)}  ${firstLineOf(fact)}\n`;
 
 export const historyCommand = async (input: CommandInput): Promise<CommandResult> => {
   const parsed = parseCommandArguments(input.args, {});
@@ -43,19 +27,17 @@ export const historyCommand = async (input: CommandInput): Promise<CommandResult
     return ticket;
   }
 
-  const facts = await input.session.listFacts([ticket.value.id]);
+  const facts = await readTicketFacts(input.session, ticket.value.id);
 
   if (!facts.ok) {
-    return storeFailure(facts.reason.message);
+    return facts;
   }
-
-  const selected = selectTicketHistory(facts.value, ticket.value.id);
 
   return {
     ok: true,
     value: {
-      json: { id: ticket.value.id, facts: selected },
-      text: selected.map(lineOf).join(''),
+      json: { id: ticket.value.id, facts: facts.value },
+      text: facts.value.map(lineOf).join(''),
     },
   };
 };

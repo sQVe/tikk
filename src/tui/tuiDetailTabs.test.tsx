@@ -340,7 +340,7 @@ it('shows the active Links label in the tab strip of the side pane at 90 by 24',
 
   const strip = linesOf(mounted).find((line) => /\[\S.*\]/.test(line.slice(line.indexOf('│'))));
 
-  expect(strip).toMatch(/ Activity \[Links 1\]\s*$/);
+  expect(strip).toMatch(/ Activity 0 \[Links 1\]\s*$/);
 });
 
 const bodyOf = (count: number) =>

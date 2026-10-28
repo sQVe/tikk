@@ -2,6 +2,7 @@ import { TextAttributes } from '@opentui/core';
 import type { ReactNode } from 'react';
 
 import type { TicketDetail } from '../cli/cli.ts';
+import { activityLinesOf } from './activityTab.tsx';
 import { detailOf, tabsOf } from './detailState.ts';
 import type { DetailState, DetailTab } from './detailState.ts';
 import type { Palette } from './palette.ts';
@@ -108,6 +109,10 @@ const countOf = (tab: DetailTab, detail: TicketDetail | undefined): number | und
     return detail.ticket.criteria?.length ?? 0;
   }
 
+  if (tab === 'activity') {
+    return detail.facts.length;
+  }
+
   return tab === 'links' ? linkCountOf(detail) : undefined;
 };
 
@@ -167,7 +172,11 @@ const tabLinesOf = (tab: DetailTab, detail: TicketDetail): string[] => {
     return criteriaOf(detail);
   }
 
-  return tab === 'links' ? linksOf(detail) : [];
+  if (tab === 'activity') {
+    return activityLinesOf(detail.facts);
+  }
+
+  return linksOf(detail);
 };
 
 const loadLinesOf = (state: DetailState): string[] | undefined => {

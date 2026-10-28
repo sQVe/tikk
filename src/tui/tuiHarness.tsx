@@ -178,6 +178,7 @@ export const ticketDetail = (
     state: entry.state,
     pr: null,
     children: [],
+    facts: [],
     ...rest,
   };
 };
