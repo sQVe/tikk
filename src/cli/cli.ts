@@ -4,6 +4,7 @@ import type { CliEffects, CommandInput, CommandResult } from './cliEffects.ts';
 import { cliInit } from './cliInit.ts';
 import { coverageCommand } from './coverageCommand.ts';
 import { findingCommand } from './findingCommand.ts';
+import { historyCommand } from './historyCommand.ts';
 import { instructionClaim, instructionRelease } from './instructionClaim.ts';
 import { instructionPassUp, instructionReject } from './instructionItem.ts';
 import { instructionLog } from './instructionLog.ts';
@@ -46,6 +47,7 @@ type SessionCommand = (input: CommandInput) => CommandResult | Promise<CommandRe
 const sessionCommands = new Map<string, SessionCommand>([
   ['new', ticketNew],
   ['show', ticketShow],
+  ['history', historyCommand],
   ['ls', ticketList],
   ['edit', ticketEdit],
   ['block', ticketBlock],
@@ -77,7 +79,7 @@ const sessionCommands = new Map<string, SessionCommand>([
 ]);
 
 const usage =
-  'Usage: tikk <init|sync|new|show|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|reject|pass-up|cancel|done|wait|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
+  'Usage: tikk <init|sync|new|show|history|ls|edit|block|unblock|move|rank|claim|release|log|submit|accept|reject|pass-up|cancel|done|wait|ready|needs|pr|reconcile|audit|archive|unarchive|check|review|finding|coverage|qa> [arguments] [--json]';
 
 const failure = (code: 'invalidArguments', message: string): CommandResult => ({
   ok: false,
