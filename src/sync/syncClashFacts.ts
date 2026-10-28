@@ -12,9 +12,20 @@ export interface MovedFactReference {
 
 type GitFunctions = Pick<SyncCommitFunctions, 'runGit'>;
 
-interface ClashSides {
+interface MergeSides {
   renamed: string;
   surviving: string;
+}
+
+interface ClashSides extends MergeSides {
+  // The renamed side's parent of the newest merge. Lines it adds after the merge that brought the
+  // file in are on this side, so a later retry still moves them.
+  tip: string;
+}
+
+interface SidePaths {
+  renamed: string[];
+  surviving: string[];
 }
 
 const factsFolder = 'facts';
@@ -85,7 +96,7 @@ const readMerge = async (
   root: string,
   parents: string[],
   renamedPath: string,
-): Promise<Result<ClashSides | undefined | 'skip', SyncReason>> => {
+): Promise<Result<MergeSides | undefined | 'skip', SyncReason>> => {
   const [local, remote] = parents;
 
   if (local === undefined || remote === undefined) {
@@ -129,6 +140,8 @@ const clashSides = async (
     return merges;
   }
 
+  const [newest = []] = merges.value;
+
   for (const parents of merges.value) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- Each merge is read only if the newer ones are skipped.
     const reading = await readMerge(functions, root, parents, renamedPath);
@@ -137,9 +150,20 @@ const clashSides = async (
       return reading;
     }
 
-    if (reading.value !== 'skip') {
-      return { ok: true, value: reading.value };
+    if (reading.value === 'skip') {
+      continue;
     }
+
+    if (reading.value === undefined) {
+      return { ok: true, value: undefined };
+    }
+
+    const sideIndex = parents[0] === reading.value.renamed ? 0 : 1;
+
+    return {
+      ok: true,
+      value: { ...reading.value, tip: newest[sideIndex] ?? reading.value.renamed },
+    };
   }
 
   return { ok: true, value: undefined };
@@ -165,15 +189,15 @@ const readLines = async (
   return { ok: true, value: lines };
 };
 
-const survivingLinesOf = (
+const optionalLinesOf = (
   functions: GitFunctions,
   root: string,
-  sides: ClashSides,
+  revision: string,
   path: string,
-  survivingPaths: string[],
+  paths: string[],
 ): Promise<Result<string[], SyncReason>> =>
-  survivingPaths.includes(path)
-    ? readLines(functions, root, sides.surviving, path)
+  paths.includes(path)
+    ? readLines(functions, root, revision, path)
     : Promise.resolve({ ok: true, value: [] });
 
 const commonPrefixLength = (left: string[], right: string[]): number => {
@@ -186,30 +210,44 @@ const commonPrefixLength = (left: string[], right: string[]): number => {
   return length;
 };
 
+// Lines on the newest parent of the renamed side that come after the lines both sides shared at the
+// merge that brought the file in, and that have the clashing ID.
 const movedLinesOf = async (
   functions: GitFunctions,
   root: string,
   sides: ClashSides,
+  paths: SidePaths,
   path: string,
   from: TicketId,
-  survivingPaths: string[],
 ): Promise<Result<MovedFactReference[], SyncReason>> => {
-  const renamedLines = await readLines(functions, root, sides.renamed, path);
+  const renamedLines = await optionalLinesOf(functions, root, sides.renamed, path, paths.renamed);
 
   if (!renamedLines.ok) {
     return renamedLines;
   }
 
-  const survivingLines = await survivingLinesOf(functions, root, sides, path, survivingPaths);
+  const survivingLines = await optionalLinesOf(
+    functions,
+    root,
+    sides.surviving,
+    path,
+    paths.surviving,
+  );
 
   if (!survivingLines.ok) {
     return survivingLines;
   }
 
+  const tipLines = await readLines(functions, root, sides.tip, path);
+
+  if (!tipLines.ok) {
+    return tipLines;
+  }
+
   const shared = commonPrefixLength(renamedLines.value, survivingLines.value);
   const references: MovedFactReference[] = [];
 
-  for (const [index, text] of renamedLines.value.entries()) {
+  for (const [index, text] of tipLines.value.entries()) {
     const parsed = parseFactLine(text);
 
     if (index >= shared && parsed.ok && parsed.value.ticket === from) {
@@ -237,6 +275,12 @@ export const movedFactReferences = async (
   }
 
   const clashSidesValue = sides.value;
+  const tipPaths = await listPaths(functions, root, clashSidesValue.tip, factsFolder);
+
+  if (!tipPaths.ok) {
+    return tipPaths;
+  }
+
   const renamedPaths = await listPaths(functions, root, clashSidesValue.renamed, factsFolder);
 
   if (!renamedPaths.ok) {
@@ -249,12 +293,11 @@ export const movedFactReferences = async (
     return survivingPaths;
   }
 
-  const jsonlPaths = renamedPaths.value.filter((path) => path.endsWith('.jsonl'));
+  const paths: SidePaths = { renamed: renamedPaths.value, surviving: survivingPaths.value };
+  const jsonlPaths = tipPaths.value.filter((path) => path.endsWith('.jsonl'));
 
   const perFile = await Promise.all(
-    jsonlPaths.map((path) =>
-      movedLinesOf(functions, root, clashSidesValue, path, from, survivingPaths.value),
-    ),
+    jsonlPaths.map((path) => movedLinesOf(functions, root, clashSidesValue, paths, path, from)),
   );
 
   const references: MovedFactReference[] = [];

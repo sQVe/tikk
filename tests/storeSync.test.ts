@@ -1265,6 +1265,98 @@ it('a clash retry after a newer merge keeps the pre-clash facts with the renamed
   }
 });
 
+it('a clash retry after the renamed clone logs again keeps that progress with the renamed ticket and the surviving ticket on the old ID', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  // B's ticket is older, so A's newer ticket is the one that gets renamed.
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['claim', 'demo-aaaa', '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+
+  const failingPath = await failNextTreeRead(second, 'demo-aaaa-first.md');
+  const failed = await second.run(['sync'], { path: failingPath });
+
+  expect(existsSync(join(second.home, 'fail-next-ls-tree'))).toBe(false);
+  expect(failed.exitCode).not.toBe(0);
+  expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
+
+  // A keeps its old ID and logs again, and the surviving clone logs in the same window.
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress after failed read',
+  ]);
+
+  await first.runChecked(['sync']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress in window',
+  ]);
+
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+  expect(alias.path).toContain('-first.md');
+
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+
+    expect(renamed.claim?.holder).toBe('first-agent');
+
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual([
+      'A progress before clash',
+      'A progress after failed read',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual(['B progress in window']);
+  }
+});
+
 it('an ID clash after a sync merge moves the folder to the new ID', async () => {
   const { first, second, remotePath } = clonePair();
 

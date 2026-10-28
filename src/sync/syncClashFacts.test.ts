@@ -109,8 +109,9 @@ it('lists the local lines when neither parent has the renamed file yet', async (
   expect(references).toEqual({ ok: true, value: [{ path: 'second/2026-10.jsonl', line: 1 }] });
 });
 
-it('skips a merge where both parents hold the renamed file and reads the merge before it', async () => {
+it('reads lines the renamed side adds after the merge that brought the file in, on its newest parent', async () => {
   const renamedLine = progressLine('demo-aaaa', 'Renamed side only');
+  const laterLine = progressLine('demo-aaaa', 'Added after the newer merge');
 
   const git = gitReplies({
     'rev-list --first-parent --merges --parents HEAD':
@@ -120,11 +121,19 @@ it('skips a merge where both parents hold the renamed file and reads the merge b
     [`ls-tree -r -z --name-only left -- ${renamedPath}`]: '',
     [`ls-tree -r -z --name-only right -- ${renamedPath}`]: `${renamedPath}\0`,
     'ls-tree -r -z --name-only right -- facts': 'facts/second/2026-10.jsonl\0',
+    'ls-tree -r -z --name-only newer-remote -- facts': 'facts/second/2026-10.jsonl\0',
     'ls-tree -r -z --name-only left -- facts': '',
     'show right:facts/second/2026-10.jsonl': `${renamedLine}\n`,
+    'show newer-remote:facts/second/2026-10.jsonl': `${renamedLine}\n${laterLine}\n`,
   });
 
   const references = await movedFactReferences(git, root, renamedPath, clashId());
 
-  expect(references).toEqual({ ok: true, value: [{ path: 'second/2026-10.jsonl', line: 1 }] });
+  expect(references).toEqual({
+    ok: true,
+    value: [
+      { path: 'second/2026-10.jsonl', line: 1 },
+      { path: 'second/2026-10.jsonl', line: 2 },
+    ],
+  });
 });
