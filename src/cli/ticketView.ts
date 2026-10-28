@@ -142,15 +142,19 @@ export const storeFailure = (message: string): CommandResult => ({
 
 const storeError = (message: string): CliFailure => ({ code: 'storeError', message });
 
-// A file that no longer parses keeps its old front matter in the cache, so it must not count.
-const parsedTickets = (session: CliSession): Result<CliTicket[], CliFailure> => {
+// A file that no longer parses keeps its old front matter in the cache, so it must not count
+// toward a state. The Projects tree uses the same rule.
+export const parsedTickets = (tickets: CliTicket[]): CliTicket[] =>
+  tickets.filter((ticket) => ticket.error === null);
+
+const listParsedTickets = (session: CliSession): Result<CliTicket[], CliFailure> => {
   const listed = session.listTickets({ includeArchived: true });
 
   if (!listed.ok) {
     return { ok: false, reason: storeError(listed.reason.message) };
   }
 
-  return { ok: true, value: listed.value.filter((other) => other.error === null) };
+  return { ok: true, value: parsedTickets(listed.value) };
 };
 
 const deriveSlice = async (
@@ -158,7 +162,7 @@ const deriveSlice = async (
   now: Date,
   ticket: CliTicket,
 ): Promise<Result<ShownState, CliFailure>> => {
-  const parsed = parsedTickets(session);
+  const parsed = listParsedTickets(session);
 
   if (!parsed.ok) {
     return parsed;
@@ -186,7 +190,7 @@ const derivePlan = async (
   now: Date,
   ticket: CliTicket,
 ): Promise<Result<ShownState, CliFailure>> => {
-  const parsed = parsedTickets(session);
+  const parsed = listParsedTickets(session);
 
   if (!parsed.ok) {
     return parsed;

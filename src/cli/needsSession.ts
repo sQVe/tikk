@@ -10,6 +10,7 @@ import { readTicketDetail } from './ticketDetail.ts';
 import type { TicketDetail } from './ticketDetail.ts';
 import { ticketEditor } from './ticketEditor.ts';
 import type { EditTarget } from './ticketEditor.ts';
+import { parsedTickets } from './ticketView.ts';
 
 interface FileErrorRow {
   path: string;
@@ -89,9 +90,11 @@ export const openNeedsSession = async (
     const project = await effects.resolveProject();
     const current = project.ok ? project.value : null;
 
+    const stateTickets = parsedTickets(listed.value);
+
     return {
       ok: true,
-      value: buildProjectTree(listed.value, facts.value, effects.now(), current),
+      value: buildProjectTree(listed.value, facts.value, effects.now(), current, stateTickets),
     };
   };
 

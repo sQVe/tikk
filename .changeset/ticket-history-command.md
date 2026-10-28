@@ -9,7 +9,9 @@ The TUI tree view is now the Projects view. It lists every project with the curr
 project first and unfolded. Each project shows an Inbox of loose tasks, then its plans, slices, and
 tasks. A task or instruction whose parent is not shown in its project goes to that project's Inbox.
 A slice folds its instructions under an "Instructions (n)" row that counts their open needs. Rows
-show kind and state as icons. `za` or `space` toggles a fold, `zo` opens it, and `zc` closes it.
+show kind and state as icons. `za` or `space` toggles a fold, `zo` opens it, and `zc` closes it. A
+ticket whose file does not parse keeps its row, but slice and plan states ignore it, as `tikk show`
+does.
 
 The detail panel reads any ticket. A header shows its title, kind, state, and where it sits. Below
 it, an attention block lists what the ticket needs from you, at most four lines; `x` expands it.

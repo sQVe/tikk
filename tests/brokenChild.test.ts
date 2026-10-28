@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
+import { openNeedsSession } from '../src/cli/needsSession.ts';
+import { createEffects } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
 import { createCliFixture } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
@@ -8,6 +10,12 @@ import type { CliFixture } from './cliFixture.ts';
 interface Shown {
   state: string;
   path: string;
+}
+
+interface TreeSliceRow {
+  id: string;
+  state: string;
+  instructions: { id: string }[];
 }
 
 let fixture: CliFixture | undefined;
@@ -68,4 +76,39 @@ it('keeps a slice planned when its accepted child no longer parses', async () =>
   await Bun.write(childPath, '---\ntitle: [unclosed\n---\n');
 
   expect((await showJson(slice)).state).toBe('planned');
+});
+
+const treeSliceOf = async (id: string): Promise<TreeSliceRow | undefined> => {
+  const effects = createEffects(cli().storePath, join(cli().home, '.cache', 'tikk', 'index.db'));
+  const opened = await openNeedsSession(effects);
+
+  invariant(opened.ok, 'The real session should open.');
+
+  const loaded = await opened.value.loadTree();
+
+  await opened.value.close();
+
+  invariant(loaded.ok, 'The real tree should load.');
+
+  const projectSlices = loaded.value.projects.flatMap((project) => project.slices);
+
+  const planSlices = loaded.value.projects
+    .flatMap((project) => project.plans)
+    .flatMap((plan) => plan.slices);
+
+  return [...projectSlices, ...planSlices].find((slice) => slice.id === id);
+};
+
+it('shows a slice planned in the tree, as show does, and keeps the broken child row', async () => {
+  const { slice, child } = await createSliceWithAcceptedInstruction();
+
+  const childPath = (await showJson(child)).path;
+
+  await Bun.write(childPath, '---\ntitle: [unclosed\n---\n');
+
+  const row = await treeSliceOf(slice);
+
+  expect(row?.state).toBe((await showJson(slice)).state);
+  expect(row?.state).toBe('planned');
+  expect(row?.instructions.map((instruction) => instruction.id)).toEqual([child]);
 });

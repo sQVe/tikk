@@ -161,14 +161,16 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
   };
 };
 
+// Every shown ticket becomes a row. Only stateTickets count toward a slice or plan state.
 export const buildProjectTree = (
   tickets: InstructionTicket[],
   facts: Fact[],
   now: Date,
   current: ProjectName | null,
+  stateTickets: InstructionTicket[],
 ): ProjectTree => {
   const shown = tickets.filter(isShown).toSorted(compareRank);
-  const index = buildSliceIndex(tickets, facts);
+  const index = buildSliceIndex(stateTickets, facts);
   const names = [...new Set(shown.map((ticket) => ticket.frontMatter.project))];
   const projectOf = buildProjects({ shown, index, now });
 
