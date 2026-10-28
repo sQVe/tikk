@@ -73,7 +73,6 @@ const createTables = (database: Database): void => {
   );
 
   database.run('CREATE INDEX facts_ticket ON facts (ticket, kind, at)');
-  // Alias rows are found by kind alone, so this index keeps that lookup off the whole table.
   database.run('CREATE INDEX facts_kind ON facts (kind)');
 
   database.run(

@@ -910,7 +910,6 @@ it('applies an alias move only once the ticket file under its new ID exists', as
 
   await cache.refresh(fake.files);
 
-  // A failed rename or clash commit leaves the alias line without a ticket under the new ID.
   expect(logTextsOf(factsOf(cache, [oldId]))).toEqual(['B progress']);
   expect(logTextsOf(factsOf(cache, [newId]))).toEqual([]);
 

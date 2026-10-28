@@ -689,7 +689,6 @@ it('does not reuse an alias whose new ID a folder already uses', async () => {
   expect(fake.aliasWrites()).toBe(1);
 });
 
-// Answers the merge with parents `left` and `right`, and the given replies for the other calls.
 const mergeGit =
   (replies: Record<string, ReturnType<typeof gitOutput>>): GitHandler =>
   (args) =>

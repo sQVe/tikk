@@ -32,7 +32,6 @@ export interface FactDamage {
 interface FactMove {
   from: TicketId;
   to: TicketId;
-  // The alias line that names the moved fact, so a later alias that moves that line can follow.
   aliasKey: string;
 }
 
@@ -128,15 +127,10 @@ const readPlacedFacts = (
   return { ok: true, value: placed };
 };
 
-// The cache keeps each fact file's full path, which differs per clone. A fact file sits one folder
-// down, so its machine folder and file name identify it on every clone.
 const factFileKey = (path: string): string => join(basename(dirname(path)), basename(path));
 
 const moveKey = (path: string, line: number): string => `${factFileKey(path)}:${line}`;
 
-// Alias facts are read on their own, because the state and archive queries leave them out.
-// An alias moves facts only once a ticket file exists under its new ID. A failed rename or clash
-// commit leaves the alias line with no such file, so its moves stay off until a retry renames it.
 const loadFactMoves = (database: Database): Result<Map<string, FactMove>, FactDamage> => {
   const aliases = readPlacedFacts(
     database,
@@ -167,9 +161,6 @@ const loadFactMoves = (database: Database): Result<Map<string, FactMove>, FactDa
   return { ok: true, value: moves };
 };
 
-// A move applies only to a line that still has the alias's old ID, so a bad reference cannot move
-// another ticket's fact. A reference lands where its alias line ends up, so a later alias that moves
-// that line carries the reference along.
 const ownerAfterMoves = (
   moves: Map<string, FactMove>,
   key: string,
@@ -197,7 +188,6 @@ const projectFact = (item: PlacedFact, moves: Map<string, FactMove>): PlacedFact
   return { ...item, fact: { ...item.fact, ticket } };
 };
 
-// Moves apply before the ticket filter, so a fact is found under its new ID and not its old one.
 const readFacts = (
   database: Database,
   ticketIds: TicketId[] | undefined,

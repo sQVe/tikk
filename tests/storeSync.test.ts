@@ -576,7 +576,6 @@ const removeOrigin = (fixture: CliFixture): Promise<string> =>
 const addOrigin = (fixture: CliFixture, remotePath: string): Promise<string> =>
   gitOutput(fixture.storePath, ['remote', 'add', 'origin', remotePath]);
 
-// A fresh file is not committed by a sync, so the clash resolver sees it as uncommitted.
 const writeClashTicket = async (
   fixture: CliFixture,
   id: string,
@@ -646,7 +645,6 @@ const readFactFiles = async (fixture: CliFixture): Promise<Map<string, string>> 
   return new Map(texts);
 };
 
-// Each fact file that existed before the sync keeps its bytes. The only new line is one alias fact.
 const kindOf = (line: string): string => {
   const parsed = parseFactLine(line);
 
@@ -712,7 +710,6 @@ it('an ID clash keeps pre-clash facts with the renamed ticket on both clones', a
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // A commits its ticket first, so B's ticket is the newer one and gets renamed.
   await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
   await first.runChecked(['sync']);
   await Bun.sleep(1100);
@@ -811,7 +808,6 @@ it("an ID clash that renames the other clone's ticket moves that clone's pre-cla
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B commits its ticket first, so A's ticket is the newer one and gets renamed.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
   await second.runChecked(['sync']);
   await Bun.sleep(1100);
@@ -930,7 +926,6 @@ it('an ID clash keeps pre-clash facts with a renamed ticket that is not committe
   expect(alias.from).toBe('demo-aaaa');
   expect(alias.path).toContain('-second.md');
 
-  // The renamed file is committed once it has settled, so the next sync sends it to the other clone.
   await Bun.sleep(settleWaitMilliseconds);
   await second.runChecked(['sync']);
   await first.runChecked(['sync']);
@@ -971,7 +966,6 @@ it('a second ID clash keeps the renamed ticket claim and log with it, and the cl
     await removeOrigin(second);
     await removeOrigin(third);
 
-    // A commits its ticket first, so B's ticket is the newer one and gets renamed.
     await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
     await first.runChecked(['sync']);
     await Bun.sleep(1100);
@@ -998,7 +992,6 @@ it('a second ID clash keeps the renamed ticket claim and log with it, and the cl
 
     invariant(firstAlias !== undefined, 'The first clash should write one alias.');
 
-    // C takes B's replacement ID with an older commit, so the next clash renames B's ticket again.
     await writeClashTicket(third, firstAlias.to, 'third', parent.id);
     await gitOutput(third.storePath, ['add', '--', 'tickets']);
     await commitOn(third.storePath, '2026-10-01T10:00:00Z');
@@ -1039,7 +1032,6 @@ const aliasTicketOf = (facts: string): string => {
   return parsed.value.ticket;
 };
 
-// A Git wrapper that fails the next `ls-tree` call, so one fact-history read fails.
 const failNextTreeRead = async (fixture: CliFixture, fileName: string): Promise<string> => {
   const folder = join(fixture.home, 'failing-git');
   const marker = join(fixture.home, 'fail-next-ls-tree');
@@ -1116,7 +1108,6 @@ it('a failed clash commit leaves pre-clash facts on the old ID until the retry r
 
   const aliasTicket = aliasTicketOf(await readAllFacts(first));
 
-  // A command refreshes the cache from the files before it reads facts.
   await first.runChecked(['ls']);
 
   expect(logTexts(listTicketFacts(first, 'demo-aaaa'))).toEqual(['B progress before clash']);
@@ -1153,7 +1144,6 @@ it('a clash retry after a fact-history read fails keeps the pre-clash facts with
   await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
   await first.runChecked(['sync']);
 
-  // B's ticket is fresh, so it stays uncommitted and the clash resolver renames the file.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
   await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
 
@@ -1178,7 +1168,6 @@ it('a clash retry after a fact-history read fails keeps the pre-clash facts with
   expect(existsSync(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'))).toBe(true);
   expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
 
-  // The ticket settles and gets committed, so HEAD stops being the merge that brought in A's ticket.
   await Bun.sleep(settleWaitMilliseconds);
   const retry = await second.runJson<AliasSyncReport>(['sync']);
   const alias = retry.aliases[0];
@@ -1217,7 +1206,6 @@ it('a clash retry after a newer merge keeps the pre-clash facts with the renamed
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B's ticket is older, so A's newer ticket is the one that gets renamed.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
   await second.runChecked(['sync']);
   await Bun.sleep(1100);
@@ -1246,7 +1234,6 @@ it('a clash retry after a newer merge keeps the pre-clash facts with the renamed
   expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
   expect(existsSync(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'))).toBe(true);
 
-  // Another clone adds a ticket, so the retry merges the remote again on top of the failed merge.
   const advance = await first.runJson<ShownInstruction>([
     'new',
     'slice',

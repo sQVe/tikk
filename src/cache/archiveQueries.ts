@@ -43,8 +43,6 @@ const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
 const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'done'))
   OR EXISTS (SELECT 1 FROM facts WHERE kind = 'accept')`;
 
-// This query counts facts under their stored ticket, but a fact an alias moved counts under its new
-// ticket. Any move therefore sends the answer to the rules in findArchiveDue.
 const movedFactsSql = `SELECT 1 FROM facts
   WHERE kind = 'alias' AND json_valid(json) AND json_array_length(json, '$.movedFacts') > 0
   LIMIT 1`;

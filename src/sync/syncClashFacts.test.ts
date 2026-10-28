@@ -27,7 +27,6 @@ const progressLine = (ticket: string, text: string): string =>
     text,
   });
 
-// Answers Git calls by their arguments after `-C <root>`. A call with no reply fails.
 const gitReplies = (replies: Record<string, string>) => ({
   runGit: (args: string[]) => {
     const command = args.slice(args.indexOf('-C') + 2).join(' ');

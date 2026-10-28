@@ -6,7 +6,6 @@ import type { TicketId } from '../ticket/ticket.ts';
 import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 
 export interface MovedFactReference {
-  // The fact file under the facts folder, such as `machine/2026-10.jsonl`.
   path: string;
   line: number;
 }
@@ -14,7 +13,6 @@ export interface MovedFactReference {
 type GitFunctions = Pick<SyncCommitFunctions, 'runGit'>;
 
 interface ClashSides {
-  // The merge side that holds the renamed ticket's facts.
   renamed: string;
   surviving: string;
 }
@@ -26,7 +24,6 @@ const failed = (message: string): { ok: false; reason: SyncReason } => ({
   reason: { kind: 'failed', message },
 });
 
-// A path that no revision has gives an empty list. A failed Git call is an error, not an empty list.
 const listPaths = async (
   functions: GitFunctions,
   root: string,
@@ -52,9 +49,6 @@ const listPaths = async (
   return { ok: true, value: listed.value.split('\0').filter((path) => path !== '') };
 };
 
-// The merges on HEAD's first-parent line, newest first. Local commits made after a merge stay on
-// that line, so a retry that comes after them still finds the merge. The first parent is the local
-// side, and the second is the remote side.
 const firstParentMerges = async (
   functions: GitFunctions,
   root: string,
@@ -86,8 +80,6 @@ const firstParentMerges = async (
   return { ok: true, value: merges };
 };
 
-// A later merge can carry the renamed file along on both sides, so a merge where both parents hold
-// it says nothing about who brought it in. Returns `skip` for that merge.
 const readMerge = async (
   functions: GitFunctions,
   root: string,
@@ -126,8 +118,6 @@ const readMerge = async (
   return { ok: true, value: { renamed: local, surviving: remote } };
 };
 
-// A file that neither parent has is not committed yet, so the nearest merge with no holder decides
-// that only this machine can hold its facts.
 const clashSides = async (
   functions: GitFunctions,
   root: string,
@@ -196,7 +186,6 @@ const commonPrefixLength = (left: string[], right: string[]): number => {
   return length;
 };
 
-// Lines the renamed side adds past the lines both sides share, and that have the clashing ID.
 const movedLinesOf = async (
   functions: GitFunctions,
   root: string,
@@ -231,8 +220,6 @@ const movedLinesOf = async (
   return { ok: true, value: references };
 };
 
-// Facts with the clashing ID that only the renamed ticket's side has. The surviving side keeps the
-// rest, so its facts stay on the old ID.
 export const movedFactReferences = async (
   functions: GitFunctions,
   root: string,
