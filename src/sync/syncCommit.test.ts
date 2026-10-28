@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 
-import { commitStore, settlingPaths } from './syncCommit.ts';
+import { commitStore, readFolderNames, settlingPaths } from './syncCommit.ts';
 import { gitFailure, gitOutput, makeSync } from './syncHarness.ts';
 
 type FakeSyncOptions = NonNullable<Parameters<typeof makeSync>[0]>;
@@ -667,4 +667,14 @@ it('fails and commits nothing when a project folder cannot be read while the ali
 
   expect(result.ok).toBe(false);
   expect(fake.blobs).toEqual([]);
+});
+
+it('reads a path that is a file, not a folder, as a folder with no names', async () => {
+  const notFolder = Object.assign(new Error('not a directory'), { code: 'ENOTDIR' });
+  const functions = { readdir: () => Promise.reject(notFolder) };
+
+  expect(await readFolderNames(functions, '/store/facts/notes.txt')).toEqual({
+    ok: true,
+    value: [],
+  });
 });

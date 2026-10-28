@@ -220,10 +220,10 @@ export const readFolderNames = async (
     return { ok: true, value: listed.value };
   }
 
-  const missing =
-    listed.error instanceof Error && 'code' in listed.error && listed.error.code === 'ENOENT';
+  const code = listed.error instanceof Error && 'code' in listed.error ? listed.error.code : null;
+  const noFolder = code === 'ENOENT' || code === 'ENOTDIR';
 
-  return missing ? { ok: true, value: [] } : failedReason(`Cannot read ${folder}.`);
+  return noFolder ? { ok: true, value: [] } : failedReason(`Cannot read ${folder}.`);
 };
 
 const projectTicketIds = async (

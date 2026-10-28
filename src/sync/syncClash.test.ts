@@ -799,6 +799,34 @@ it('does not give a clashing ticket an ID that an alias fact already names as it
   expect(result.ok && result.value.aliases.map((entry) => String(entry.to))).toEqual(['demo-zzzz']);
 });
 
+it('reserves the new ID of an alias stored under a machine folder whose name ends in .jsonl', async () => {
+  const machineFactPath = '/store/facts/box.jsonl/2026-10.jsonl';
+
+  const alias = JSON.stringify({
+    version: 1,
+    ticket: 'demo-qqqq',
+    at: '2026-10-05T10:00:00.000Z',
+    machine: 'box.jsonl',
+    kind: 'alias',
+    from: 'demo-aaaa',
+  });
+
+  const fake = twoTickets({
+    suffixes: ['qqqq', 'zzzz'],
+    files: { [machineFactPath]: { text: `${alias}\n`, mtimeMs: 0 } },
+    folders: {
+      '/store/tickets': ['demo'],
+      '/store/tickets/demo': ['demo-aaaa-a.md', 'demo-aaaa-b.md'],
+      '/store/facts': ['box.jsonl'],
+      '/store/facts/box.jsonl': ['2026-10.jsonl'],
+    },
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok && result.value.aliases.map((entry) => String(entry.to))).toEqual(['demo-zzzz']);
+});
+
 it('does not reuse the new ID of an alias that HEAD already holds', async () => {
   const committedAlias = JSON.stringify({
     version: 1,

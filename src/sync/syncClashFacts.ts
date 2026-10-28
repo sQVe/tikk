@@ -528,7 +528,7 @@ export const aliasDestinations = async (
 
   const destinations: string[] = [];
 
-  for (const machine of machines.value.filter((name) => !name.endsWith('.jsonl'))) {
+  for (const machine of machines.value) {
     // oxlint-disable-next-line eslint/no-await-in-loop -- Each machine folder is read in turn.
     const names = await readFolderNames(functions, join(root, factsFolder, machine));
 
