@@ -1,3 +1,4 @@
+import { TextAttributes } from '@opentui/core';
 import type { ReactNode } from 'react';
 
 import { errorsOfTicket } from './fileErrors.ts';
@@ -40,13 +41,19 @@ export const DetailPane = (props: {
       overflow="hidden"
       paddingLeft={1}
       border={['left']}
-      borderColor={palette.dim}
+      borderColor={palette.text}
     >
       {row === undefined
         ? null
         : factsOf(row, props.errors).map((fact) => (
             <box flexDirection="row" height={1} flexShrink={0} key={`${fact.label}:${fact.value}`}>
-              <text fg={palette.dim} width={labelWidth} height={1} flexShrink={0}>
+              <text
+                fg={palette.text}
+                attributes={TextAttributes.DIM}
+                width={labelWidth}
+                height={1}
+                flexShrink={0}
+              >
                 {fact.label}
               </text>
               <text fg={palette.text} wrapMode="none" truncate height={1} flexShrink={1}>

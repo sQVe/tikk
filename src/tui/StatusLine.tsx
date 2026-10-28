@@ -1,3 +1,4 @@
+import { TextAttributes } from '@opentui/core';
 import type { ReactNode } from 'react';
 
 import type { Palette } from './palette.ts';
@@ -10,14 +11,14 @@ export const StatusLine = (props: {
   palette: Palette;
 }): ReactNode => (
   <box flexDirection="row" height={1} gap={2}>
-    <text fg={props.palette.dim} flexShrink={0}>
+    <text fg={props.palette.text} attributes={TextAttributes.DIM} flexShrink={0}>
       {props.view}
     </text>
-    <text wrapMode="none" truncate flexShrink={1}>
+    <text fg={props.palette.text} wrapMode="none" truncate flexShrink={1}>
       {singleLine(props.text)}
     </text>
     <box flexGrow={1} />
-    <text fg={props.palette.dim} flexShrink={0}>
+    <text fg={props.palette.text} attributes={TextAttributes.DIM} flexShrink={0}>
       {`${props.helpKeys} help`}
     </text>
   </box>

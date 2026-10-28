@@ -293,6 +293,7 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
                   rows={view.rows}
                   selected={view.selection.index}
                   height={listHeight}
+                  palette={palette}
                   emptyMessage={
                     snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
                   }
