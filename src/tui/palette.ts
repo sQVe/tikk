@@ -10,7 +10,6 @@ export interface Palette {
 const ansiYellow = 3;
 const ansiBlue = 4;
 
-// OpenTUI draws an unset color as fixed white, so every color names the terminal's own slot.
 export const palette: Palette = {
   text: RGBA.defaultForeground(),
   key: RGBA.fromIndex(ansiYellow),
