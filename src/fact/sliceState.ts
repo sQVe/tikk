@@ -80,10 +80,7 @@ const meetsCriterion = (criterion: SliceCriterion, audit: AuditFact): boolean =>
   const definition = criterionFingerprint(criterion);
 
   return audit.verdicts.some(
-    (entry) =>
-      entry.criterion === criterion.id &&
-      entry.verdict === 'met' &&
-      entry.definition === definition,
+    (entry) => entry.criterion === criterion.id && entry.definition === definition,
   );
 };
 

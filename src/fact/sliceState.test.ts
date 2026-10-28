@@ -157,6 +157,49 @@ describe('deriveSliceState', () => {
     expect(derive(grown, [grown], [prFact(), audit], now).state).toBe('mergedUnverified');
   });
 
+  it('derives mergedUnverified when a criterion is reworded to another criterion text', () => {
+    const audited = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [
+        { id: 'first', check: 'Run it.', expected: 'It works.' },
+        { id: 'second', check: 'Time it.', expected: 'It is fast.' },
+      ],
+    });
+
+    const reworded = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [
+        { id: 'first', check: 'Run it.', expected: 'It works.' },
+        { id: 'second', check: 'Run it.', expected: 'It works.' },
+      ],
+    });
+
+    const audit = makeFact('3469', {
+      kind: 'audit',
+      repository: 'sqve/tikk',
+      changeHash: 'hash1',
+      head: 'aaa',
+      base: 'main',
+      verdicts: [
+        {
+          criterion: 'first',
+          verdict: 'met',
+          evidence: 'Ran it.',
+          definition: criterionFingerprint({ check: 'Run it.', expected: 'It works.' }),
+        },
+        {
+          criterion: 'second',
+          verdict: 'met',
+          evidence: 'Timed it.',
+          definition: criterionFingerprint({ check: 'Time it.', expected: 'It is fast.' }),
+        },
+      ],
+    });
+
+    expect(derive(audited, [audited], [prFact(), audit], now).state).toBe('done');
+    expect(derive(reworded, [reworded], [prFact(), audit], now).state).toBe('mergedUnverified');
+  });
+
   it('derives done from an audit whose verdict fingerprints the current criterion text', () => {
     const current = makeTicket('3469', {
       kind: 'slice',
