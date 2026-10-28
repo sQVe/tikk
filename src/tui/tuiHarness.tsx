@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
 import type { NeedView, ProjectTree, TicketDetail, TreeProject } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
 import { App, catalog, createTuiSession, defaultBindings } from './tui.tsx';
-import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
+import type { AppProps, BindingTable, IconChoice, TuiEffects } from './tui.tsx';
 
 type Setup = Awaited<ReturnType<typeof testRender>>;
 
@@ -20,6 +20,7 @@ interface CommitProbeControls {
 export interface TuiFixture {
   setup: Setup;
   edited: string[];
+  designEdited: string[];
   quits: () => number;
   press: (key: string, modifiers?: { ctrl: boolean }) => Promise<void>;
   storeChanged: () => Promise<void>;
@@ -288,9 +289,11 @@ export const createTuiFixture = async (
   overrides: Partial<TuiEffects> = {},
   bindings: BindingTable = defaultBindings,
   notices: string[] = [],
+  icons: IconChoice = 'unicode',
 ): Promise<TuiFixture> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
+  const designEdited: string[] = [];
   let quitCount = 0;
 
   const probe: CommitProbeControls = {
@@ -335,6 +338,11 @@ export const createTuiFixture = async (
 
       return Promise.resolve({ ok: true, value: undefined });
     },
+    editDesign: (rawId) => {
+      designEdited.push(rawId);
+
+      return Promise.resolve({ ok: true, value: undefined });
+    },
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: (listener) => {
       changeListeners.add(listener);
@@ -352,6 +360,7 @@ export const createTuiFixture = async (
       <WithKeymap
         session={session}
         bindings={bindings}
+        icons={icons}
         onQuit={() => {
           quitCount += 1;
         }}
@@ -434,6 +443,7 @@ export const createTuiFixture = async (
   return {
     setup,
     edited,
+    designEdited,
     quits: () => quitCount,
     press,
     storeChanged,

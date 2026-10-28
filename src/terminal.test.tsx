@@ -126,6 +126,7 @@ const start = async (options: StartOptions = {}) => {
         ok: false,
         reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
       }),
+    editDesign: () => Promise.resolve({ ok: true, value: undefined }),
     edit:
       options.edit ??
       (() => {
@@ -154,6 +155,7 @@ const start = async (options: StartOptions = {}) => {
         };
       },
       bindings: defaultBindings,
+      icons: 'unicode',
       notices: [],
     },
     effects,

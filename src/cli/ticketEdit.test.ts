@@ -44,6 +44,41 @@ const edit = (
   return { fakeSession, fakeEffects, result };
 };
 
+it('refuses a field flag with --design and opens no editor', async () => {
+  const { fakeSession, fakeEffects, result } = edit(
+    ['demo-3467', '--design', '--title', 'Other'],
+    true,
+  );
+
+  const reason = failureOf(await result);
+
+  expect(reason.code).toBe('invalidArguments');
+  expect(reason.message).toContain('--design cannot be combined with field flags');
+  expect(fakeEffects.editorPaths).toEqual([]);
+  expect(fakeSession.writes).toEqual([]);
+});
+
+it('opens the design.md of a plan with tikk edit --design and no field flags', async () => {
+  const plan = makeTicket('demo-3467', {
+    frontMatter: { ...makeTicket('demo-3467').frontMatter, kind: 'plan' },
+  });
+
+  const designPath = '/store/tickets/demo/demo-3467/design.md';
+
+  const { fakeEffects, result } = edit(
+    ['demo-3467', '--design'],
+    false,
+    { tickets: [plan] },
+    {
+      files: { [designPath]: '# Design\n' },
+    },
+  );
+
+  successOf(await result);
+
+  expect(fakeEffects.editorPaths).toEqual([designPath]);
+});
+
 it('writes a changed title and status with the expected hash, then shows the ticket', async () => {
   const { fakeSession, result } = edit(
     ['demo-3467', '--hash', 'hash-demo-3467', '--title', 'New', '--status', 'draft'],

@@ -242,6 +242,7 @@ export const makeSession = (options: SessionOptions = {}): FakeSession => {
     listErrors: () => ({ ok: true, value: options.errors ?? [] }),
     listTicketFolderFiles: (_project, id) =>
       Promise.resolve({ ok: true, value: options.folderFiles?.[id] ?? [] }),
+    designFilePath: (project, id) => `/store/tickets/${project}/${id}/design.md`,
     listFacts: (ticketIds) =>
       Promise.resolve({
         ok: true,

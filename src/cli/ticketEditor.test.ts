@@ -1,6 +1,6 @@
 import { expect, it } from 'bun:test';
 
-import type { CliEffects } from './cliEffects.ts';
+import type { CliEffects, CliTicket } from './cliEffects.ts';
 import { failureOf, makeEffects, makeSession, makeTicket, successOf } from './cliHarness.ts';
 import type { EffectsOptions, SessionOptions } from './cliHarness.ts';
 import { ticketEditor } from './ticketEditor.ts';
@@ -21,10 +21,75 @@ const open = (
   const result = ticketEditor(
     { args: [rawId], json: false, effects: fakeEffects.effects, session: fakeSession.session },
     rawId,
+    'ticket',
   );
 
   return { fakeSession, fakeEffects, result };
 };
+
+const planTicket = makeTicket('demo-3467', {
+  frontMatter: { ...target.frontMatter, kind: 'plan' },
+});
+
+const designPath = '/store/tickets/demo/demo-3467/design.md';
+
+const openDesign = (ticket: CliTicket, files: Record<string, string> = {}) => {
+  const fakeSession = makeSession({ tickets: [ticket] });
+  const fakeEffects = makeEffects({ session: fakeSession, files });
+
+  const result = ticketEditor(
+    { args: [ticket.id], json: false, effects: fakeEffects.effects, session: fakeSession.session },
+    ticket.id,
+    'design',
+  );
+
+  return { fakeEffects, result };
+};
+
+it('opens the design.md of a plan with the design target', async () => {
+  const { fakeEffects, result } = openDesign(planTicket, { [designPath]: '# Design\n' });
+
+  successOf(await result);
+
+  expect(fakeEffects.editorPaths).toEqual([designPath]);
+});
+
+it('refuses the design target for a ticket that is not a plan', async () => {
+  const { fakeEffects, result } = openDesign(target, { [designPath]: '# Design\n' });
+  const reason = failureOf(await result);
+
+  expect(reason.code).toBe('invalidArguments');
+  expect(reason.message).toContain('demo-3467');
+  expect(fakeEffects.editorPaths).toEqual([]);
+});
+
+it('refuses the design target for an unknown ticket and opens no editor', async () => {
+  const fakeSession = makeSession({ tickets: [] });
+  const fakeEffects = makeEffects({ session: fakeSession });
+
+  const result = ticketEditor(
+    {
+      args: ['demo-3468'],
+      json: false,
+      effects: fakeEffects.effects,
+      session: fakeSession.session,
+    },
+    'demo-3468',
+    'design',
+  );
+
+  expect(failureOf(await result).code).toBe('notFound');
+  expect(fakeEffects.editorPaths).toEqual([]);
+});
+
+it('refuses the design target when design.md is missing and names its path', async () => {
+  const { fakeEffects, result } = openDesign(planTicket);
+  const reason = failureOf(await result);
+
+  expect(reason.code).toBe('notFound');
+  expect(reason.message).toContain(designPath);
+  expect(fakeEffects.editorPaths).toEqual([]);
+});
 
 it('opens the editor on the ticket path without --json and shows the edited file', async () => {
   const fakeSession = makeSession({ tickets: [target] });
@@ -49,6 +114,7 @@ it('opens the editor on the ticket path without --json and shows the edited file
         session: fakeSession.session,
       },
       'demo-3467',
+      'ticket',
     ),
   );
 

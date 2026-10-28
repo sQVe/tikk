@@ -1,3 +1,4 @@
+import { detailOf } from './detailState.ts';
 import type { DetailStep } from './detailState.ts';
 import type { OverlayMove } from './overlayScroll.ts';
 import type { TuiIntent, TuiSnapshot } from './tuiSession.ts';
@@ -104,6 +105,24 @@ const foldReason = (snapshot: TuiSnapshot): string | undefined => {
   return fold === null ? 'This row does not fold.' : undefined;
 };
 
+const planReason = (snapshot: TuiSnapshot): string | undefined => {
+  const ticketReason = selectedTicketReason(snapshot);
+
+  if (ticketReason !== undefined) {
+    return ticketReason;
+  }
+
+  const detail = detailOf(snapshot.detail.load);
+
+  if (detail === undefined) {
+    return snapshot.detail.load.status === 'failed'
+      ? 'The ticket did not load, so its kind is unknown.'
+      : 'The ticket is still loading.';
+  }
+
+  return detail.ticket.kind === 'plan' ? undefined : 'The selected row is not a plan.';
+};
+
 const session = (intent: TuiIntent): CommandIntent => ({ kind: 'session', intent });
 
 const paneCommands: readonly PaneCommand[] = [
@@ -130,6 +149,14 @@ const paneCommands: readonly PaneCommand[] = [
     keys: ['x'],
     disabledReason: enabled,
     intent: session({ kind: 'toggleAttention' }),
+  },
+  {
+    id: 'editDesign',
+    label: 'Edit the plan design.md in $EDITOR',
+    section: 'tickets',
+    keys: ['shift+d'],
+    disabledReason: planReason,
+    intent: session({ kind: 'editDesign' }),
   },
   {
     id: 'scrollDetailHalfDown',

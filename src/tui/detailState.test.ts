@@ -58,6 +58,7 @@ const createFake = async (
       return gate.promise;
     },
     edit: async () => ({ ok: true, value: undefined }),
+    editDesign: async () => ({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: (listener) => {
       changeListeners.add(listener);

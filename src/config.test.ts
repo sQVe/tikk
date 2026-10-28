@@ -36,14 +36,19 @@ it('reads the projects, machine, and keys from one file that has no version', ()
 
   expect(readSettings(home, effectsWithText(text))).toEqual({
     ok: true,
-    value: { machine: 'laptop', projects: { 'sqve/tikk': 'tk' }, keys: { help: ['h'] } },
+    value: {
+      machine: 'laptop',
+      projects: { 'sqve/tikk': 'tk' },
+      keys: { help: ['h'] },
+      icons: 'unicode',
+    },
   });
 });
 
 it('returns empty settings when the file is missing', () => {
   expect(readSettings(home, { readFile: () => ({ kind: 'missing' }) })).toEqual({
     ok: true,
-    value: { machine: undefined, projects: {}, keys: {} },
+    value: { machine: undefined, projects: {}, keys: {}, icons: 'unicode' },
   });
 });
 
@@ -52,7 +57,7 @@ it('ignores top-level fields it does not use', () => {
 
   expect(result).toEqual({
     ok: true,
-    value: { machine: undefined, projects: {}, keys: {} },
+    value: { machine: undefined, projects: {}, keys: {}, icons: 'unicode' },
   });
 });
 

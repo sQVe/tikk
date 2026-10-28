@@ -1,17 +1,13 @@
 import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { createEffects } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
-import { cliEnvironment, createCliFixture } from './cliFixture.ts';
+import { createCliFixture } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
-
-interface Screen {
-  lines: string[];
-  alternate: boolean;
-}
+import { screenOf, startTerminalTikk, waitFor, writeEditorScript } from './tuiTerminalFixture.ts';
 
 const entryPath = join(import.meta.dir, '..', 'src', 'index.ts');
 const typedTitle = 'ZZZZ-typed-ZZZZ';
@@ -42,70 +38,6 @@ printf reaped > '${pidPath}.reaped'
 `;
 
 const showCursor = '\u001b[?25h';
-const columns = 100;
-const rows = 20;
-
-const sequencePattern =
-  // oxlint-disable-next-line eslint/no-control-regex -- Terminal escape sequences start with ESC and end with BEL.
-  /\u001b\[([0-9;?]*)([ -/]*[@-~])|\u001b\][^\u0007\u001b]*(\u0007|\u001b\\)|\u001b[^[\]]/y;
-
-const emptyScreen = (): string[][] =>
-  Array.from({ length: rows }, () => Array.from({ length: columns }, () => ' '));
-
-const screenOf = (output: string): Screen => {
-  const main = emptyScreen();
-  let screen = main;
-  let alternate = false;
-  let row = 0;
-  let column = 0;
-  let index = 0;
-
-  while (index < output.length) {
-    sequencePattern.lastIndex = index;
-
-    const sequence = sequencePattern.exec(output);
-
-    if (sequence !== null) {
-      const [whole, parameters = '', command] = sequence;
-
-      if (command === 'H') {
-        const [line = '1', cell = '1'] = parameters.split(';');
-
-        row = Number(line || '1') - 1;
-        column = Number(cell || '1') - 1;
-      }
-
-      if (command === 'J' && parameters === '2') {
-        screen.splice(0, rows, ...emptyScreen());
-      }
-
-      if (parameters === '?1049') {
-        alternate = command === 'h';
-        screen = alternate ? emptyScreen() : main;
-      }
-
-      index += whole.length;
-
-      continue;
-    }
-
-    const character = output[index] ?? '';
-    const line = screen[row];
-
-    if (character === '\r') {
-      column = 0;
-    } else if (character === '\n') {
-      row = Math.min(rows - 1, row + 1);
-    } else if (line !== undefined && column < columns) {
-      line[column] = character;
-      column += 1;
-    }
-
-    index += 1;
-  }
-
-  return { lines: screen.map((line) => line.join('')), alternate };
-};
 
 let fixture: CliFixture | undefined;
 
@@ -115,14 +47,13 @@ const cli = (): CliFixture => {
   return fixture;
 };
 
-const writeEditor = async (script: string): Promise<string> => {
-  const editorPath = join(cli().home, 'editor.sh');
+const writeEditor = (script: string): Promise<string> => writeEditorScript(cli().home, script);
 
-  await writeFile(editorPath, script);
-  await chmod(editorPath, 0o755);
-
-  return editorPath;
-};
+const startTikk = (
+  editorPath: string,
+  environment: Record<string, string> = {},
+  preload?: string,
+) => startTerminalTikk(cli(), editorPath, environment, preload);
 
 const writeSignalRefusal = async (pidPath: string): Promise<string> => {
   const preload = join(cli().home, 'refuse-signals.ts');
@@ -149,89 +80,6 @@ process.kill = (pid, signal) => {
   );
 
   return preload;
-};
-
-const waitFor = async (ready: () => boolean, what: string): Promise<void> => {
-  const deadline = Date.now() + 10_000;
-
-  while (!ready() && Date.now() < deadline) {
-    await Bun.sleep(25);
-  }
-
-  invariant(ready(), `The terminal never showed ${what}.`);
-};
-
-const startTikk = (
-  editorPath: string,
-  environment: Record<string, string> = {},
-  preload?: string,
-) => {
-  const decoder = new TextDecoder();
-  const terminal = { output: '' };
-
-  const command = [process.execPath];
-
-  if (preload !== undefined) {
-    command.push('--preload', preload);
-  }
-
-  command.push(entryPath);
-
-  const child = Bun.spawn(command, {
-    cwd: cli().home,
-    env: { ...cliEnvironment(cli().home, cli().storePath), EDITOR: editorPath, ...environment },
-    terminal: {
-      cols: columns,
-      rows,
-      data: (_terminal, data) => {
-        terminal.output += decoder.decode(data, { stream: true });
-      },
-    },
-  });
-
-  const shows = (text: string): boolean =>
-    screenOf(terminal.output).lines.some((line) => line.includes(text));
-
-  const waitForScreen = (text: string) => waitFor(() => shows(text), `"${text}"`);
-
-  const waitForOutput = (text: string, from: number) =>
-    waitFor(() => terminal.output.slice(from).includes(text), `"${text}" in its output`);
-
-  const type = (text: string): void => {
-    child.terminal?.write(text);
-  };
-
-  const waitForSelected = (text: string) =>
-    waitFor(
-      () =>
-        screenOf(terminal.output).lines.some((line) => line.startsWith('>') && line.includes(text)),
-      `"${text}" selected`,
-    );
-
-  // The plan sits below its project row and the Inbox row of the current project.
-  const selectPlan = async (text: string): Promise<void> => {
-    type('s');
-    await waitForScreen(text);
-    type('jj');
-    await waitForSelected(text);
-  };
-
-  const close = () => {
-    child.kill('SIGKILL');
-    child.terminal?.close();
-  };
-
-  return {
-    child,
-    terminal,
-    shows,
-    waitForScreen,
-    waitForSelected,
-    selectPlan,
-    waitForOutput,
-    type,
-    close,
-  };
 };
 
 const isRunning = (pid: number): boolean => {

@@ -115,7 +115,13 @@ const start = async (cliEffects: CliEffects): Promise<Started> => {
 
   await act(async () => {
     await startTerminal(
-      { needs, watch: watchStore(cli().storePath), bindings: defaultBindings, notices: [] },
+      {
+        needs,
+        watch: watchStore(cli().storePath),
+        bindings: defaultBindings,
+        icons: 'unicode',
+        notices: [],
+      },
       testEffects(setup, handlers, exits),
     );
   });

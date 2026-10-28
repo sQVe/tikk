@@ -26,6 +26,7 @@ export interface TuiEffects {
   loadErrors: () => Promise<Result<TicketFileError[], CliFailure>>;
   loadDetail: LoadDetail;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+  editDesign: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
   onChange: (listener: () => void) => () => void;
   notices: readonly string[];
@@ -67,13 +68,17 @@ export type TuiIntent =
   | { kind: 'moveLast' }
   | { kind: 'switchView' }
   | { kind: 'edit' }
+  | { kind: 'editDesign' }
   | { kind: 'openDetail' }
   | { kind: 'closeDetail' }
   | { kind: 'fold'; fold: FoldIntent }
   | DetailIntent
   | OverlayIntent;
 
-type LocalIntent = Exclude<TuiIntent, { kind: 'switchView' } | { kind: 'edit' }>;
+type LocalIntent = Exclude<
+  TuiIntent,
+  { kind: 'switchView' } | { kind: 'edit' } | { kind: 'editDesign' }
+>;
 
 export interface TuiSession {
   getSnapshot: () => TuiSnapshot;
@@ -420,7 +425,7 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     update({ ...snapshot, notice, messages: messagesWith(snapshot.messages, [notice]) });
   };
 
-  const edit = () => {
+  const editSelected = (edit: (rawId: string) => Promise<Result<undefined, CliFailure>>) => {
     const { id } = snapshot.views[snapshot.view].selection;
 
     if (typeof id !== 'string') {
@@ -428,7 +433,7 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
     }
 
     effects
-      .lend(() => effects.edit(id))
+      .lend(() => edit(id))
       .then((loan) => {
         if (loan.ok) {
           showNotice(loan.value.ok ? '' : loan.value.reason.message);
@@ -453,7 +458,9 @@ export const createTuiSession = (effects: TuiEffects): TuiSession => {
         requestLoad(['tree']);
       }
     } else if (intent.kind === 'edit') {
-      edit();
+      editSelected((rawId) => effects.edit(rawId));
+    } else if (intent.kind === 'editDesign') {
+      editSelected((rawId) => effects.editDesign(rawId));
     } else {
       update(snapshotAfter(snapshot, intent));
     }

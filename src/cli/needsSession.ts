@@ -9,6 +9,7 @@ import { refreshSession } from './sessionRefresh.ts';
 import { readTicketDetail } from './ticketDetail.ts';
 import type { TicketDetail } from './ticketDetail.ts';
 import { ticketEditor } from './ticketEditor.ts';
+import type { EditTarget } from './ticketEditor.ts';
 
 interface FileErrorRow {
   path: string;
@@ -22,6 +23,7 @@ export interface NeedsSession {
   loadErrors: () => Promise<Result<FileErrorRow[], CliFailure>>;
   loadDetail: (rawId: string) => Promise<Result<TicketDetail, CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+  editDesign: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
 
@@ -93,10 +95,14 @@ export const openNeedsSession = async (
     };
   };
 
-  const edit = async (rawId: string): Promise<Result<undefined, CliFailure>> => {
+  const edit = async (
+    rawId: string,
+    target: EditTarget,
+  ): Promise<Result<undefined, CliFailure>> => {
     const edited = await ticketEditor(
       { args: [], json: true, effects: loadEffects, session },
       rawId,
+      target,
     );
 
     return edited.ok ? { ok: true, value: undefined } : edited;
@@ -140,7 +146,8 @@ export const openNeedsSession = async (
   };
 
   const loadErrors = () => track(() => Promise.resolve(readErrors()));
-  const editTicket = (rawId: string) => track(() => edit(rawId));
+  const editTicket = (rawId: string) => track(() => edit(rawId, 'ticket'));
+  const editDesignFile = (rawId: string) => track(() => edit(rawId, 'design'));
 
   const loadDetail = (rawId: string) =>
     track(() => readTicketDetail(session, effects.now(), rawId));
@@ -161,5 +168,16 @@ export const openNeedsSession = async (
     return closingResult;
   };
 
-  return { ok: true, value: { load, loadTree, loadErrors, loadDetail, edit: editTicket, close } };
+  return {
+    ok: true,
+    value: {
+      load,
+      loadTree,
+      loadErrors,
+      loadDetail,
+      edit: editTicket,
+      editDesign: editDesignFile,
+      close,
+    },
+  };
 };

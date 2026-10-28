@@ -66,3 +66,22 @@ it('applies the key remap in the TUI and resolves the machine and project from t
 
   expect(project).toMatchObject({ ok: true, value: 'tk' });
 });
+
+it('reads the icons setting as nerdFont and defaults to unicode', async () => {
+  const nerdFontHome = await homeWithConfig({ icons: 'nerdFont' });
+  const defaultHome = await homeWithConfig({});
+
+  expect(readSettings(nerdFontHome)).toMatchObject({ ok: true, value: { icons: 'nerdFont' } });
+  expect(readSettings(defaultHome)).toMatchObject({ ok: true, value: { icons: 'unicode' } });
+});
+
+it('reports an unknown icons value as a config error and keeps the default keys', async () => {
+  const home = await homeWithConfig({ icons: 'emoji', keys: { help: ['h'] } });
+  const settings = readSettings(home);
+  const loaded = loadBindings(settings, configPathOf(home));
+
+  expect(settings.ok).toBe(false);
+  expect(loaded.messages).toHaveLength(1);
+  expect(loaded.messages[0]).toContain(`${configPathOf(home)} must be`);
+  expect(loaded.messages[0]).toContain('"icons"');
+});

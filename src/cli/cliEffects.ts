@@ -76,6 +76,7 @@ export interface CliSession extends Disposable {
     project: ProjectName,
     id: TicketId,
   ) => Promise<Result<string[], CliMessage>>;
+  designFilePath: (project: ProjectName, id: TicketId) => string;
   listFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listStateFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listArchiveFacts: () => Promise<Result<Fact[], CliMessage>>;

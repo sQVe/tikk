@@ -18,3 +18,10 @@ shows the body, or the Outcome, Files, and First test sections of an instruction
 for instructions. Activity lists every fact of the ticket, newest first, with its time, kind, and
 text; its count is the number of facts. `ctrl+d` and `ctrl+u` scroll the tab half a page, and `j`
 and `k` scroll it one line in the full-screen detail.
+
+In the TUI, `D` on a plan opens its `design.md` in `$EDITOR`. The CLI has the same action as
+`tikk edit <id> --design`, with or without `--json`. It fails for a ticket that is not a plan, and
+for a plan with no `design.md`. `--design` cannot be combined with field flags.
+
+The config key `icons` picks the row icons: `unicode` (the default) or `nerdFont`. Any other value
+is a config error, and the defaults stay in place.

@@ -18,15 +18,22 @@ export interface ConfigSettings {
   projects: Record<string, string>;
   machine: string | undefined;
   keys: Record<string, string[]>;
+  icons: 'unicode' | 'nerdFont';
 }
 
 const configSchema = z.object({
   projects: z.record(z.string(), z.string()).optional(),
   machine: z.string().optional(),
   keys: z.record(z.string(), z.array(z.string())).optional(),
+  icons: z.enum(['unicode', 'nerdFont']).optional(),
 });
 
-const defaultSettings: ConfigSettings = { projects: {}, machine: undefined, keys: {} };
+const defaultSettings: ConfigSettings = {
+  projects: {},
+  machine: undefined,
+  keys: {},
+  icons: 'unicode',
+};
 
 const isMissingFile = (error: unknown): boolean =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
@@ -49,7 +56,7 @@ export const configPathOf = (homeDirectory: string): string =>
   join(homeDirectory, '.config', 'tikk', 'config.json');
 
 const shapeMessageOf = (path: string): string =>
-  `${path} must be {"projects": {"<owner>/<name>": "<project>"}, "machine": "<name>", "keys": {"<command id>": ["<key>"]}}.`;
+  `${path} must be {"projects": {"<owner>/<name>": "<project>"}, "machine": "<name>", "keys": {"<command id>": ["<key>"]}, "icons": "unicode" | "nerdFont"}.`;
 
 const parseSettings = (text: string, path: string): Result<ConfigSettings, string> => {
   let json: unknown;
@@ -72,6 +79,7 @@ const parseSettings = (text: string, path: string): Result<ConfigSettings, strin
       projects: parsed.data.projects ?? {},
       machine: parsed.data.machine,
       keys: parsed.data.keys ?? {},
+      icons: parsed.data.icons ?? 'unicode',
     },
   };
 };

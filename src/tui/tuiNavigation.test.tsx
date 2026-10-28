@@ -157,6 +157,74 @@ it('opens the selected ticket with e in the home and the tree view', async () =>
   expect(edited).toEqual(['demo-3401', 'demo-3401', 'demo-3402']);
 });
 
+it('opens the design of the selected plan with D and ignores D on a slice', async () => {
+  const { designEdited, press, selectedLine } = await mount(
+    [],
+    { width: 60, height: 8 },
+    [],
+    projectTree(),
+  );
+
+  await press('s');
+  await press('j');
+  await press('j');
+
+  expect(selectedLine()).toContain('demo-3401');
+
+  await press('D');
+  await press('j');
+
+  expect(selectedLine()).toContain('demo-3402');
+
+  await press('D');
+
+  expect(designEdited).toEqual(['demo-3401']);
+});
+
+it('opens the design of a plan listed in the home view with D', async () => {
+  const { designEdited, press } = await mount(
+    [needView(1, 'Plan need')],
+    { width: 60, height: 8 },
+    [],
+    projectTree(),
+  );
+
+  await press('D');
+
+  expect(designEdited).toEqual(['demo-3401']);
+});
+
+it('gives D on a slice row a reason in help', async () => {
+  const { press, setup } = await mount([], { width: 80, height: 44 }, [], projectTree());
+
+  await press('s');
+  await press('j');
+  await press('j');
+  await press('j');
+  await press('?');
+
+  expect(setup.captureCharFrame()).toContain('The selected row is not a plan.');
+});
+
+it('keeps D disabled while the selected ticket is still loading', async () => {
+  const { designEdited, press, setup } = await mount(
+    [needView(1, 'Plan need')],
+    { width: 80, height: 44 },
+    [],
+    projectTree(),
+    { loadDetail: () => new Promise(() => {}) },
+  );
+
+  await press('?');
+
+  expect(setup.captureCharFrame()).toContain('The ticket is still loading.');
+
+  await press('q');
+  await press('D');
+
+  expect(designEdited).toEqual([]);
+});
+
 it('keeps the selected ticket when s switches to a view that has it', async () => {
   const { press, selectedLine } = await mount(
     [needView(0, 'First'), needView(2, 'Instruction need')],

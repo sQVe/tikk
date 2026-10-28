@@ -1,5 +1,7 @@
 import type { TreeStateName } from '../cli/cli.ts';
 
+export type IconChoice = 'unicode' | 'nerdFont';
+
 export type IconKind =
   | 'project'
   | 'inbox'
@@ -18,7 +20,7 @@ export interface IconSet {
   attention: string;
 }
 
-export const unicodeIcons: IconSet = {
+const unicodeIcons: IconSet = {
   kinds: {
     project: '■',
     inbox: '□',
@@ -42,4 +44,36 @@ export const unicodeIcons: IconSet = {
   },
   folds: { folded: '▸', unfolded: '▾' },
   attention: '!',
+};
+
+// Nerd Font glyphs sit in the Private Use Area, so they are written as escapes.
+const nerdFontIcons: IconSet = {
+  kinds: {
+    project: '\uf1b2',
+    inbox: '\uf01c',
+    plan: '\uf279',
+    slice: '\uf0e8',
+    task: '\uf0ae',
+    instructions: '\uf15c',
+    instruction: '\uf105',
+  },
+  states: {
+    draft: '\uf1db',
+    open: '\uf10c',
+    planned: '\uf10c',
+    active: '\uf042',
+    submitted: '\uf192',
+    inReview: '\uf192',
+    mergedUnverified: '\uf14a',
+    flagged: '\uf05e',
+    done: '\uf058',
+    canceled: '\uf057',
+  },
+  folds: { folded: '\uf054', unfolded: '\uf078' },
+  attention: '\uf06a',
+};
+
+export const iconSets: Readonly<Record<IconChoice, IconSet>> = {
+  unicode: unicodeIcons,
+  nerdFont: nerdFontIcons,
 };

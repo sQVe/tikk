@@ -13,6 +13,7 @@ interface FakeTui {
   items: NeedView[];
   fileErrors: { path: string; id: string | null; message: string }[];
   edited: string[];
+  designEdited: string[];
   changeListeners: Set<() => void>;
   setHomeFailure: (message: string | undefined) => void;
 }
@@ -31,6 +32,7 @@ const createFake = async (
 ): Promise<FakeTui> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
+  const designEdited: string[] = [];
   const fileErrors: { path: string; id: string | null; message: string }[] = [];
   let homeFailure: string | undefined;
 
@@ -47,6 +49,11 @@ const createFake = async (
     }),
     edit: async (rawId) => {
       edited.push(rawId);
+
+      return { ok: true, value: undefined };
+    },
+    editDesign: async (rawId) => {
+      designEdited.push(rawId);
 
       return { ok: true, value: undefined };
     },
@@ -71,6 +78,7 @@ const createFake = async (
     items,
     fileErrors,
     edited,
+    designEdited,
     changeListeners,
     setHomeFailure: (message) => {
       homeFailure = message;
@@ -533,6 +541,7 @@ it('refreshes the rows when listing the file errors fails', async () => {
       reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
     }),
     edit: async () => ({ ok: true, value: undefined }),
+    editDesign: async () => ({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: (listener) => {
       changes.add(listener);

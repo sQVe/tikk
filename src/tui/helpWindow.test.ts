@@ -16,6 +16,7 @@ const snapshotOf = async (): Promise<TuiSnapshot> => {
         reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
       }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
+    editDesign: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: () => () => undefined,
     notices: [],

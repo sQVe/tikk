@@ -51,6 +51,7 @@ const helpTitlesOf = (): string[] => {
         reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
       }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
+    editDesign: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: () => () => undefined,
     notices: [],
@@ -95,7 +96,7 @@ afterEach(() => {
 });
 
 it('lists every help command and shows why edit is disabled when no ticket is selected', async () => {
-  const { setup, press } = await mount([], { width: 80, height: 40 });
+  const { setup, press } = await mount([], { width: 80, height: 44 });
 
   await press('?');
 
@@ -356,7 +357,7 @@ it('shows the close hint in the help footer when the box is wide enough', async 
 });
 
 it('closes help when ? is pressed again', async () => {
-  const { setup, press } = await mount([], { width: 80, height: 40 });
+  const { setup, press } = await mount([], { width: 80, height: 44 });
 
   await press('?');
   expect(setup.captureCharFrame()).toContain(commandLabel('closeHelp'));
@@ -463,7 +464,7 @@ it('shows the position of the visible help rows in an overflowing help box', asy
 });
 
 it('lists every action once in help', async () => {
-  const { setup, press } = await mount([], { width: 80, height: 40 });
+  const { setup, press } = await mount([], { width: 80, height: 44 });
 
   await press('?');
 
