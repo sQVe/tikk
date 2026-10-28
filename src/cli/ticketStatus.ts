@@ -128,8 +128,6 @@ export const checkCovers = (
   return { ok: true, value: undefined };
 };
 
-// A status fact needs this machine's name, and an ID that two files share refuses it. Both are
-// checked before the ticket file is written, so a refused command leaves the file as it was.
 const statusFactGate = async (
   input: CommandInput,
   ticket: CliTicket,

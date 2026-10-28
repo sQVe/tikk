@@ -18,8 +18,6 @@ interface MergeSides {
 }
 
 interface ClashSides extends MergeSides {
-  // The renamed side's parent of the newest merge. Lines it adds after the merge that brought the
-  // file in are on this side, so a later retry still moves them.
   tip: string;
 }
 
@@ -214,7 +212,6 @@ const commonPrefixLength = (left: string[], right: string[]): number => {
   return length;
 };
 
-// The lines from `start` on that have the clashing ID, named by file and 1-based line.
 const referencesFrom = (
   path: string,
   lines: string[],
@@ -229,8 +226,6 @@ const referencesFrom = (
       : [];
   });
 
-// Lines on the newest parent of the renamed side that come after the lines both sides shared at the
-// merge that brought the file in, and that have the clashing ID.
 const movedLinesOf = async (
   functions: GitFunctions,
   root: string,
@@ -284,9 +279,6 @@ const collectReferences = (
   return { ok: true, value: references };
 };
 
-// An uncommitted ticket file exists only on this machine. Its facts are the old-ID lines this
-// machine wrote, read from HEAD, because a merge parent can be the other clone's side. Lines that
-// this machine wrote after it merged the other ticket, and before the rename, are included too.
 const pendingReferences = async (
   functions: GitFunctions,
   root: string,
@@ -318,7 +310,6 @@ const pendingReferences = async (
   return collectReferences(perFile);
 };
 
-// The `path:line` keys that one fact line moves, when it is an alias.
 const movedKeysOf = (text: string): string[] => {
   const parsed = parseFactLine(text);
 
@@ -329,8 +320,6 @@ const movedKeysOf = (text: string): string[] => {
   return (parsed.value.movedFacts ?? []).map((reference) => `${reference.path}:${reference.line}`);
 };
 
-// Lines an alias on HEAD already moves belong to that alias's ticket now. A later clash must not
-// move them again, or the earlier renamed ticket would lose them.
 const alreadyMovedKeys = async (
   functions: GitFunctions,
   root: string,
@@ -366,7 +355,6 @@ const ownedReferences = async (
   from: TicketId,
   localMachine: string | undefined,
 ): Promise<Result<MovedFactReference[], SyncReason>> => {
-  // A ticket file that HEAD lacks is uncommitted, so it is pending even when no merge is on HEAD.
   const inHead = await listPaths(functions, root, 'HEAD', renamedPath);
 
   if (!inHead.ok) {

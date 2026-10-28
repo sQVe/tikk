@@ -216,8 +216,6 @@ const reusableId = async (
   return undefined;
 };
 
-// A reused alias has its fact already. A retry still looks for facts that were added after the
-// alias was written, and a fact found that way gets its own alias line with the same IDs.
 const aliasFactPath = async (
   functions: SyncClashFunctions,
   root: string,

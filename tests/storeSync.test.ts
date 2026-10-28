@@ -1292,7 +1292,6 @@ it('a clash retry refuses writes under the shared ID and keeps the pre-clash fac
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B's ticket is older, so A's newer ticket is the one that gets renamed.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
   await second.runChecked(['sync']);
   await Bun.sleep(1100);
@@ -1320,7 +1319,6 @@ it('a clash retry refuses writes under the shared ID and keeps the pre-clash fac
   expect(failed.exitCode).not.toBe(0);
   expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
 
-  // The surviving clone has both ticket files, so its write under the shared ID is refused.
   {
     const refused = await second.run([
       'log',
@@ -1377,7 +1375,6 @@ it('a pending renamed ticket keeps its own facts when the other clone merged fac
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B's ticket stays pending, but its progress is committed and pushed before the ticket.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
 
   await second.runChecked([
@@ -1393,7 +1390,6 @@ it('a pending renamed ticket keeps its own facts when the other clone merged fac
   await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
   await second.runChecked(['sync']);
 
-  // A's ticket is settled and has the same ID, and A merges B's facts before B's ticket exists.
   await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
 
   await first.runChecked([
@@ -1408,7 +1404,6 @@ it('a pending renamed ticket keeps its own facts when the other clone merged fac
   await addOrigin(first, remotePath);
   await first.runChecked(['sync']);
 
-  // B merges A's history while its ticket is still pending, so the clash renames that ticket.
   await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
   const report = await second.runJson<AliasSyncReport>(['sync']);
   const alias = report.aliases[0];
@@ -1424,7 +1419,6 @@ it('a pending renamed ticket keeps its own facts when the other clone merged fac
 
   expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A log for surviving ticket']);
 
-  // The renamed file settles and is committed, and A receives it.
   await Bun.sleep(settleWaitMilliseconds);
   await second.runChecked(['sync']);
   await first.runChecked(['sync']);
@@ -1541,7 +1535,6 @@ const createSharedIdStore = async (kind = 'instruction'): Promise<CliFixture> =>
   return fixture;
 };
 
-// Runs a command that writes a ticket file and a fact, and checks that it wrote neither.
 const expectSharedRefusalWithoutWrites = async (
   fixture: CliFixture,
   args: string[],
@@ -1575,7 +1568,6 @@ it('unarchive refuses a shared ID before it writes the ticket file or an unarchi
   const [first, second] = sharedIdPaths(fixture);
   const parent = (await readFile(second, 'utf8')).match(/^parent: (\S+)$/m)?.[1] ?? '';
 
-  // The first file is the one the command picks, so it is archived here.
   await writeFile(
     first,
     `---\nkind: task\ntitle: first\nproject: demo\nparent: ${parent}\nblockedBy: []\nstatus: done\narchived: 2026-10-01\n---\n`,
@@ -1588,7 +1580,6 @@ it('a log refuses an ID whose second ticket file does not parse, and appends no 
   const fixture = await createSharedIdStore();
   const [, second] = sharedIdPaths(fixture);
 
-  // The second file keeps its name, so the ID is still shared even though its front matter is broken.
   await writeFile(second, '---\nkind: broken\n---\n');
 
   const before = await readAllFacts(fixture).catch(() => '');
@@ -1628,7 +1619,6 @@ it('a pending renamed ticket keeps its pre-clash facts when the sync that rename
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B's ticket stays pending while its progress is pushed. A imports that progress before it has a ticket.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
 
   await second.runChecked([
@@ -1646,7 +1636,6 @@ it('a pending renamed ticket keeps its pre-clash facts when the sync that rename
   await addOrigin(first, remotePath);
   await first.runChecked(['sync']);
 
-  // A's settled ticket shares the ID and gets its own progress. The remote has no merge commit.
   await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
 
   await first.runChecked([
@@ -1660,7 +1649,6 @@ it('a pending renamed ticket keeps its pre-clash facts when the sync that rename
 
   await first.runChecked(['sync']);
 
-  // B's sync fast-forwards to A's history while B's ticket is still pending.
   await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
   const report = await second.runJson<AliasSyncReport>(['sync']);
   const alias = report.aliases[0];
@@ -1693,7 +1681,6 @@ it('a pending clash that a failed resolution left shared keeps the write refused
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B's ticket stays pending while its progress is pushed, and A's settled ticket shares the ID.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
 
   await second.runChecked([
@@ -1723,7 +1710,6 @@ it('a pending clash that a failed resolution left shared keeps the write refused
   await addOrigin(first, remotePath);
   await first.runChecked(['sync']);
 
-  // The clash resolution fails after the merge, so both ticket files share the ID.
   const failingPath = await failNextTreeRead(second, 'demo-aaaa-second.md');
   await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
   const failed = await second.run(['sync'], { path: failingPath });
@@ -1851,7 +1837,6 @@ it('a second pending clash leaves a fact that an earlier alias moved with the ea
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // First clash: B's ticket is pending, and B's progress is pushed before the ticket.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
 
   await second.runChecked([
@@ -1891,12 +1876,10 @@ it('a second pending clash leaves a fact that an earlier alias moved with the ea
   await second.runChecked(['sync']);
   await first.runChecked(['sync']);
 
-  // The surviving ticket is deleted, so its ID is free for a second clash.
   await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'));
   await first.runChecked(['sync']);
   await second.runChecked(['sync']);
 
-  // Second clash: B's new ticket is pending and its progress is pushed, and A's new ticket is settled.
   await writeClashTicket(second, 'demo-aaaa', 'third', parent.id, false);
 
   await second.runChecked([
@@ -1962,7 +1945,6 @@ it('a retry after a failed clash commit moves a fact written on the other clone 
   await removeOrigin(first);
   await removeOrigin(second);
 
-  // B's ticket is older. A's newer ticket is renamed, and A logs before the failed resolution.
   await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
   await second.runChecked(['sync']);
   await Bun.sleep(1100);
@@ -1983,7 +1965,6 @@ it('a retry after a failed clash commit moves a fact written on the other clone 
   await addOrigin(second, remotePath);
   await first.runChecked(['sync']);
 
-  // The clash commit fails after the alias fact is written.
   const hook = join(second.storePath, '.git', 'hooks', 'pre-commit');
 
   await mkdir(dirname(hook), { recursive: true });
@@ -1999,7 +1980,6 @@ it('a retry after a failed clash commit moves a fact written on the other clone 
 
   expect(failed.exitCode).not.toBe(0);
 
-  // A has only its own ticket file, so A's write is accepted and lands on the old ID.
   await first.runChecked([
     'log',
     'demo-aaaa',

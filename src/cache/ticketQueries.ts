@@ -278,8 +278,6 @@ export const listErrors = (database: Database): CachedError[] => {
   });
 };
 
-// Two ticket files whose names give one ID share it. The name decides, so a file that does not
-// parse still counts.
 export const isIdShared = (database: Database, id: TicketId): boolean => {
   const project = parseProjectName(id.slice(0, -'-XXXX'.length));
 

@@ -80,7 +80,6 @@ const listTicketFolderFiles = async (
   }
 };
 
-// Two ticket files with one ID make a fact for it ambiguous, so the write waits for `tikk sync`.
 const checkIdUnshared = (
   cache: TicketCache,
   id: TicketId,
