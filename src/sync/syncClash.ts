@@ -3,6 +3,8 @@ import { join, relative } from 'node:path';
 import type { Result } from '../result.ts';
 import { parseProjectName, parseTicketFileName, parseTicketId } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
+import { movedFactReferences } from './syncClashFacts.ts';
+import type { MovedFactReference } from './syncClashFacts.ts';
 import { resetIndex, stageRemoval, stageText } from './syncCommit.ts';
 import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 
@@ -22,6 +24,7 @@ interface AliasRecord {
   ticket: TicketId;
   from: TicketId;
   at: string;
+  movedFacts: MovedFactReference[];
 }
 
 export interface SyncAlias {
@@ -216,14 +219,30 @@ const reusableId = async (
 const aliasFactPath = async (
   functions: SyncClashFunctions,
   root: string,
-  record: { ticket: TicketId; from: TicketId; reusedPath: string | undefined },
+  record: {
+    ticket: TicketId;
+    from: TicketId;
+    renamedPath: string;
+    reusedPath: string | undefined;
+  },
 ): Promise<Result<string, SyncReason>> => {
   if (record.reusedPath !== undefined) {
     return { ok: true, value: record.reusedPath };
   }
 
   const at = new Date(functions.now()).toISOString();
-  const appended = await functions.appendAlias({ ticket: record.ticket, from: record.from, at });
+  const movedFacts = await movedFactReferences(functions, root, record.renamedPath, record.from);
+
+  if (!movedFacts.ok) {
+    return movedFacts;
+  }
+
+  const appended = await functions.appendAlias({
+    ticket: record.ticket,
+    from: record.from,
+    at,
+    movedFacts: movedFacts.value,
+  });
 
   return appended.ok
     ? { ok: true, value: relative(root, appended.value.path) }
@@ -246,9 +265,12 @@ const renameFile = async (
 
   taken.add(to);
 
+  const from = join('tickets', project, file.fileName);
+
   const fact = await aliasFactPath(functions, root, {
     ticket: to,
     from: file.id,
+    renamedPath: from,
     reusedPath: reused?.path,
   });
 
@@ -257,7 +279,6 @@ const renameFile = async (
   }
 
   const path = join('tickets', project, `${to}-${file.slug}.md`);
-  const from = join('tickets', project, file.fileName);
 
   try {
     await functions.rename(join(root, from), join(root, path));

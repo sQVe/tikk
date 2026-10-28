@@ -94,6 +94,27 @@ describe('parseFactLine', () => {
     expect(parseFactLine(line({ kind: 'alias' })).ok).toBe(false);
   });
 
+  it('round-trips an alias with moved facts and rejects a moved fact with no line', () => {
+    const movedFacts = [{ path: 'laptop/2026-10.jsonl', line: 3 }];
+
+    const parsed = parseFactLine(
+      line({ kind: 'alias', from: 'me-3469', movedFacts }, { ticket: 'me-4aaa' }),
+    );
+
+    if (!parsed.ok) {
+      throw new Error(parsed.reason.message);
+    }
+
+    expect(parsed.value).toMatchObject({ kind: 'alias', movedFacts });
+    expect(parseFactLine(serializeFactLine(parsed.value).trim())).toEqual(parsed);
+
+    expect(
+      parseFactLine(
+        line({ kind: 'alias', from: 'me-3469', movedFacts: [{ path: 'laptop/x.jsonl', line: 0 }] }),
+      ).ok,
+    ).toBe(false);
+  });
+
   it('parses a pr fact and an audit fact', () => {
     const pr = parseFactLine(
       line({

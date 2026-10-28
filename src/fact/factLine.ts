@@ -93,10 +93,18 @@ const unarchiveSchema = z.strictObject({
   kind: z.literal('unarchive'),
 });
 
+// One fact line, named by its file under the facts folder and its 1-based line number.
+const movedFactSchema = z.strictObject({
+  path: z.string().min(1),
+  line: z.number().int().positive(),
+});
+
 const aliasSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('alias'),
   from: ticketIdSchema,
+  // Without this list, the alias moves no facts.
+  movedFacts: z.array(movedFactSchema).optional(),
 });
 
 const repositorySchema = z

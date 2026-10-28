@@ -1,4 +1,5 @@
 import type { Result } from '../result.ts';
+import type { MovedFactReference } from './syncClashFacts.ts';
 import type { RemoteInitFunctions } from './syncRemote.ts';
 
 type GitReply = Result<string, { message: string }>;
@@ -17,7 +18,7 @@ export interface FakeSync {
   removed: string[];
   disk: Map<string, { text: string; mtimeMs: number }>;
   aliasWrites: () => number;
-  aliasRecords: { ticket: string; from: string; at: string }[];
+  aliasRecords: { ticket: string; from: string; at: string; movedFacts: MovedFactReference[] }[];
   suffixCalls: () => number;
   commands: () => string[];
   lockCalls: () => number;
@@ -105,7 +106,14 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   const renames: [string, string][] = [];
   const removed: string[] = [];
   const disk = new Map(Object.entries(options.files ?? {}));
-  const aliasRecords: { ticket: string; from: string; at: string }[] = [];
+
+  const aliasRecords: {
+    ticket: string;
+    from: string;
+    at: string;
+    movedFacts: MovedFactReference[];
+  }[] = [];
+
   let suffixCount = 0;
   let aliasWrites = 0;
   let locked = false;

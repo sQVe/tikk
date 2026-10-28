@@ -44,7 +44,7 @@ const allowedImports = new Map<string, Set<string>>([
   ['fact', new Set(['ticket', 'invariant', 'result'])],
   ['store', new Set(['ticket', 'fact', 'invariant', 'result'])],
   ['cache', new Set(['ticket', 'fact', 'invariant', 'result'])],
-  ['sync', new Set(['ticket', 'invariant', 'result'])],
+  ['sync', new Set(['fact', 'ticket', 'invariant', 'result'])],
   ['project', new Set(['config', 'ticket', 'invariant', 'result'])],
   ['github', new Set(['result'])],
   ['cli', new Set(['ticket', 'fact', 'github', 'invariant', 'result'])],

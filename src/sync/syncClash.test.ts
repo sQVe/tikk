@@ -200,6 +200,7 @@ it('puts the renamed ticket back at the old path when nothing was saved there', 
 const strictCommands = {
   logOlder: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-a.md',
   logNewer: 'log --diff-filter=A --format=%ct -- tickets/demo/demo-aaaa-b.md',
+  parents: 'rev-list --first-parent --merges --parents HEAD',
   head: 'rev-parse --verify --quiet HEAD',
   readTree: 'read-tree HEAD',
   blob: 'ls-tree HEAD -- tickets/demo/demo-aaaa-b.md',
@@ -211,6 +212,7 @@ const strictCommands = {
 const strictReplies: Record<string, string> = {
   [strictCommands.logOlder]: '900\n',
   [strictCommands.logNewer]: '1000\n2000\n',
+  [strictCommands.parents]: '',
   [strictCommands.head]: '',
   [strictCommands.readTree]: '',
   [strictCommands.blob]: '100644 blob abc123\ttickets/demo/demo-aaaa-b.md\n',
@@ -283,6 +285,7 @@ it('runs exactly the expected Git calls for a tracked clash, and commits with si
   expect(nonConfigCommands(fake).filter((command) => !command.startsWith('commit'))).toEqual([
     strictCommands.logOlder,
     strictCommands.logNewer,
+    strictCommands.parents,
     strictCommands.head,
     strictCommands.readTree,
     strictCommands.blob,
@@ -294,7 +297,12 @@ it('runs exactly the expected Git calls for a tracked clash, and commits with si
   expect(commit?.args.slice(0, 2)).toEqual(['-c', 'commit.gpgsign=false']);
 
   expect(fake.aliasRecords).toEqual([
-    { ticket: 'demo-zzzz', from: 'demo-aaaa', at: '2026-10-05T10:00:00.000Z' },
+    {
+      ticket: 'demo-zzzz',
+      from: 'demo-aaaa',
+      at: '2026-10-05T10:00:00.000Z',
+      movedFacts: [],
+    },
   ]);
 });
 
@@ -679,4 +687,41 @@ it('does not reuse an alias whose new ID a folder already uses', async () => {
 
   expect(result.ok && result.value.aliases.map((alias) => String(alias.to))).toEqual(['demo-zzzz']);
   expect(fake.aliasWrites()).toBe(1);
+});
+
+// Answers the merge with parents `left` and `right`, and the given replies for the other calls.
+const mergeGit =
+  (replies: Record<string, ReturnType<typeof gitOutput>>): GitHandler =>
+  (args) =>
+    replies[commandOf(args)];
+
+it('stops before the alias and the rename when a fact listing fails', async () => {
+  const fake = twoTickets({
+    git: mergeGit({
+      'rev-list --first-parent --merges --parents HEAD': gitOutput('merge left right\n'),
+      'ls-tree -r -z --name-only left -- facts': gitFailure('listing failed'),
+    }),
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.aliasWrites()).toBe(0);
+  expect(fake.renames).toEqual([]);
+});
+
+it('stops before the alias and the rename when a fact file that exists cannot be read', async () => {
+  const fake = twoTickets({
+    git: mergeGit({
+      'rev-list --first-parent --merges --parents HEAD': gitOutput('merge left right\n'),
+      'ls-tree -r -z --name-only left -- facts': gitOutput('facts/fake/2026-10.jsonl\0'),
+      'show left:facts/fake/2026-10.jsonl': gitFailure('read failed'),
+    }),
+  });
+
+  const result = await resolveIdClashes(fake.functions, root);
+
+  expect(result.ok).toBe(false);
+  expect(fake.aliasWrites()).toBe(0);
+  expect(fake.renames).toEqual([]);
 });

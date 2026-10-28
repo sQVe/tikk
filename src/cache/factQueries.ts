@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -26,6 +27,13 @@ interface FactRow {
 export interface FactDamage {
   kind: 'damaged';
   message: string;
+}
+
+interface FactMove {
+  from: TicketId;
+  to: TicketId;
+  // The alias line that names the moved fact, so a later alias that moves that line can follow.
+  aliasKey: string;
 }
 
 const errorRowSchema = z.object({ path: z.string(), line: z.number(), message: z.string() });
@@ -82,11 +90,11 @@ const stateFactsSql = `(kind IN ('claim', 'release', 'accept', 'reject', 'status
 
 const archiveFactsSql = `(kind IN ('accept', 'status', 'unarchive') OR (kind = 'log' AND log_type = 'submitted'))`;
 
-const readFacts = (
+const readPlacedFacts = (
   database: Database,
   ticketIds: TicketId[] | undefined,
   kindFilter: string | undefined,
-): Result<Fact[], FactDamage> => {
+): Result<PlacedFact[], FactDamage> => {
   const conditions: string[] = [];
   const parameters: string[] = [];
 
@@ -117,7 +125,106 @@ const readFacts = (
     placed.push(row.value);
   }
 
-  return { ok: true, value: placed.toSorted(comparePlaced).map((item) => item.fact) };
+  return { ok: true, value: placed };
+};
+
+// The cache keeps each fact file's full path, which differs per clone. A fact file sits one folder
+// down, so its machine folder and file name identify it on every clone.
+const factFileKey = (path: string): string => join(basename(dirname(path)), basename(path));
+
+const moveKey = (path: string, line: number): string => `${factFileKey(path)}:${line}`;
+
+// Alias facts are read on their own, because the state and archive queries leave them out.
+// An alias moves facts only once a ticket file exists under its new ID. A failed rename or clash
+// commit leaves the alias line with no such file, so its moves stay off until a retry renames it.
+const loadFactMoves = (database: Database): Result<Map<string, FactMove>, FactDamage> => {
+  const aliases = readPlacedFacts(
+    database,
+    undefined,
+    "kind = 'alias' AND ticket IN (SELECT id FROM tickets)",
+  );
+
+  if (!aliases.ok) {
+    return aliases;
+  }
+
+  const moves = new Map<string, FactMove>();
+
+  for (const { fact, path, line } of aliases.value) {
+    if (fact.kind === 'alias') {
+      const aliasKey = moveKey(path, line);
+
+      for (const reference of fact.movedFacts ?? []) {
+        moves.set(moveKey(reference.path, reference.line), {
+          from: fact.from,
+          to: fact.ticket,
+          aliasKey,
+        });
+      }
+    }
+  }
+
+  return { ok: true, value: moves };
+};
+
+// A move applies only to a line that still has the alias's old ID, so a bad reference cannot move
+// another ticket's fact. A reference lands where its alias line ends up, so a later alias that moves
+// that line carries the reference along.
+const ownerAfterMoves = (
+  moves: Map<string, FactMove>,
+  key: string,
+  ticket: TicketId,
+  visited: Set<string>,
+): TicketId => {
+  const move = moves.get(key);
+
+  if (move === undefined || move.from !== ticket || visited.has(key)) {
+    return ticket;
+  }
+
+  visited.add(key);
+
+  return ownerAfterMoves(moves, move.aliasKey, move.to, visited);
+};
+
+const projectFact = (item: PlacedFact, moves: Map<string, FactMove>): PlacedFact => {
+  const ticket = ownerAfterMoves(moves, moveKey(item.path, item.line), item.fact.ticket, new Set());
+
+  if (ticket === item.fact.ticket) {
+    return item;
+  }
+
+  return { ...item, fact: { ...item.fact, ticket } };
+};
+
+// Moves apply before the ticket filter, so a fact is found under its new ID and not its old one.
+const readFacts = (
+  database: Database,
+  ticketIds: TicketId[] | undefined,
+  kindFilter: string | undefined,
+): Result<Fact[], FactDamage> => {
+  const moves = loadFactMoves(database);
+
+  if (!moves.ok) {
+    return moves;
+  }
+
+  const movedFromTickets = [...moves.value.values()].map((move) => move.from);
+  const sourceTickets = ticketIds === undefined ? undefined : [...ticketIds, ...movedFromTickets];
+  const placed = readPlacedFacts(database, sourceTickets, kindFilter);
+
+  if (!placed.ok) {
+    return placed;
+  }
+
+  const projected = placed.value.map((item) => projectFact(item, moves.value));
+
+  const selected =
+    ticketIds === undefined
+      ? projected
+      : projected.filter((item) => ticketIds.includes(item.fact.ticket));
+
+  return { ok: true, value: selected.toSorted(comparePlaced).map((item) => item.fact) };
 };
 
 export const listFacts = (database: Database, ticketIds?: TicketId[]): Result<Fact[], FactDamage> =>
