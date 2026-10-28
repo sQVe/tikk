@@ -31,6 +31,14 @@ it.each([
   expect(setup.captureCharFrame()).toMatch(new RegExp(`Age\\s+${label}(?!\\w)`));
 });
 
+it('shows no age in the detail of an item that has none', async () => {
+  const item: NeedView = { ...needView(0, 'First'), since: null, ageSeconds: null };
+  const { setup } = await mount([item], { width: 120, height: 20 });
+
+  expect(setup.captureCharFrame()).toContain('demo-3400');
+  expect(setup.captureCharFrame()).not.toMatch(/Age\s/);
+});
+
 const treeWithPr = (pr: number | null): TreeGroup[] => {
   const [group] = treeGroups();
 

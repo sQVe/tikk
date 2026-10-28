@@ -35,11 +35,14 @@ const rowKey = (item: NeedView): string => {
   return `${item.id}:${item.reason}`;
 };
 
+const ageFactsOf = (ageSeconds: number | null): DetailFact[] =>
+  ageSeconds === null ? [] : [{ label: 'Age', value: ageLabelOf(ageSeconds) }];
+
 const factsOf = (item: NeedView): DetailFact[] => [
   { label: 'ID', value: item.id },
   { label: 'Title', value: singleLine(item.title) },
   { label: 'Reason', value: item.reason },
-  { label: 'Age', value: ageLabelOf(item.ageSeconds) },
+  ...ageFactsOf(item.ageSeconds),
 ];
 
 export const homeRowsOf = (items: readonly NeedView[]): ListRow[] =>
