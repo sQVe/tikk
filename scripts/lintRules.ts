@@ -33,6 +33,8 @@ const flatModules = new Set([
   'storeEffects',
   'sessionEffects',
   'syncEffects',
+  'config',
+  'remap',
 ]);
 
 const allowedImports = new Map<string, Set<string>>([
@@ -43,9 +45,11 @@ const allowedImports = new Map<string, Set<string>>([
   ['store', new Set(['ticket', 'fact', 'invariant', 'result'])],
   ['cache', new Set(['ticket', 'fact', 'invariant', 'result'])],
   ['sync', new Set(['ticket', 'invariant', 'result'])],
-  ['project', new Set(['ticket', 'invariant', 'result'])],
+  ['project', new Set(['config', 'ticket', 'invariant', 'result'])],
   ['github', new Set(['result'])],
   ['cli', new Set(['ticket', 'fact', 'github', 'invariant', 'result'])],
+  ['config', new Set(['result'])],
+  ['remap', new Set(['config', 'tui', 'invariant', 'result'])],
   ['tui', new Set(['cli', 'invariant', 'result'])],
   ['terminal', new Set(['cli', 'tui'])],
   ['storeEffects', new Set(['store'])],
@@ -62,9 +66,10 @@ const packagePolicies = new Map<string, PackagePolicy>([
   ['store', { builtins: true, packages: ['nanoid'] }],
   ['cache', { builtins: true, packages: ['zod'] }],
   ['sync', { builtins: true, packages: ['zod'] }],
-  ['project', { builtins: true, packages: ['zod'] }],
   ['github', { builtins: false, packages: ['zod'] }],
   ['cli', { builtins: false, packages: ['node:util'] }],
+  ['config', { builtins: true, packages: ['zod'] }],
+  ['remap', { builtins: false, packages: ['@opentui/keymap'] }],
   [
     'tui',
     {

@@ -9,8 +9,9 @@ import { z } from 'zod';
 
 import { openNeedsSession, runCli } from './cli/cli.ts';
 import type { CliEffects } from './cli/cli.ts';
+import { configPathOf, readSettings } from './config.ts';
 import { resolveMachine, resolveProject } from './project.ts';
-import type { ConfigRead, GitOutcome, ProjectEffects } from './project.ts';
+import type { GitOutcome, ProjectEffects } from './project.ts';
 import type { Result } from './result.ts';
 import { createOpenSession } from './sessionEffects.ts';
 import { initStore, resolveStoreRoot } from './store/store.ts';
@@ -49,16 +50,6 @@ const runStoreGit = async (args: string[]): Promise<Result<string, { message: st
 const readTextFile = (path: string): Promise<string | undefined> =>
   readFile(path, 'utf8').catch(() => undefined);
 
-const readConfigFile = async (path: string): Promise<ConfigRead> => {
-  try {
-    return { kind: 'text', text: await readFile(path, 'utf8') };
-  } catch (error) {
-    const missing = error instanceof Error && 'code' in error && error.code === 'ENOENT';
-
-    return missing ? { kind: 'missing' } : { kind: 'failed' };
-  }
-};
-
 // GH_PROMPT_DISABLED makes gh fail instead of asking questions, since no one may be at the terminal.
 const runGh: CliEffects['runGh'] = async (args, signal) => {
   try {
@@ -95,6 +86,8 @@ const runGh: CliEffects['runGh'] = async (args, signal) => {
 
 const editorKillDelayMilliseconds = 2000;
 const editorReapDelayMilliseconds = 50;
+// A cleanup failure waits this long for the editor to exit and be reaped, so the caller never sees a process that a signal has already ended. A process that refuses signals is not waited for longer than this.
+const editorExitWaitMilliseconds = 1000;
 
 const processRowSchema = z.tuple([
   z.coerce.number().int().positive(),
@@ -234,6 +227,8 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
     const cleanup = await stopping;
 
     if (cleanup !== undefined && !cleanup.ok) {
+      await Promise.race([child.exited, Bun.sleep(editorExitWaitMilliseconds)]);
+
       return cleanup;
     }
 
@@ -278,8 +273,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
 
   const projectEffects: ProjectEffects = {
     runGit: spawnGit,
-    readConfigFile,
-    homeDirectory,
+    readSettings: () => readSettings(homeDirectory),
     hostName: hostname(),
   };
 
@@ -295,7 +289,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
     mergeFetched: syncEffects.mergeFetched,
     openSession: createOpenSession(storeRoot, cachePath),
     resolveProject: () => resolveProject(process.cwd(), projectEffects),
-    resolveMachine: () => resolveMachine(projectEffects),
+    resolveMachine: () => Promise.resolve(resolveMachine(projectEffects)),
     runGh,
     readTextFile,
     runEditor,
@@ -338,8 +332,15 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
   }
 
   const { startTerminal } = await import('./terminal.tsx');
+  const { loadBindings } = await import('./remap.ts');
+  const config = loadBindings(readSettings(homeDirectory), configPathOf(homeDirectory));
 
-  await startTerminal({ needs: opened.value, watch: watchStore(defaultStoreRoot) });
+  await startTerminal({
+    needs: opened.value,
+    watch: watchStore(defaultStoreRoot),
+    bindings: config.bindings,
+    notices: config.messages,
+  });
 };
 
 const startsTerminal = (args: string[]): boolean =>

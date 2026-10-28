@@ -1,11 +1,11 @@
 import { createCliRenderer } from '@opentui/core';
 import { createDefaultOpenTuiKeymap } from '@opentui/keymap/opentui';
-import { createRoot, flushSync } from '@opentui/react';
+import { createRoot } from '@opentui/react';
 import type { ReactNode } from 'react';
 
 import type { NeedsSession } from './cli/cli.ts';
-import { App } from './tui/tui.tsx';
-import type { AppProps } from './tui/tui.tsx';
+import { App, createTuiSession } from './tui/tui.tsx';
+import type { AppProps, BindingTable, TuiEffects, TuiSession } from './tui/tui.tsx';
 
 type ProcessEvent = 'SIGINT' | 'SIGTERM' | 'uncaughtException' | 'unhandledRejection';
 
@@ -29,6 +29,7 @@ export interface TerminalEffects {
   listen: (event: ProcessEvent, handler: (reason?: unknown) => void) => () => void;
   exit: (code: number) => void;
   printError: (error: unknown) => void;
+  createSession: (effects: TuiEffects) => TuiSession;
 }
 
 type StoreWatch = (onChange: () => void) => () => void;
@@ -36,6 +37,8 @@ type StoreWatch = (onChange: () => void) => () => void;
 export interface TerminalDependencies {
   needs: NeedsSession;
   watch: StoreWatch;
+  bindings: BindingTable;
+  notices: readonly string[];
 }
 
 const changeDelayMilliseconds = 100;
@@ -140,6 +143,7 @@ const processEffects: TerminalEffects = {
       `${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
     );
   },
+  createSession: createTuiSession,
 };
 
 export const startTerminal = async (
@@ -149,6 +153,7 @@ export const startTerminal = async (
   const { needs } = dependencies;
   const changes = createChangeFeed(dependencies.watch);
   const removers: (() => void)[] = [];
+  let session: TuiSession | undefined;
   let shutdownPromise: Promise<void> | undefined;
   let fatal: { error: unknown } | undefined;
   let finishing = false;
@@ -166,6 +171,7 @@ export const startTerminal = async (
 
   const runShutdown = async (): Promise<void> => {
     changes.stop();
+    session?.stop();
 
     const opened = await settledOpen();
 
@@ -257,7 +263,7 @@ export const startTerminal = async (
     }
   };
 
-  const lend: AppProps['effects']['lend'] = async (run) => {
+  const lend: TuiEffects['lend'] = async (run) => {
     const previous = loanTail;
     const turn = Promise.withResolvers<undefined>();
 
@@ -302,17 +308,16 @@ export const startTerminal = async (
       return;
     }
 
-    // The root renders concurrently, so without flushSync the first load would start before the
-    // view has mounted.
-    flushSync(() => {
-      root.render(
-        <App
-          effects={{ ...needs, lend, onChange: changes.subscribe }}
-          keymap={keymap}
-          onQuit={quit}
-        />,
-      );
+    session = effects.createSession({
+      ...needs,
+      lend,
+      onChange: changes.subscribe,
+      notices: dependencies.notices,
     });
+
+    root.render(
+      <App session={session} keymap={keymap} bindings={dependencies.bindings} onQuit={quit} />,
+    );
   } catch (error) {
     fail(error);
   }

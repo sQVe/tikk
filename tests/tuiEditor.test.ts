@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { createEffects } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
 import { cliEnvironment, createCliFixture } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
@@ -234,7 +235,7 @@ it('lends the terminal to $EDITOR on e, shows the typed title in the tree, and e
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen(`> ${plan.id}  aaaa  draft`);
 
     const beforeEdit = tikk.terminal.output.length;
@@ -244,7 +245,7 @@ it('lends the terminal to $EDITOR on e, shows the typed title in the tree, and e
     tikk.type(`${typedTitle}\r`);
     await tikk.waitForScreen(`> ${plan.id}  ${typedTitle}  draft`);
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('Nothing needs you.');
 
     expect(tikk.shows(typedTitle)).toBe(false);
@@ -271,7 +272,7 @@ it.skipIf(Bun.which('nvim') === null)(
     try {
       await tikk.waitForScreen('Nothing needs you.');
 
-      tikk.type('\t');
+      tikk.type('s');
       await tikk.waitForScreen(`> ${plan.id}  aaaa  draft`);
 
       const beforeEdit = tikk.terminal.output.length;
@@ -307,7 +308,7 @@ it('stops a non-exec editor wrapper and its descendant before restoring the term
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('aaaa  draft');
 
     const beforeEdit = tikk.terminal.output.length;
@@ -555,7 +556,7 @@ it.each(['process list failure', 'signal refusal'])(
     try {
       await tikk.waitForScreen('Nothing needs you.');
 
-      tikk.type('\t');
+      tikk.type('s');
       await tikk.waitForScreen('aaaa  draft');
 
       const beforeEdit = tikk.terminal.output.length;
@@ -608,7 +609,7 @@ it('keeps handling delayed SIGTERM during editor cleanup and restores the termin
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('aaaa  draft');
 
     const beforeEdit = tikk.terminal.output.length;
@@ -658,7 +659,7 @@ it('stops an editor that ignores SIGTERM at shutdown, restores the terminal, and
   try {
     await tikk.waitForScreen('Nothing needs you.');
 
-    tikk.type('\t');
+    tikk.type('s');
     await tikk.waitForScreen('aaaa  draft');
 
     const beforeEdit = tikk.terminal.output.length;
@@ -682,3 +683,197 @@ it('stops an editor that ignores SIGTERM at shutdown, restores the terminal, and
     tikk.close();
   }
 }, 30_000);
+
+// Starts the editor directly through the production effects. The script records its PID, ignores TERM, and replaces itself with sleep.
+const directEditorScript = (pidPath: string): string => `#!/bin/sh
+printf '%s' $$ > '${pidPath}'
+trap '' TERM
+exec sleep 30
+`;
+
+// Calls the production runEditor, aborts it once the editor runs, and reports the outcome and whether the editor PID still exists when it returns.
+const cleanupDriver = (pidPath: string, editorPath: string): string => `
+import { existsSync, readFileSync } from 'node:fs';
+import { createEffects } from '${join(import.meta.dir, '..', 'src', 'index.ts')}';
+
+const effects = createEffects('${cli().storePath}', '${join(cli().home, 'index.db')}');
+const controller = new AbortController();
+const running = effects.runEditor('${editorPath}', controller.signal);
+
+while (!existsSync('${pidPath}')) {
+  await Bun.sleep(25);
+}
+
+const editorPid = Number(readFileSync('${pidPath}', 'utf8'));
+
+controller.abort();
+
+const result = await running;
+
+const editorAlive = (() => {
+  try {
+    process.kill(editorPid, 0);
+
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+console.log(JSON.stringify({ failed: !result.ok, kind: result.ok ? undefined : result.reason.kind, editorAlive }));
+`;
+
+const positivePidOf = (text: string): number => {
+  const pid = Number(text);
+
+  invariant(Number.isInteger(pid) && pid > 0, `The editor wrote an invalid PID: "${text}".`);
+
+  return pid;
+};
+
+const waitForPid = async (pidPath: string): Promise<number> => {
+  const deadline = Date.now() + 10_000;
+
+  while (!existsSync(pidPath) && Date.now() < deadline) {
+    await Bun.sleep(25);
+  }
+
+  return positivePidOf(await readFile(pidPath, 'utf8'));
+};
+
+// The editor PID, when the editor has written one. Signals are sent only to this value.
+const knownEditorPid = async (pidPath: string): Promise<number | undefined> => {
+  if (!existsSync(pidPath)) {
+    return undefined;
+  }
+
+  const pid = Number(await readFile(pidPath, 'utf8'));
+
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+};
+
+const withinBound = async <Value>(
+  work: Promise<Value>,
+  milliseconds: number,
+  what: string,
+): Promise<Value> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const expired = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${what} did not finish within ${milliseconds} ms.`));
+    }, milliseconds);
+  });
+
+  try {
+    return await Promise.race([work, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+it('ends the editor before reporting a process listing failure during cleanup', async () => {
+  const commandDirectory = join(cli().home, 'failing-listing');
+  const pidPath = join(cli().home, 'direct-editor.pid');
+  const editorPath = await writeEditor(directEditorScript(pidPath));
+  const driverPath = join(cli().home, 'run-editor.ts');
+
+  await mkdir(commandDirectory);
+  await writeFile(join(commandDirectory, 'ps'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  await writeFile(driverPath, cleanupDriver(pidPath, editorPath));
+
+  // The PATH is set before this process starts, because Bun resolves ps from the PATH it started with.
+  const driver = Bun.spawn(['bun', driverPath], {
+    env: {
+      ...Bun.env,
+      EDITOR: editorPath,
+      PATH: `${commandDirectory}:${Bun.env.PATH ?? ''}`,
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  try {
+    const [stdout, exitCode] = await withinBound(
+      Promise.all([driver.stdout.text(), driver.exited]),
+      15_000,
+      'The cleanup driver',
+    );
+
+    expect(exitCode).toBe(0);
+
+    const outcome = JSON.parse(stdout.trim().split('\n').at(-1) ?? '{}') as {
+      failed: boolean;
+      kind?: string;
+      editorAlive: boolean;
+    };
+
+    expect(outcome.failed).toBe(true);
+    expect(outcome.kind).toBe('cleanup');
+    expect(outcome.editorAlive).toBe(false);
+  } finally {
+    if (driver.exitCode === null) {
+      driver.kill('SIGKILL');
+    }
+
+    const editorPid = await knownEditorPid(pidPath);
+
+    if (editorPid !== undefined && isRunning(editorPid)) {
+      process.kill(editorPid, 'SIGKILL');
+    }
+
+    await driver.exited;
+  }
+}, 20_000);
+
+it('ends cleanup within a bound when an editor refuses SIGTERM and the signals to stop it', async () => {
+  const pidPath = join(cli().home, 'refusing-editor.pid');
+  const editorPath = await writeEditor(directEditorScript(pidPath));
+  const effects = createEffects(cli().storePath, join(cli().home, 'index.db'));
+  const signalProcess = process.kill.bind(process);
+  const previousEditor = Bun.env['EDITOR'];
+  const controller = new AbortController();
+  let editorPid: number | undefined;
+  let running: ReturnType<typeof effects.runEditor> | undefined;
+
+  Bun.env['EDITOR'] = editorPath;
+
+  try {
+    process.kill = (pid: number, signal?: string | number) => {
+      if (pid === editorPid && signal !== 0) {
+        throw Object.assign(new Error('refused'), { code: 'EPERM' });
+      }
+
+      return signalProcess(pid, signal);
+    };
+
+    running = effects.runEditor(editorPath, controller.signal);
+    editorPid = await waitForPid(pidPath);
+
+    const started = Date.now();
+
+    controller.abort();
+
+    const result = await running;
+
+    expect(result.ok).toBe(false);
+    expect(!result.ok && result.reason.kind).toBe('cleanup');
+    expect(Date.now() - started).toBeLessThan(6000);
+  } finally {
+    process.kill = signalProcess;
+
+    // Aborting asks the production cleanup to stop the editor tree it owns, even when the test failed early.
+    controller.abort();
+    await running;
+
+    if (editorPid !== undefined && isRunning(editorPid)) {
+      signalProcess(editorPid, 'SIGKILL');
+    }
+
+    if (previousEditor === undefined) {
+      delete Bun.env['EDITOR'];
+    } else {
+      Bun.env['EDITOR'] = previousEditor;
+    }
+  }
+}, 20_000);

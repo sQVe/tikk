@@ -1,7 +1,4 @@
-import { join } from 'node:path';
-
-import { z } from 'zod';
-
+import type { ConfigSettings } from './config.ts';
 import type { Result } from './result.ts';
 import { parseProjectName } from './ticket/ticket.ts';
 import type { ProjectName } from './ticket/ticket.ts';
@@ -11,25 +8,15 @@ export type GitOutcome =
   | { kind: 'failed' }
   | { kind: 'unavailable'; message: string };
 
-export type ConfigRead = { kind: 'text'; text: string } | { kind: 'missing' } | { kind: 'failed' };
-
 export interface ProjectEffects {
   runGit: (args: string[]) => Promise<GitOutcome>;
-  readConfigFile: (path: string) => Promise<ConfigRead>;
-  homeDirectory: string;
+  readSettings: () => Result<ConfigSettings, string>;
   hostName: string;
 }
 
 export interface ProjectReason {
   message: string;
 }
-
-const configSchema = z.object({
-  projects: z.record(z.string(), z.string()).optional(),
-  machine: z.string().optional(),
-});
-
-type Config = z.infer<typeof configSchema>;
 
 const machinePattern = /^[a-z0-9][a-z0-9._-]*$/;
 
@@ -52,67 +39,39 @@ const parseRepository = (url: string): { owner: string; name: string } | undefin
   return undefined;
 };
 
-const readConfig = async (effects: ProjectEffects): Promise<Result<Config, ProjectReason>> => {
-  const configPath = join(effects.homeDirectory, '.config', 'tikk', 'config.json');
-  const read = await effects.readConfigFile(configPath);
+const settingsOf = (effects: ProjectEffects): Result<ConfigSettings, ProjectReason> => {
+  const settings = effects.readSettings();
 
-  if (read.kind === 'missing') {
-    return { ok: true, value: {} };
+  if (settings.ok) {
+    return settings;
   }
 
-  if (read.kind === 'failed') {
-    return { ok: false, reason: { message: `Cannot read ${configPath}.` } };
-  }
-
-  let json: unknown;
-
-  try {
-    json = JSON.parse(read.text);
-  } catch {
-    return { ok: false, reason: { message: `${configPath} is not valid JSON.` } };
-  }
-
-  const parsed = configSchema.safeParse(json);
-
-  if (!parsed.success) {
-    return {
-      ok: false,
-      reason: {
-        message: `${configPath} must be {"projects": {"<owner>/<name>": "<project>"}, "machine": "<name>"}.`,
-      },
-    };
-  }
-
-  return { ok: true, value: parsed.data };
+  return { ok: false, reason: { message: settings.reason } };
 };
 
-const readMappings = async (
-  effects: ProjectEffects,
-): Promise<Result<Map<string, string>, ProjectReason>> => {
-  const config = await readConfig(effects);
+const readMappings = (effects: ProjectEffects): Result<Map<string, string>, ProjectReason> => {
+  const settings = settingsOf(effects);
   const mappings = new Map<string, string>();
 
-  if (!config.ok) {
-    return config;
+  if (!settings.ok) {
+    return settings;
   }
 
-  for (const [key, value] of Object.entries(config.value.projects ?? {})) {
+  for (const [key, value] of Object.entries(settings.value.projects)) {
     mappings.set(key.toLowerCase(), value);
   }
 
   return { ok: true, value: mappings };
 };
 
-export const resolveMachine = async (
-  effects: ProjectEffects,
-): Promise<Result<string, ProjectReason>> => {
-  const config = await readConfig(effects);
+export const resolveMachine = (effects: ProjectEffects): Result<string, ProjectReason> => {
+  const settings = settingsOf(effects);
 
-  if (!config.ok) {
-    return config;
+  if (!settings.ok) {
+    return settings;
   }
 
-  const configured = config.value.machine;
+  const configured = settings.value.machine;
   const machine = (configured ?? effects.hostName).toLowerCase();
 
   if (machinePattern.test(machine)) {
@@ -151,7 +110,7 @@ export const resolveProject = async (
     return personalResult();
   }
 
-  const mappings = await readMappings(effects);
+  const mappings = readMappings(effects);
 
   if (!mappings.ok) {
     return mappings;

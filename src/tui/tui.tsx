@@ -1,245 +1,344 @@
 import type { CommandContext } from '@opentui/keymap';
 import type { createDefaultOpenTuiKeymap } from '@opentui/keymap/opentui';
-import { KeymapProvider, useBindings } from '@opentui/keymap/react';
+import { KeymapProvider, useBindings, useKeymap } from '@opentui/keymap/react';
 import { useTerminalDimensions } from '@opentui/react';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 
-import type { CliFailure, NeedsReading, TreeGroup } from '../cli/cli.ts';
-import type { Result } from '../result.ts';
-import { homeRowsOf } from './homeView.tsx';
-import { RowList, singleLine } from './rowList.tsx';
-import type { ListRow } from './rowList.tsx';
-import { treeRowsOf } from './treeView.tsx';
-import { viewCommands } from './viewKeymap.ts';
-import type { ViewIntent } from './viewKeymap.ts';
+import { DetailPane } from './DetailPane.tsx';
+import { strayErrorsOf } from './fileErrors.ts';
+import { HelpOverlay } from './HelpOverlay.tsx';
+import { helpWindowOf } from './helpWindow.ts';
+import { MessageOverlay } from './MessageOverlay.tsx';
+import { messageWindowOf } from './messageWindow.ts';
+import { palette } from './palette.ts';
+import { RowList } from './rowList.tsx';
+import { StatusLine } from './StatusLine.tsx';
+import { commandScopes, keysOfAction, scopePriority } from './tuiCommands.ts';
+import type { Binding, BindingTable, CommandScope } from './tuiCommands.ts';
+import type { TuiIntent, TuiSession, TuiSnapshot } from './tuiSession.ts';
 
-interface TuiEffects {
-  load: () => Promise<Result<NeedsReading, CliFailure>>;
-  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
-  edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
-  lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
-  onChange: (listener: () => void) => () => void;
-}
+export {
+  catalog,
+  commandScopes,
+  defaultBindings,
+  defaultChoiceOf,
+  emptyBindingTable,
+  expandBindings,
+  keysOfAction,
+  readableKeyOf,
+} from './tuiCommands.ts';
+
+export type { Binding, BindingTable, Command, CommandScope, KeyChoice } from './tuiCommands.ts';
+
+export { createTuiSession } from './tuiSession.ts';
+export type { TuiEffects, TuiSession } from './tuiSession.ts';
 
 export interface AppProps {
-  effects: TuiEffects;
+  session: TuiSession;
   keymap: ReturnType<typeof createDefaultOpenTuiKeymap>;
+  bindings: BindingTable;
   onQuit: () => void;
 }
 
-type Loaded<Value> =
-  | { state: 'loading' }
-  | { state: 'failed'; message: string }
-  | { state: 'loaded'; value: Value };
-
-type ViewName = 'home' | 'tree';
-
-interface Selection {
-  index: number;
-  key: string | undefined;
+interface LayerProps {
+  scope: CommandScope;
+  run: (binding: Binding) => void;
+  session: TuiSession;
+  bindings: BindingTable;
 }
 
-interface ListState<Value> {
-  loaded: Loaded<Value>;
-  rows: ListRow[];
-  selection: Selection;
+// The state that decides which scopes are active. One owner: the key layers and the config
+// resolver both read it through scopesActiveWith.
+interface ActivityState {
+  overlay: TuiSnapshot['overlay']['kind'];
+  detailOpen: boolean;
 }
 
-const errorMessage = (error: unknown, fallback: string): string =>
-  error instanceof Error ? error.message : fallback;
+const primaryStatusOf = (snapshot: TuiSnapshot): string => {
+  const view = snapshot.views[snapshot.view];
 
-const clampedIndex = (index: number, count: number): number =>
-  Math.max(0, Math.min(count - 1, index));
+  if (snapshot.notice !== '') {
+    return snapshot.notice;
+  }
 
-const resolvedSelection = (selection: Selection, rows: readonly ListRow[]): Selection => {
-  const found = rows.findIndex((row) => row.key === selection.key);
-  const index = found === -1 ? clampedIndex(selection.index, rows.length) : found;
+  if (view.failure !== undefined) {
+    return view.failure;
+  }
 
-  return { index, key: rows[index]?.key };
+  return view.loaded ? view.problems.join('; ') : 'Loading...';
 };
 
-const loadedState = <Value,>(
-  current: ListState<Value>,
-  loaded: Loaded<Value>,
-  rows: ListRow[],
-): ListState<Value> => ({ loaded, rows, selection: resolvedSelection(current.selection, rows) });
+const fileErrorStatusOf = (count: number): string => {
+  if (count === 0) {
+    return '';
+  }
 
-const useList = <Value,>(
-  enabled: boolean,
-  load: () => Promise<Result<Value, CliFailure>>,
-  generation: number,
-  rowsOf: (value: Value) => ListRow[],
-) => {
-  const [state, setState] = useState<ListState<Value>>({
-    loaded: { state: 'loading' },
-    rows: [],
-    selection: { index: 0, key: undefined },
-  });
+  const noun = count === 1 ? 'error' : 'errors';
+
+  return `${count} file ${noun}`;
+};
+
+const statusOf = (snapshot: TuiSnapshot, strayCount: number): string =>
+  [primaryStatusOf(snapshot), fileErrorStatusOf(strayCount)]
+    .filter((part) => part !== '')
+    .join('; ');
+
+const viewLabels: Record<TuiSnapshot['view'], string> = { home: 'Home', tree: 'Tree' };
+
+const sideLayoutMinimumWidth = 90;
+const detailMaximumWidth = 44;
+const detailShare = 0.36;
+
+const statusRows = 1;
+
+const isScopeActiveIn = (scope: CommandScope, state: ActivityState): boolean => {
+  const active: Record<CommandScope, boolean> = {
+    global: true,
+    list: state.overlay === 'none' && !state.detailOpen,
+    detail: state.detailOpen,
+    input: false,
+    rank: false,
+    visual: false,
+    help: state.overlay === 'help',
+    messages: state.overlay === 'messages',
+  };
+
+  return active[scope];
+};
+
+const isScopeActive = (scope: CommandScope, snapshot: TuiSnapshot): boolean =>
+  isScopeActiveIn(scope, { overlay: snapshot.overlay.kind, detailOpen: snapshot.detailOpen });
+
+const overlayKinds: readonly ActivityState['overlay'][] = ['none', 'help', 'messages'];
+
+const activityStates: readonly ActivityState[] = overlayKinds.flatMap((overlay) =>
+  [false, true].map((detailOpen) => ({ overlay, detailOpen })),
+);
+
+// The scopes that can be active in the same state as the given scope, including itself when
+// it can be active at all.
+export const scopesActiveWith = (scope: CommandScope): CommandScope[] =>
+  commandScopes.filter((other) =>
+    activityStates.some((state) => isScopeActiveIn(scope, state) && isScopeActiveIn(other, state)),
+  );
+
+const messagesHeightOf = (height: number): number => Math.max(1, height - statusRows);
+
+const overlayMaximumTop = (
+  bindings: BindingTable,
+  snapshot: TuiSnapshot,
+  width: number,
+  height: number,
+): number => {
+  if (snapshot.overlay.kind === 'messages') {
+    return messageWindowOf(snapshot.messages, width, messagesHeightOf(height)).maximumTop;
+  }
+
+  return helpWindowOf(bindings, snapshot, height, width).maximumTop;
+};
+
+const KeyLayer = ({ scope, run, session, bindings }: LayerProps): null => {
+  useBindings(() => {
+    const scoped = bindings[scope];
+    const keys = [...new Set(scoped.map((binding) => binding.key))];
+
+    return {
+      priority: scopePriority[scope],
+      enabled: () => isScopeActive(scope, session.getSnapshot()),
+      bindings: keys.map((key) => ({
+        key,
+        cmd: (context: CommandContext) => {
+          const binding = scoped.find((candidate) => candidate.key === key);
+
+          context.event.preventDefault();
+          context.event.stopPropagation();
+
+          if (binding !== undefined) {
+            run(binding);
+          }
+        },
+      })),
+    };
+  }, [scope, run, session, bindings]);
+
+  return null;
+};
+
+const commandDuringSequence = (
+  bindings: BindingTable,
+  snapshot: TuiSnapshot,
+  matches: (key: string) => boolean,
+): Binding | undefined => {
+  const active = commandScopes
+    .filter((scope) => isScopeActive(scope, snapshot))
+    .toSorted((first, second) => scopePriority[second] - scopePriority[first]);
+
+  for (const scope of active) {
+    const binding = bindings[scope].find(
+      (candidate) => candidate.duringSequence && matches(candidate.key),
+    );
+
+    if (binding !== undefined) {
+      return binding;
+    }
+  }
+
+  return undefined;
+};
+
+const PendingSequence = ({ run, session, bindings }: Omit<LayerProps, 'scope'>): null => {
+  const keymap = useKeymap();
 
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
+    const stopExits = keymap.intercept('key', (context) => {
+      if (!keymap.hasPendingSequence()) {
+        return;
+      }
 
-    load()
-      .then((result) => {
-        setState((current) =>
-          result.ok
-            ? loadedState(current, { state: 'loaded', value: result.value }, rowsOf(result.value))
-            : loadedState(current, { state: 'failed', message: result.reason.message }, []),
-        );
-      })
-      .catch((error: unknown) => {
-        const message = errorMessage(error, 'The list did not load.');
+      const matches = (key: string) => keymap.createKeyMatcher(key)(context.event);
+      const binding = commandDuringSequence(bindings, session.getSnapshot(), matches);
 
-        setState((current) => loadedState(current, { state: 'failed', message }, []));
-      });
-  }, [enabled, load, generation, rowsOf]);
+      if (binding === undefined) {
+        return;
+      }
 
-  const move = (step: number) => {
-    setState((current) => {
-      const index = clampedIndex(current.selection.index + step, current.rows.length);
-
-      return { ...current, selection: { index, key: current.rows[index]?.key } };
+      keymap.clearPendingSequence();
+      context.consume();
+      run(binding);
     });
-  };
 
-  return [state, move] as const;
+    const stopMisses = keymap.intercept('key:after', (context) => {
+      if (context.reason === 'sequence-miss') {
+        context.consume();
+      }
+    });
+
+    return () => {
+      stopExits();
+      stopMisses();
+    };
+  }, [keymap, run, session, bindings]);
+
+  return null;
 };
 
-const useGeneration = (onChange: TuiEffects['onChange']): number => {
-  const [generation, setGeneration] = useState(0);
+const isRedundantDetail = (intent: TuiIntent, sideLayout: boolean): boolean =>
+  sideLayout && intent.kind === 'openDetail';
 
-  useEffect(
-    () =>
-      onChange(() => {
-        setGeneration((current) => current + 1);
-      }),
-    [onChange],
+const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactNode => {
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
+  const { width, height } = useTerminalDimensions();
+  const view = snapshot.views[snapshot.view];
+  const sideLayout = width >= sideLayoutMinimumWidth;
+  const fullDetail = snapshot.detailOpen && !sideLayout;
+  const showsPane = sideLayout || fullDetail;
+  const detailWidth = Math.min(detailMaximumWidth, Math.floor(width * detailShare));
+  const paneWidth = sideLayout ? detailWidth : width;
+  const listWidth = sideLayout ? width - detailWidth : width;
+  const selectedRow = view.rows[view.selection.index];
+  const rows = [...snapshot.views.home.rows, ...snapshot.views.tree.rows];
+  const strayCount = strayErrorsOf(snapshot.fileErrors, rows).length;
+  const helpKeys = keysOfAction(bindings, 'global', 'help').join('/');
+
+  const run = useCallback(
+    (binding: Binding) => {
+      const current = session.getSnapshot();
+      const { command, overlayMove } = binding;
+
+      if (command.disabledReason(current) !== undefined) {
+        return;
+      }
+
+      if (overlayMove !== undefined) {
+        const maximumTop = overlayMaximumTop(bindings, current, width, height);
+
+        session.send({ kind: 'scrollOverlay', move: overlayMove, maximumTop });
+
+        return;
+      }
+
+      const { intent } = command;
+
+      if (intent.kind === 'quit') {
+        onQuit();
+      } else if (!isRedundantDetail(intent.intent, sideLayout)) {
+        session.send(intent.intent);
+      }
+    },
+    [session, onQuit, bindings, width, height, sideLayout],
   );
 
-  return generation;
-};
-
-const failureStatus = (loaded: Loaded<unknown>): string => {
-  if (loaded.state === 'loading') {
-    return 'Loading...';
-  }
-
-  return loaded.state === 'failed' ? loaded.message : '';
-};
-
-const homeStatusOf = (loaded: Loaded<NeedsReading>): string => {
-  if (loaded.state !== 'loaded') {
-    return failureStatus(loaded);
-  }
-
-  return loaded.value.reconcileProblems.map((problem) => problem.message).join('; ');
-};
-
-const homeRowsOfReading = (reading: NeedsReading): ListRow[] => homeRowsOf(reading.items);
-
-const Screen = ({ effects, onQuit }: Omit<AppProps, 'keymap'>): ReactNode => {
-  const [view, setView] = useState<ViewName>('home');
-
-  const [treeRequested, setTreeRequested] = useState(false);
-  const [notice, setNotice] = useState('');
-  const { height } = useTerminalDimensions();
-  const generation = useGeneration(effects.onChange);
-  const [home, moveHome] = useList(true, effects.load, generation, homeRowsOfReading);
-  const [tree, moveTree] = useList(treeRequested, effects.loadTree, generation, treeRowsOf);
-  const current = view === 'home' ? home : tree;
-  const { rows } = current;
-  const selected = current.selection.index;
-  const move = view === 'home' ? moveHome : moveTree;
-
-  const edit = (id: string) => {
-    effects
-      .lend(() => effects.edit(id))
-      .then((loan) => {
-        if (!loan.ok) {
-          return;
-        }
-
-        const result = loan.value;
-
-        setNotice(result.ok ? '' : result.reason.message);
-      })
-      .catch((error: unknown) => {
-        setNotice(errorMessage(error, 'The editor did not run.'));
-      });
-  };
-
-  const run = (intent: ViewIntent) => {
-    if (intent === 'quit') {
-      onQuit();
+  useEffect(() => {
+    if (sideLayout && snapshot.detailOpen) {
+      session.send({ kind: 'closeDetail' });
     }
+  }, [session, sideLayout, snapshot.detailOpen]);
 
-    if (intent === 'switchView') {
-      setView(view === 'home' ? 'tree' : 'home');
-      setTreeRequested(true);
-    }
-
-    if (intent === 'moveUp') {
-      move(-1);
-    }
-
-    if (intent === 'moveDown') {
-      move(1);
-    }
-
-    const id = rows[selected]?.id;
-
-    if (intent === 'edit' && typeof id === 'string') {
-      edit(id);
-    }
-  };
-
-  const latestRun = useRef(run);
-
-  useLayoutEffect(() => {
-    latestRun.current = run;
-  });
-
-  useBindings(
-    () => ({
-      bindings: viewCommands.flatMap((command) =>
-        command.keys.map((key) => ({
-          key,
-          cmd: (context: CommandContext) => {
-            context.event.preventDefault();
-            latestRun.current(command.intent);
-          },
-        })),
-      ),
-    }),
-    [],
-  );
-
-  const listHeight = Math.max(1, height - 1);
-  const viewStatus = view === 'home' ? homeStatusOf(home.loaded) : failureStatus(tree.loaded);
-  const status = notice === '' ? viewStatus : notice;
+  const listHeight = Math.max(0, height - statusRows);
+  const hasContentRows = listHeight > 0;
 
   return (
     <box flexDirection="column" flexGrow={1}>
-      {current.loaded.state === 'loaded' ? (
-        <RowList
-          rows={rows}
-          selected={selected}
-          height={listHeight}
-          emptyMessage={view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'}
+      <PendingSequence run={run} session={session} bindings={bindings} />
+      {commandScopes.map((scope) => (
+        <KeyLayer key={scope} scope={scope} run={run} session={session} bindings={bindings} />
+      ))}
+      <box height={listHeight} flexShrink={0}>
+        {view.loaded && hasContentRows ? (
+          <box flexDirection="row">
+            {fullDetail ? null : (
+              <box width={listWidth} flexShrink={0}>
+                <RowList
+                  rows={view.rows}
+                  selected={view.selection.index}
+                  height={listHeight}
+                  emptyMessage={
+                    snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
+                  }
+                />
+              </box>
+            )}
+            {showsPane ? (
+              <DetailPane
+                row={selectedRow}
+                errors={snapshot.fileErrors}
+                palette={palette}
+                width={paneWidth}
+              />
+            ) : null}
+          </box>
+        ) : null}
+      </box>
+      <StatusLine
+        view={viewLabels[snapshot.view]}
+        text={statusOf(snapshot, strayCount)}
+        helpKeys={helpKeys}
+        palette={palette}
+      />
+      {snapshot.overlay.kind === 'help' ? (
+        <HelpOverlay
+          bindings={bindings}
+          palette={palette}
+          height={height}
+          helpWindow={helpWindowOf(bindings, snapshot, height, width)}
+          top={snapshot.overlay.top}
         />
       ) : null}
-      <text wrapMode="none" truncate height={1}>
-        {singleLine(status)}
-      </text>
+      {snapshot.overlay.kind === 'messages' ? (
+        <MessageOverlay
+          messageWindow={messageWindowOf(snapshot.messages, width, messagesHeightOf(height))}
+          palette={palette}
+          height={messagesHeightOf(height)}
+          top={snapshot.overlay.top}
+        />
+      ) : null}
     </box>
   );
 };
 
-export const App = ({ effects, keymap, onQuit }: AppProps): ReactNode => (
+export const App = ({ session, keymap, onQuit, bindings }: AppProps): ReactNode => (
   <KeymapProvider keymap={keymap}>
-    <Screen effects={effects} onQuit={onQuit} />
+    <Screen session={session} onQuit={onQuit} bindings={bindings} />
   </KeymapProvider>
 );

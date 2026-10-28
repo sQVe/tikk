@@ -12,6 +12,7 @@ import { createEffects, watchStore } from '../src/index.ts';
 import { invariant } from '../src/invariant.ts';
 import { startTerminal } from '../src/terminal.tsx';
 import type { TerminalEffects } from '../src/terminal.tsx';
+import { createTuiSession, defaultBindings } from '../src/tui/tui.tsx';
 import { createCliFixture, waitForBackgroundSync, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 import { createFakeGh } from './fakeGh.ts';
@@ -75,6 +76,7 @@ const testEffects = (setup: Setup, handlers: Map<string, Handler>, exits: number
     },
     exit: (code) => exits.push(code),
     printError: () => undefined,
+    createSession: createTuiSession,
   };
 
   return effects;
@@ -113,7 +115,7 @@ const start = async (cliEffects: CliEffects): Promise<Started> => {
 
   await act(async () => {
     await startTerminal(
-      { needs, watch: watchStore(cli().storePath) },
+      { needs, watch: watchStore(cli().storePath), bindings: defaultBindings, notices: [] },
       testEffects(setup, handlers, exits),
     );
   });

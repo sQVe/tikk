@@ -74,7 +74,7 @@ it('shows a failed tree read and recovers on a successful store refresh', async 
     },
   );
 
-  await press('tab');
+  await press('s');
 
   expect(setup.captureCharFrame()).toContain('Tree read failed.');
   expect(selectedLine()).toBeUndefined();
@@ -127,7 +127,7 @@ it('reloads the loaded tree when the store changes', async () => {
     groups,
   );
 
-  await press('tab');
+  await press('s');
 
   const [group] = groups;
 
@@ -190,7 +190,7 @@ it('keeps the selected tree row across reloads that insert and then remove rows'
     groups,
   );
 
-  await press('tab');
+  await press('s');
   expect(selectedLine()).toContain('Plan title');
 
   groups.unshift({
@@ -280,7 +280,7 @@ it('opens the tree row on screen when e arrives in the commit of a reload that r
     groups,
   );
 
-  await press('tab');
+  await press('s');
   await press('j');
   expect(selectedLine()).toContain('Slice title');
 

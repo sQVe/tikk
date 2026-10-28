@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 
 import type { NeedView, TreeGroup } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
-import { App } from './tui.tsx';
-import type { AppProps } from './tui.tsx';
+import { App, catalog, createTuiSession, defaultBindings } from './tui.tsx';
+import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
 
 type Setup = Awaited<ReturnType<typeof testRender>>;
 
@@ -20,7 +20,8 @@ interface CommitProbeControls {
 export interface TuiFixture {
   setup: Setup;
   edited: string[];
-  press: (key: string) => Promise<void>;
+  quits: () => number;
+  press: (key: string, modifiers?: { ctrl: boolean }) => Promise<void>;
   storeChanged: () => Promise<void>;
   selectedLine: () => string | undefined;
   pressAtNextCommit: (...keys: string[]) => void;
@@ -74,6 +75,15 @@ const demoId = (raw: string): NeedView['id'] => {
   return raw;
 };
 
+// The label of a command as the catalog defines it, so tests track rewording of the label.
+export const commandLabel = (id: string): string => {
+  const command = catalog.find((candidate) => candidate.id === id);
+
+  invariant(command !== undefined, `The catalog has no ${id} command.`);
+
+  return command.label;
+};
+
 export const needView = (index: number, title: string): NeedView => ({
   id: demoId(`demo-${firstDemoNumber + index}`),
   title,
@@ -110,10 +120,13 @@ export const createTuiFixture = async (
   size: { width: number; height: number },
   problems: string[] = [],
   groups: TreeGroup[] = [],
-  overrides: Partial<AppProps['effects']> = {},
+  overrides: Partial<TuiEffects> = {},
+  bindings: BindingTable = defaultBindings,
+  notices: string[] = [],
 ): Promise<TuiFixture> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
+  let quitCount = 0;
 
   const probe: CommitProbeControls = {
     setup: undefined,
@@ -128,7 +141,7 @@ export const createTuiFixture = async (
     message,
   }));
 
-  const effects: AppProps['effects'] = {
+  const effects: TuiEffects = {
     load: () => {
       const loaded = Promise.resolve({
         ok: true as const,
@@ -150,6 +163,7 @@ export const createTuiFixture = async (
         return result;
       });
     },
+    loadErrors: () => Promise.resolve([]),
     edit: (rawId) => {
       edited.push(rawId);
 
@@ -161,16 +175,30 @@ export const createTuiFixture = async (
 
       return () => changeListeners.delete(listener);
     },
+    notices,
     ...overrides,
   };
 
+  const session = createTuiSession(effects);
+
   const setup = await act(() =>
-    testRender(<WithKeymap effects={effects} onQuit={() => undefined} probe={probe} />, size),
+    testRender(
+      <WithKeymap
+        session={session}
+        bindings={bindings}
+        onQuit={() => {
+          quitCount += 1;
+        }}
+        probe={probe}
+      />,
+      size,
+    ),
   );
 
   probe.setup = setup;
 
   const cleanup = (): void => {
+    session.stop();
     changeListeners.clear();
     probe.keysAtCommit.splice(0);
 
@@ -195,14 +223,12 @@ export const createTuiFixture = async (
     }
   }
 
-  const press = async (key: string): Promise<void> => {
+  const press = async (key: string, modifiers?: { ctrl: boolean }): Promise<void> => {
     await act(async () => {
       if (key === 'up' || key === 'down') {
         setup.mockInput.pressArrow(key);
-      } else if (key === 'tab') {
-        setup.mockInput.pressTab();
       } else {
-        setup.mockInput.pressKey(key);
+        setup.mockInput.pressKey(key, modifiers);
       }
 
       await Bun.sleep(keySettleMilliseconds);
@@ -239,5 +265,14 @@ export const createTuiFixture = async (
     probe.keysAtCommit.push(...keys);
   };
 
-  return { setup, edited, press, storeChanged, selectedLine, pressAtNextCommit, cleanup };
+  return {
+    setup,
+    edited,
+    quits: () => quitCount,
+    press,
+    storeChanged,
+    selectedLine,
+    pressAtNextCommit,
+    cleanup,
+  };
 };

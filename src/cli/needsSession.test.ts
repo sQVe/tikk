@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import type { TicketId } from '../ticket/ticket.ts';
 import {
   makeEffects,
   makeFact,
@@ -218,6 +219,87 @@ it('runs one load at a time, so a second load starts only after the first settle
   expect(ghCalls.length).toBeGreaterThan(1);
 });
 
+it('lists the ticket files that failed to parse once the pending load settles', async () => {
+  const errors = [{ path: 'tickets/demo-3467.md', message: 'Front matter is invalid.' }];
+
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact],
+    errors,
+  });
+
+  const gh = Promise.withResolvers<undefined>();
+  let ghCalls = 0;
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: async () => {
+      ghCalls += 1;
+      await gh.promise;
+
+      return { ok: false, reason: { message: 'gh is offline.' } };
+    },
+  });
+
+  const opened = await openNeedsSession(fakeEffects.effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const loading = opened.value.load();
+  let listed: { path: string; message: string; id: string | null }[] | undefined;
+
+  const listing = (async () => {
+    listed = await opened.value.loadErrors();
+  })();
+
+  await waitFor(() => ghCalls > 0);
+  await Bun.sleep(30);
+
+  expect(listed).toBeUndefined();
+
+  gh.resolve(undefined);
+  await Promise.all([loading, listing]);
+  await opened.value.close();
+
+  expect(listed).toEqual([
+    { path: 'tickets/demo-3467.md', message: 'Front matter is invalid.', id: null },
+  ]);
+});
+
+it('tags each file error with the ID of the ticket at its exact path, or null when none has that path', async () => {
+  const exactPath = '/store/demo/demo-3467-slug.md';
+  const prefixPath = '/store/demo/demo-3467-abcd-broken.md';
+
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    errors: [
+      { path: exactPath, message: 'Front matter is invalid.' },
+      { path: prefixPath, message: 'Front matter is invalid.' },
+    ],
+  });
+
+  const opened = await openNeedsSession(makeEffects({ session: fakeSession }).effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const listed = await opened.value.loadErrors();
+
+  await opened.value.close();
+
+  expect(listed).toEqual([
+    { path: exactPath, message: 'Front matter is invalid.', id: 'demo-3467' as TicketId },
+    { path: prefixPath, message: 'Front matter is invalid.', id: null },
+  ]);
+});
+
 it('opens the editor on the ticket file and waits for it before it closes', async () => {
   const target = makeTicket('demo-3467');
   const fakeSession = makeSession({ tickets: [target] });
@@ -391,4 +473,35 @@ it('stops the editor of a pending edit when the session closes', async () => {
   expect(signals[0]?.aborted).toBe(true);
   expect((await editing).ok).toBe(false);
   expect(fakeSession.disposed()).toBe(true);
+});
+
+it('tags a file error with the ID of an archived ticket at its path', async () => {
+  const archivedPath = '/store/demo/demo-3468-slug.md';
+  const slice = makeKindTicket('demo-3468', 'slice');
+
+  const archived = {
+    ...slice,
+    frontMatter: { ...slice.frontMatter, archived: '2026-10-01' },
+  };
+
+  const fakeSession = makeSession({
+    tickets: [archived],
+    errors: [{ path: archivedPath, message: 'Front matter is invalid.' }],
+  });
+
+  const opened = await openNeedsSession(makeEffects({ session: fakeSession }).effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const listed = await opened.value.loadErrors();
+
+  await opened.value.close();
+
+  expect(listed).toEqual([
+    { path: archivedPath, message: 'Front matter is invalid.', id: 'demo-3468' as TicketId },
+  ]);
 });

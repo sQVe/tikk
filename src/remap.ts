@@ -1,0 +1,259 @@
+import { stringifyKeySequence } from '@opentui/keymap';
+import { createTestKeymap } from '@opentui/keymap/testing';
+
+import type { ConfigSettings } from './config.ts';
+import type { Result } from './result.ts';
+import type { Binding, BindingTable, Command, CommandScope, KeyChoice } from './tui/tui.tsx';
+import {
+  catalog,
+  commandScopes,
+  defaultBindings,
+  defaultChoiceOf,
+  emptyBindingTable,
+  expandBindings,
+  readableKeyOf,
+  scopesActiveWith,
+} from './tui/tui.tsx';
+
+type ConfigKeys = Record<string, string[]>;
+
+type ConfigKeymap = ReturnType<typeof createTestKeymap>['keymap'];
+
+type StrokesOf = (key: string) => readonly string[];
+
+type Remapped = Result<{ bindings: BindingTable; notices: string[] }, string>;
+
+type Pair = [Binding, Binding];
+
+interface Resolution {
+  surviving: BindingTable;
+  notices: string[];
+}
+
+export interface ConfigLoad {
+  bindings: BindingTable;
+  messages: string[];
+}
+
+const ctrlC = 'ctrl+c';
+
+const strokesIn = (keymap: ConfigKeymap, key: string): string[] => {
+  try {
+    return keymap.parseKeySequence(key).map((part) => stringifyKeySequence([part]));
+  } catch {
+    return [];
+  }
+};
+
+const parsedStrokesOf = (keymap: ConfigKeymap): StrokesOf => {
+  const cache = new Map<string, readonly string[]>();
+
+  return (key) => {
+    const cached = cache.get(key);
+
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const strokes = strokesIn(keymap, key);
+
+    cache.set(key, strokes);
+
+    return strokes;
+  };
+};
+
+const relatedStrokes = (first: readonly string[], second: readonly string[]): boolean => {
+  const shared = Math.min(first.length, second.length);
+
+  return first.slice(0, shared).join(' ') === second.slice(0, shared).join(' ');
+};
+
+const commandIdsText = (): string => [...new Set(catalog.map((command) => command.id))].join(', ');
+
+const usesCtrlC = (strokes: readonly string[]): boolean =>
+  strokes.some((stroke) => stroke.split(' ').includes(ctrlC));
+
+const isWholeQuitKey = (id: string, key: string): boolean => id === 'quit' && key === ctrlC;
+
+const checkEntry = (
+  id: string,
+  key: string,
+  strokesOf: StrokesOf,
+  path: string,
+): string | undefined => {
+  const strokes = strokesOf(key);
+
+  if (strokes.length === 0) {
+    return `${path}: keys.${id} "${key}" is not a key the keymap can read.`;
+  }
+
+  if (usesCtrlC(strokes) && !isWholeQuitKey(id, key)) {
+    return `${path}: keys.${id} "${key}" uses Ctrl+C. Only quit may use Ctrl+C, and only as the whole key.`;
+  }
+
+  return undefined;
+};
+
+const checkEntries = (keys: ConfigKeys, strokesOf: StrokesOf, path: string): string | undefined => {
+  for (const [id, entries] of Object.entries(keys)) {
+    if (!catalog.some((command) => command.id === id)) {
+      return `${path}: keys.${id} is not a command id. Command ids: ${commandIdsText()}.`;
+    }
+
+    for (const key of entries) {
+      const problem = checkEntry(id, key, strokesOf, path);
+
+      if (problem !== undefined) {
+        return problem;
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const choicesOf = (keys: ConfigKeys, command: Command, strokesOf: StrokesOf): KeyChoice[] => {
+  const configured = keys[command.id];
+
+  if (configured === undefined) {
+    return command.keys.map((key) => defaultChoiceOf(command, key));
+  }
+
+  const uniqueKeys = [...new Set(configured)];
+
+  const exitsSequence = command.keysDuringSequence !== undefined;
+
+  const choices: KeyChoice[] = uniqueKeys.map((key) => ({
+    key,
+    user: true,
+    sequenceExit: exitsSequence && strokesOf(key).length === 1,
+  }));
+
+  if (command.id === 'quit' && !uniqueKeys.includes(ctrlC)) {
+    choices.push(defaultChoiceOf(command, ctrlC));
+  }
+
+  return choices;
+};
+
+const layersOf = (first: Binding, second: Binding): string =>
+  first.scope === second.scope
+    ? `the ${first.scope} layer`
+    : `the ${first.scope} and ${second.scope} layers`;
+
+const clashMessage = (first: Binding, second: Binding, path: string): string => {
+  const shownFirst = `keys.${first.command.id} "${first.key}"`;
+  const shownSecond = `keys.${second.command.id} "${second.key}"`;
+
+  return `${path}: ${shownFirst} and ${shownSecond} clash in ${layersOf(first, second)}. Give one of them another key.`;
+};
+
+// The loser is the default that a user key displaces in the scope where the two meet.
+const noticeOf = (winner: Binding, loser: Binding): string =>
+  `Key "${winner.key}" of ${winner.command.id} replaces the default "${readableKeyOf(loser.key)}" of ${loser.command.id} in the ${loser.scope} layer.`;
+
+const withinScopePairs = (bindings: readonly Binding[]): Pair[] =>
+  bindings.flatMap((first, index) =>
+    bindings.slice(index + 1).map((second): Pair => [first, second]),
+  );
+
+const pairsBetween = (table: BindingTable, first: CommandScope, second: CommandScope): Pair[] => {
+  if (first === second) {
+    return withinScopePairs(table[first]);
+  }
+
+  if (!scopesActiveWith(first).includes(second)) {
+    return [];
+  }
+
+  return table[first].flatMap((a) => table[second].map((b): Pair => [a, b]));
+};
+
+// Every pair of bindings that can be active in the same state, so a user key is checked against
+// the defaults of each scope that is active with its own scope.
+const activePairsOf = (table: BindingTable): Pair[] =>
+  commandScopes.flatMap((first, index) =>
+    commandScopes.slice(index).flatMap((second) => pairsBetween(table, first, second)),
+  );
+
+const resolveBindings = (
+  table: BindingTable,
+  strokesOf: StrokesOf,
+  path: string,
+): Result<Resolution, string> => {
+  const displaced = new Set<Binding>();
+  const notices: string[] = [];
+
+  for (const [first, second] of activePairsOf(table)) {
+    if (!relatedStrokes(strokesOf(first.key), strokesOf(second.key))) {
+      continue;
+    }
+
+    if (first.user && second.user) {
+      return { ok: false, reason: clashMessage(first, second, path) };
+    }
+
+    const [winner, loser] = first.user ? [first, second] : [second, first];
+
+    if (winner.user) {
+      displaced.add(loser);
+      notices.push(noticeOf(winner, loser));
+    }
+  }
+
+  const surviving = emptyBindingTable();
+
+  for (const scope of commandScopes) {
+    surviving[scope] = table[scope].filter((binding) => !displaced.has(binding));
+  }
+
+  return { ok: true, value: { surviving, notices } };
+};
+
+const remapBindings = (keys: ConfigKeys, path: string, keymap: ConfigKeymap): Remapped => {
+  const strokesOf = parsedStrokesOf(keymap);
+  const problem = checkEntries(keys, strokesOf, path);
+
+  if (problem !== undefined) {
+    return { ok: false, reason: problem };
+  }
+
+  const expanded = expandBindings((command) => choicesOf(keys, command, strokesOf));
+  const resolved = resolveBindings(expanded, strokesOf, path);
+
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason };
+  }
+
+  return {
+    ok: true,
+    value: { bindings: resolved.value.surviving, notices: [...new Set(resolved.value.notices)] },
+  };
+};
+
+const defaultsWith = (message: string): ConfigLoad => ({
+  bindings: defaultBindings,
+  messages: [message],
+});
+
+// Only the terminal path calls this, so the catalog and the keymap load there and nowhere else.
+export const loadBindings = (
+  settings: Result<ConfigSettings, string>,
+  path: string,
+): ConfigLoad => {
+  if (!settings.ok) {
+    return defaultsWith(settings.reason);
+  }
+
+  const harness = createTestKeymap({ defaultKeys: true });
+  const remapped = remapBindings(settings.value.keys, path, harness.keymap);
+
+  harness.cleanup();
+
+  if (!remapped.ok) {
+    return defaultsWith(remapped.reason);
+  }
+
+  return { bindings: remapped.value.bindings, messages: remapped.value.notices };
+};

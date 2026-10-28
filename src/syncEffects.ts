@@ -124,7 +124,7 @@ export const createSyncEffects = (
   | 'mergeFetched'
 > => {
   const listAliases: SyncFunctions['listAliases'] = async () => {
-    const machine = await resolveMachine(projectEffects);
+    const machine = resolveMachine(projectEffects);
 
     if (!machine.ok) {
       return [];
@@ -172,7 +172,7 @@ export const createSyncEffects = (
     unlink: (path) => unlink(path),
     randomIdSuffix: () => newIdSuffix(),
     appendAlias: async (alias) => {
-      const machine = await resolveMachine(projectEffects);
+      const machine = resolveMachine(projectEffects);
 
       if (!machine.ok) {
         return { ok: false, reason: { message: machine.reason.message } };
