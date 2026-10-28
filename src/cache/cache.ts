@@ -164,8 +164,8 @@ export class TicketCache implements Disposable {
     return readResult(() => findTicketPath(this.#database, id));
   }
 
-  isIdShared(id: TicketId): boolean {
-    return isIdShared(this.#database, id);
+  isIdShared(id: TicketId): Result<boolean, CacheQueryFailure> {
+    return readValue(() => isIdShared(this.#database, id));
   }
 
   listTickets(options: ListTicketsOptions): Result<CachedTicket[], CacheQueryFailure> {
@@ -188,8 +188,8 @@ export class TicketCache implements Disposable {
     return readResult(() => listStateFacts(this.#database, ticketIds));
   }
 
-  aliasDestinations(): Result<TicketId[], FactDamage> {
-    return listAliasDestinations(this.#database);
+  aliasDestinations(): Result<TicketId[], FactDamage | CacheQueryFailure> {
+    return readResult(() => listAliasDestinations(this.#database));
   }
 
   listArchiveFacts(): Result<Fact[], FactDamage | CacheQueryFailure> {

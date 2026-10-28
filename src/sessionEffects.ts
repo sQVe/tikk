@@ -83,8 +83,14 @@ const listTicketFolderFiles = async (
 const checkIdUnshared = (
   cache: TicketCache,
   id: TicketId,
-): ReturnType<CliSession['checkIdUnshared']> =>
-  cache.isIdShared(id)
+): ReturnType<CliSession['checkIdUnshared']> => {
+  const shared = cache.isIdShared(id);
+
+  if (!shared.ok) {
+    return { ok: false, reason: { kind: 'failed', message: shared.reason.message } };
+  }
+
+  return shared.value
     ? {
         ok: false,
         reason: {
@@ -93,6 +99,7 @@ const checkIdUnshared = (
         },
       }
     : { ok: true, value: undefined };
+};
 
 const sessionFor = (
   store: Store,

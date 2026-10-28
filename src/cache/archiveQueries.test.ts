@@ -278,12 +278,12 @@ it('answers yes when an alias moves the canceled status that makes a task due', 
 
   invariant(archived.ok, 'The archive facts must decode.');
 
-  const due = findArchiveDue(cache.listTicketOutlines(), archived.value, now);
+  const due = findArchiveDue(okValueOf(cache.listTicketOutlines()), archived.value, now);
   const rules = due.archive.length > 0 || due.statusFacts.length > 0;
 
   expect(rules).toBe(true);
 
-  expect({ precheck: cache.mayHaveArchiveWork(now), rules }).toEqual({
+  expect({ precheck: okValueOf(cache.mayHaveArchiveWork(now)), rules }).toEqual({
     precheck: true,
     rules: true,
   });

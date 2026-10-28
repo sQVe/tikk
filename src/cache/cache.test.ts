@@ -714,6 +714,42 @@ it('reports a fact query that stays busy as failed, not as damaged', async () =>
   }
 });
 
+it('reports a shared-ID check that stays busy as failed', async () => {
+  await seedOneTicket();
+
+  using cache = openTestCache(databasePath, 10);
+
+  const holder = lockDatabase(databasePath);
+  const busy = cache.isIdShared(tikkId());
+
+  holder.run('ROLLBACK');
+  holder.close();
+
+  expect(busy.ok).toBe(false);
+
+  if (!busy.ok) {
+    expect(busy.reason.kind).toBe('failed');
+  }
+});
+
+it('reports an alias destination query that stays busy as failed', async () => {
+  await seedOneTicket();
+
+  using cache = openTestCache(databasePath, 10);
+
+  const holder = lockDatabase(databasePath);
+  const busy = cache.aliasDestinations();
+
+  holder.run('ROLLBACK');
+  holder.close();
+
+  expect(busy.ok).toBe(false);
+
+  if (!busy.ok) {
+    expect(busy.reason.kind).toBe('failed');
+  }
+});
+
 const oldAndNewIds = () => {
   const oldId = parseTicketId('tikk-3a4b');
   const newId = parseTicketId('tikk-9fk4');
