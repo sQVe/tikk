@@ -1,4 +1,4 @@
-import { validateFact } from '../fact/fact.ts';
+import { criterionFingerprint, validateFact } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
@@ -126,17 +126,34 @@ const checkCitations = (slice: CliTicket, audit: AuditFact, facts: Fact[]): stri
   return undefined;
 };
 
+const withDefinitions = (slice: CliTicket, audit: AuditFact): AuditFact => {
+  const criteria = slice.frontMatter.criteria ?? [];
+
+  return {
+    ...audit,
+    verdicts: audit.verdicts.map((verdict) => {
+      const criterion = criteria.find((candidate) => candidate.id === verdict.criterion);
+
+      invariant(criterion !== undefined, 'checkCriteria should reject unknown criteria.');
+
+      return { ...verdict, definition: criterionFingerprint(criterion) };
+    }),
+  };
+};
+
 const appendAudit = async (
   input: CommandInput,
   slice: CliTicket,
-  audit: AuditFact,
+  unfingerprinted: AuditFact,
   machine: string,
 ): Promise<CommandResult> => {
-  const problem = checkCriteria(slice, audit);
+  const problem = checkCriteria(slice, unfingerprinted);
 
   if (problem !== undefined) {
     return invalidArguments(problem);
   }
+
+  const audit = withDefinitions(slice, unfingerprinted);
 
   const facts = await input.session.listFacts([slice.id]);
 

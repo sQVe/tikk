@@ -35,7 +35,9 @@ both. Each derived state shows the age of its oldest input. Items with stale fac
 
 `tikk audit <slice> --repository <owner/name> --head <sha> --base <sha> --change-hash <hash> --verdicts-file <path>`
 records one verdict for each criterion of the slice. An audit counts only when its repository and
-head match the PR at merge, and it has a `met` verdict for every current criterion.
+head match the PR at merge, and it has a `met` verdict for every current criterion. A verdict counts
+only for the criterion's current `check` and `expected` text, so an edit to either text voids it
+until a new audit runs.
 
 ## Consequences
 

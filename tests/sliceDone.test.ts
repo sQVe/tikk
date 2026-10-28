@@ -74,6 +74,12 @@ const createSlice = async (): Promise<string> => {
 
 const showSlice = (id: string): Promise<SliceShow> => cli().runJson<SliceShow>(['show', id]);
 
+const editSlice = async (id: string, change: string[]): Promise<void> => {
+  const { hash } = await cli().runJson<{ hash: string }>(['show', id]);
+
+  await cli().runJson(['edit', id, '--hash', hash, ...change]);
+};
+
 const auditAllMet = async (
   id: string,
   head: string,
@@ -134,6 +140,33 @@ it('shows the slice as done after an audit that meets every criterion for the me
 
   expect(audited.state).toBe('done');
   expect((await showSlice(id)).state).toBe('done');
+});
+
+it('keeps the slice done after a title edit that keeps the audit', async () => {
+  const id = await createSlice();
+
+  await cli().runJson(['pr', 'link', id, prUrl]);
+  await auditAllMet(id, 'head1');
+
+  await editSlice(id, ['--title', 'Renamed slice']);
+
+  expect((await showSlice(id)).state).toBe('done');
+});
+
+it('voids the audit when a criterion expected text changes and keeps its ID', async () => {
+  const id = await createSlice();
+
+  await cli().runJson(['pr', 'link', id, prUrl]);
+  await auditAllMet(id, 'head1');
+
+  const criteria = await writeFixtureFile(
+    'reworded.yaml',
+    '- id: works\n  check: Run it\n  expected: It works faster\n',
+  );
+
+  await editSlice(id, ['--criteria-file', criteria]);
+
+  expect((await showSlice(id)).state).toBe('mergedUnverified');
 });
 
 it('keeps the slice unverified when the audit is for another head', async () => {

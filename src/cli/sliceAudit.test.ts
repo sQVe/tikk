@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import { criterionFingerprint } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import {
   failureOf,
@@ -113,6 +114,26 @@ it('appends one audit fact and shows the slice as done', async () => {
       { criterion: 'second', verdict: 'met', evidence: 'Test passes' },
     ],
   });
+});
+
+it('stores the fingerprint of each criterion text that the verdict judged', async () => {
+  const { appends } = await audit(fullArguments);
+  const verdicts = appends[0]?.fact.kind === 'audit' ? appends[0].fact.verdicts : [];
+
+  expect(verdicts).toEqual([
+    {
+      criterion: 'first',
+      verdict: 'met',
+      evidence: 'Test passes',
+      definition: criterionFingerprint({ check: 'Run it', expected: 'First works' }),
+    },
+    {
+      criterion: 'second',
+      verdict: 'met',
+      evidence: 'Test passes',
+      definition: criterionFingerprint({ check: 'Run it', expected: 'Second works' }),
+    },
+  ]);
 });
 
 it.each(['--repository', '--head', '--base', '--change-hash', '--verdicts-file'])(

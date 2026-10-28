@@ -121,6 +121,10 @@ const auditVerdictSchema = z.strictObject({
   verdict: z.enum(['met', 'not-met', 'not-run', 'deferred']),
   evidence: z.string().min(1),
   qa: z.array(z.string().min(1)).min(1).optional(),
+  definition: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 });
 
 const auditSchema = z.strictObject({

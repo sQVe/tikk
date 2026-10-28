@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { buildSliceIndex, deriveSliceState } from './fact.ts';
+import { buildSliceIndex, criterionFingerprint, deriveSliceState } from './fact.ts';
 import type { Fact } from './fact.ts';
 import { makeFact, makeTicket, now, instructionId } from './factHarness.ts';
 
@@ -143,11 +143,86 @@ describe('deriveSliceState', () => {
       changeHash: 'hash1',
       head: 'aaa',
       base: 'main',
-      verdicts: [{ criterion: 'works', verdict: 'met', evidence: 'Ran it.' }],
+      verdicts: [
+        {
+          criterion: 'works',
+          verdict: 'met',
+          evidence: 'Ran it.',
+          definition: criterionFingerprint({ check: 'Run it.', expected: 'It works.' }),
+        },
+      ],
     });
 
     expect(derive(audited, [audited], [prFact(), audit], now).state).toBe('done');
     expect(derive(grown, [grown], [prFact(), audit], now).state).toBe('mergedUnverified');
+  });
+
+  it('derives done from an audit whose verdict fingerprints the current criterion text', () => {
+    const current = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [{ id: 'works', check: 'Run it.', expected: 'It works fast.' }],
+    });
+
+    const audit = makeFact('3469', {
+      kind: 'audit',
+      repository: 'sqve/tikk',
+      changeHash: 'hash1',
+      head: 'aaa',
+      base: 'main',
+      verdicts: [
+        {
+          criterion: 'works',
+          verdict: 'met',
+          evidence: 'Ran it.',
+          definition: criterionFingerprint({ check: 'Run it.', expected: 'It works fast.' }),
+        },
+      ],
+    });
+
+    expect(derive(current, [current], [prFact(), audit], now).state).toBe('done');
+  });
+
+  it('derives mergedUnverified from a verdict whose fingerprint is for an older criterion text', () => {
+    const current = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [{ id: 'works', check: 'Run it.', expected: 'It works fast.' }],
+    });
+
+    const audit = makeFact('3469', {
+      kind: 'audit',
+      repository: 'sqve/tikk',
+      changeHash: 'hash1',
+      head: 'aaa',
+      base: 'main',
+      verdicts: [
+        {
+          criterion: 'works',
+          verdict: 'met',
+          evidence: 'Ran it.',
+          definition: criterionFingerprint({ check: 'Run it.', expected: 'It works.' }),
+        },
+      ],
+    });
+
+    expect(derive(current, [current], [prFact(), audit], now).state).toBe('mergedUnverified');
+  });
+
+  it('derives mergedUnverified from a met verdict with no fingerprint', () => {
+    const current = makeTicket('3469', {
+      kind: 'slice',
+      criteria: [{ id: 'works', check: 'Run it.', expected: 'It works.' }],
+    });
+
+    const audit = makeFact('3469', {
+      kind: 'audit',
+      repository: 'sqve/tikk',
+      changeHash: 'hash1',
+      head: 'aaa',
+      base: 'main',
+      verdicts: [{ criterion: 'works', verdict: 'met', evidence: 'Ran it.' }],
+    });
+
+    expect(derive(current, [current], [prFact(), audit], now).state).toBe('mergedUnverified');
   });
 
   it('derives mergedUnverified from an all-met audit for another repository with the same head', () => {

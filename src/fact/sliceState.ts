@@ -1,4 +1,5 @@
 import type { TicketFrontMatter, TicketId } from '../ticket/ticket.ts';
+import { criterionFingerprint } from './criterionFingerprint.ts';
 import type { Fact } from './factLine.ts';
 import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
 
@@ -44,6 +45,7 @@ export interface SliceIndex {
 
 type PrFact = Extract<Fact, { kind: 'pr' }>;
 type AuditFact = Extract<Fact, { kind: 'audit' }>;
+type SliceCriterion = NonNullable<SliceTicket['frontMatter']['criteria']>[number];
 
 const millisecondsPerSecond = 1000;
 
@@ -74,15 +76,22 @@ const decidingAudit = (own: Fact[], pr: PrFact): AuditFact | undefined =>
     .filter(isAuditFact)
     .findLast((fact) => fact.head === pr.head && fact.repository === pr.repository);
 
-const meetsEveryCriterion = (slice: SliceTicket, audit: AuditFact): boolean => {
-  const met = new Set(
-    audit.verdicts.filter((entry) => entry.verdict === 'met').map((entry) => entry.criterion),
-  );
+const meetsCriterion = (criterion: SliceCriterion, audit: AuditFact): boolean => {
+  const definition = criterionFingerprint(criterion);
 
+  return audit.verdicts.some(
+    (entry) =>
+      entry.criterion === criterion.id &&
+      entry.verdict === 'met' &&
+      entry.definition === definition,
+  );
+};
+
+const meetsEveryCriterion = (slice: SliceTicket, audit: AuditFact): boolean => {
   const allVerdictsMet = audit.verdicts.every((entry) => entry.verdict === 'met');
   const criteria = slice.frontMatter.criteria ?? [];
 
-  return allVerdictsMet && criteria.every((criterion) => met.has(criterion.id));
+  return allVerdictsMet && criteria.every((criterion) => meetsCriterion(criterion, audit));
 };
 
 const isStarted = (state: string): boolean =>
