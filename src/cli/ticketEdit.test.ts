@@ -607,6 +607,46 @@ it('writes the covers list of an instruction whose names the parent has', async 
   expect(fakeSession.writes[0]?.text).toContain('works');
 });
 
+// The tree check reads the parent first, so only a later read can reach the covers check.
+const parentReadFailsAfterFirstRead = (): SessionOptions => {
+  let parentReads = 0;
+
+  return {
+    ...criteriaTickets,
+    overrides: {
+      getTicket: (id) => {
+        if (id === criteriaInstruction.id) {
+          return { ok: true, value: criteriaInstruction };
+        }
+
+        parentReads += 1;
+
+        if (parentReads === 1) {
+          return { ok: true, value: criteriaSlice };
+        }
+
+        return { ok: false, reason: { kind: 'failed', message: 'The cache is busy.' } };
+      },
+    },
+  };
+};
+
+it('reports a storeError when the covers parent cannot be read again and writes nothing', async () => {
+  const { fakeSession, result } = edit(
+    ['demo-3467', '--hash', 'h', '--covers', 'works'],
+    true,
+    parentReadFailsAfterFirstRead(),
+  );
+
+  expect(failureOf(await result)).toMatchObject({
+    code: 'storeError',
+    message: 'The cache is busy.',
+  });
+
+  expect(fakeSession.writes).toEqual([]);
+  expect(fakeSession.appends).toEqual([]);
+});
+
 const otherCriterion = { id: 'other', check: 'bun test', expected: 'It also passes.' };
 
 const twoCriteriaSlice = makeTicket('demo-3468', {

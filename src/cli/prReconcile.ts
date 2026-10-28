@@ -83,17 +83,17 @@ const isStillSelected = (change: Change, index: SliceIndex): boolean => {
 const readCurrentIndex = async (
   session: CliSession,
   sliceIds: TicketId[],
-): Promise<Result<SliceIndex, { message: string }>> => {
+): Promise<Result<SliceIndex, CliFailure>> => {
   const refreshed = await session.refresh();
 
   if (!refreshed.ok) {
-    return refreshed;
+    return { ok: false, reason: { code: 'storeError', message: refreshed.reason.message } };
   }
 
   const facts = await session.listStateFacts(sliceIds);
 
   if (!facts.ok) {
-    return facts;
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
   return { ok: true, value: buildSliceIndex([], facts.value) };
@@ -104,16 +104,14 @@ const appendSelected = async (
   changes: Change[],
   machine: string,
   outcome: ReconcileOutcome,
-): Promise<void> => {
+): Promise<Result<undefined, CliFailure>> => {
   const index = await readCurrentIndex(
     session,
     changes.map((change) => change.ticket),
   );
 
   if (!index.ok) {
-    outcome.problems.push(globalProblem(index.reason.message));
-
-    return;
+    return index;
   }
 
   const selected = changes.filter((change) => isStillSelected(change, index.value));
@@ -134,20 +132,22 @@ const appendSelected = async (
       outcome.problems.push(changeProblem(change, appended.reason.message));
     }
   }
+
+  return { ok: true, value: undefined };
 };
 
 const appendChanges = async (
   input: ReconcileInput,
   changes: Change[],
   outcome: ReconcileOutcome,
-): Promise<void> => {
+): Promise<Result<undefined, CliFailure>> => {
   const { effects, session } = input;
   const machine = await effects.resolveMachine();
 
   if (!machine.ok) {
     outcome.problems.push(globalProblem(machine.reason.message));
 
-    return;
+    return { ok: true, value: undefined };
   }
 
   const lock = await session.lockStore();
@@ -155,11 +155,11 @@ const appendChanges = async (
   if (!lock.ok) {
     outcome.problems.push(globalProblem(lock.reason.message));
 
-    return;
+    return { ok: true, value: undefined };
   }
 
   try {
-    await appendSelected(input, changes, machine.value, outcome);
+    return await appendSelected(input, changes, machine.value, outcome);
   } finally {
     await lock.value.release();
   }
@@ -238,15 +238,17 @@ export const reconcilePullRequests = async (
   const facts = await input.session.listStateFacts(slices);
 
   if (!facts.ok) {
-    outcome.problems.push(globalProblem(facts.reason.message));
-
-    return { ok: true, value: outcome };
+    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
   }
 
   const changes = await collectChanges(input, slices, facts.value, outcome);
 
   if (changes.length > 0) {
-    await appendChanges(input, changes, outcome);
+    const appended = await appendChanges(input, changes, outcome);
+
+    if (!appended.ok) {
+      return appended;
+    }
   }
 
   if (outcome.updated.length > 0) {
