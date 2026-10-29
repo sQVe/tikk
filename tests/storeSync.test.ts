@@ -22,6 +22,7 @@ import { invariant } from '../src/invariant.ts';
 import { createOpenSession } from '../src/sessionEffects.ts';
 import { nodeTicketFiles } from '../src/store/storeHarness.ts';
 import { ticketFolderPath } from '../src/store/storePaths.ts';
+import type { SyncDelays } from '../src/sync/sync.ts';
 import { parseProjectName, parseTicketId } from '../src/ticket/ticket.ts';
 import { createCliFixture, createCloneFixtures, waitForBackgroundSync } from './cliFixture.ts';
 import type { CliFixture, CloneFixtures } from './cliFixture.ts';
@@ -55,6 +56,9 @@ interface AliasSyncReport extends SyncReport {
 // Each test runs the CLI and Git in child processes, which takes seconds on a busy machine.
 setDefaultTimeout(30_000);
 
+// Short sync delays keep each test from waiting out the default debounce and settle windows.
+const syncDelays: SyncDelays = { debounceMilliseconds: 1000, settleMilliseconds: 1000 };
+
 let clones: CloneFixtures | undefined;
 let single: CliFixture | undefined;
 
@@ -71,8 +75,8 @@ const singleFixture = (): CliFixture => {
 };
 
 beforeEach(async () => {
-  clones = await createCloneFixtures('tikk-sync-');
-  single = await createCliFixture('tikk-sync-single-');
+  clones = await createCloneFixtures('tikk-sync-', syncDelays);
+  single = await createCliFixture('tikk-sync-single-', { syncDelays });
 });
 
 afterEach(async () => {
@@ -604,7 +608,7 @@ const touchFile = async (path: string): Promise<void> => {
   await utimes(path, now, now);
 };
 
-const settleWaitMilliseconds = 2100;
+const settleWaitMilliseconds = syncDelays.settleMilliseconds + 100;
 
 const commitOn = async (root: string, date: string): Promise<void> => {
   const child = Bun.spawn(
@@ -964,7 +968,12 @@ it('an ID clash keeps pre-clash facts with a renamed ticket that is not committe
 
 it('a second ID clash keeps the renamed ticket claim and log with it, and the clone that kept the intermediate ID shows none', async () => {
   const { first, second, remotePath } = clonePair();
-  const third = await createCliFixture('tikk-sync-third-', { machine: 'third', remotePath });
+
+  const third = await createCliFixture('tikk-sync-third-', {
+    machine: 'third',
+    remotePath,
+    syncDelays,
+  });
 
   try {
     await first.runChecked(['init', '--remote', remotePath]);
@@ -2027,7 +2036,12 @@ it('a retry after a failed clash commit moves a fact written on the other clone 
 
 it('a second clash after a failed alias commit moves the renamed ticket later facts to it', async () => {
   const { first, second, remotePath } = clonePair();
-  const third = await createCliFixture('tikk-sync-third-', { machine: 'third', remotePath });
+
+  const third = await createCliFixture('tikk-sync-third-', {
+    machine: 'third',
+    remotePath,
+    syncDelays,
+  });
 
   try {
     await first.runChecked(['init', '--remote', remotePath]);
@@ -2322,7 +2336,7 @@ it('a ticket written just before the background sync reaches the remote with no 
 
   await first.runChecked(['init', '--remote', remotePath]);
   await createInstructionIn(first, 'Early instruction');
-  await Bun.sleep(2200);
+  await Bun.sleep(syncDelays.debounceMilliseconds / 2);
 
   const late = await createInstructionIn(first, 'Late instruction');
   const lateRelative = relative(first.storePath, late.path);

@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { invariant } from '../src/invariant.ts';
+import { syncDelayEnvironment } from '../src/sync/sync.ts';
+import type { SyncDelays } from '../src/sync/sync.ts';
 
 export interface CliRun {
   exitCode: number;
@@ -16,6 +18,8 @@ export interface CliFixtureOptions {
   remotePath?: string;
   // A folder that goes first on PATH, such as one that holds a fake gh.
   pathPrefix?: string;
+  // Replaces the default sync delays for every CLI run, including its background sync.
+  syncDelays?: SyncDelays | undefined;
 }
 
 export interface CliFixture {
@@ -90,6 +94,10 @@ export const createCliFixture = async (
       environment.PATH = `${options.pathPrefix}:${Bun.env.PATH ?? ''}`;
     }
 
+    if (options.syncDelays !== undefined) {
+      Object.assign(environment, syncDelayEnvironment(options.syncDelays));
+    }
+
     if (runOptions.path !== undefined) {
       environment.PATH = runOptions.path;
     }
@@ -157,13 +165,16 @@ export const createParentSlice = async (fixture: CliFixture): Promise<string> =>
 
 // Two clients with their own homes and machine names, which share one bare remote in the first
 // home. Neither store exists until a test runs `tikk init`.
-export const createCloneFixtures = async (prefix: string): Promise<CloneFixtures> => {
-  const first = await createCliFixture(prefix, { machine: 'first' });
+export const createCloneFixtures = async (
+  prefix: string,
+  syncDelays?: SyncDelays,
+): Promise<CloneFixtures> => {
+  const first = await createCliFixture(prefix, { machine: 'first', syncDelays });
   const remotePath = first.remotePath;
 
   await runGit(['init', '--bare', '--initial-branch=main', remotePath]);
 
-  const second = await createCliFixture(prefix, { machine: 'second', remotePath });
+  const second = await createCliFixture(prefix, { machine: 'second', remotePath, syncDelays });
 
   const cleanup = async (): Promise<void> => {
     await second.cleanup();

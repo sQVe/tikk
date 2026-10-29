@@ -31,10 +31,12 @@ import {
   runBackgroundSync,
   scheduleSync,
   settlingPaths,
+  syncDelayEnvironment,
   syncStore,
 } from './sync/sync.ts';
 import type {
   RemoteInitFunctions,
+  SyncDelays,
   SyncFunctions,
   SyncReason,
   SyncScheduleFunctions,
@@ -114,6 +116,7 @@ export const createSyncEffects = (
   storeRoot: string,
   initLocalStore: CliEffects['initStore'],
   projectEffects: ProjectEffects,
+  syncDelays: SyncDelays,
 ): Pick<
   CliEffects,
   | 'initRemoteStore'
@@ -157,6 +160,7 @@ export const createSyncEffects = (
   };
 
   const syncFunctions: SyncFunctions = {
+    settleMilliseconds: syncDelays.settleMilliseconds,
     runGit: runSyncGit,
     writeBlob,
     listAliases,
@@ -193,6 +197,7 @@ export const createSyncEffects = (
   const startBackground = (): number | undefined => {
     const child = Bun.spawn(backgroundCommand(), {
       detached: true,
+      env: { ...Bun.env, ...syncDelayEnvironment(syncDelays) },
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',
@@ -214,6 +219,7 @@ export const createSyncEffects = (
     randomSuffix: storeLock.randomSuffix,
     isProcessAlive: storeLock.isProcessAlive,
     sleep: storeLock.sleep,
+    debounceMilliseconds: syncDelays.debounceMilliseconds,
     startBackground,
   };
 

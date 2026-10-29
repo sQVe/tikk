@@ -61,6 +61,7 @@ the commit in its row.
 - [0014: Git history is undo, with no event sourcing for intent](./0014-git-history-as-undo.md)
 - [0015: Observed facts in per-machine JSONL](./0015-facts-in-per-machine-jsonl.md)
 - [0017: A disposable SQLite cache](./0017-disposable-sqlite-cache.md)
+- [0028: Sync delays come from environment variables](./0028-sync-delay-environment.md)
 
 ### Work model
 

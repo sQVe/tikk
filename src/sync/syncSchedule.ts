@@ -13,11 +13,11 @@ export interface SyncScheduleFunctions {
   randomSuffix: () => string;
   isProcessAlive: (pid: number) => boolean;
   sleep: (milliseconds: number) => Promise<void>;
+  debounceMilliseconds: number;
   // Starts `tikk sync --background` detached, and returns its PID, or `undefined` when it cannot start.
   startBackground: () => number | undefined;
 }
 
-const debounceMilliseconds = 3000;
 const runningPollMilliseconds = 100;
 const runningPollLimit = 600;
 
@@ -172,7 +172,7 @@ export const runBackgroundSync = async (
   root: string,
   sync: () => Promise<boolean>,
 ): Promise<void> => {
-  await functions.sleep(debounceMilliseconds);
+  await functions.sleep(functions.debounceMilliseconds);
   await removeOwnFile(functions, markerPath(root));
 
   const path = runningPath(root);

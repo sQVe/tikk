@@ -16,6 +16,8 @@ import type { Result } from './result.ts';
 import { createOpenSession } from './sessionEffects.ts';
 import { initStore, resolveStoreRoot } from './store/store.ts';
 import { storeFiles } from './storeEffects.ts';
+import { defaultSyncDelays, parseSyncDelays } from './sync/sync.ts';
+import type { SyncDelayFailure, SyncDelays } from './sync/sync.ts';
 import { createSyncEffects } from './syncEffects.ts';
 
 type EditorCleanup = Result<undefined, { kind: 'cleanup'; message: string }>;
@@ -256,7 +258,11 @@ const runEditor: CliEffects['runEditor'] = async (path, signal) => {
 
 const itemIdBytes = 6;
 
-export const createEffects = (storeRoot: string, cachePath: string): CliEffects => {
+export const createEffects = (
+  storeRoot: string,
+  cachePath: string,
+  syncDelays: SyncDelays = defaultSyncDelays,
+): CliEffects => {
   const initLocalStore = async (): Promise<
     Result<{ store: string; created: boolean }, { message: string }>
   > => {
@@ -277,7 +283,7 @@ export const createEffects = (storeRoot: string, cachePath: string): CliEffects 
     hostName: hostname(),
   };
 
-  const syncEffects = createSyncEffects(storeRoot, initLocalStore, projectEffects);
+  const syncEffects = createSyncEffects(storeRoot, initLocalStore, projectEffects, syncDelays);
 
   return {
     initStore: initLocalStore,
@@ -349,17 +355,34 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
 const startsTerminal = (args: string[]): boolean =>
   args.length === 0 && process.stdin.isTTY && process.stdout.isTTY;
 
+// Reports a rejected sync delay the way runCli reports a failed command.
+const rejectSyncDelays = (args: string[], reason: SyncDelayFailure): number => {
+  if (args.includes('--json')) {
+    process.stdout.write(`${JSON.stringify({ error: reason })}\n`);
+  } else {
+    process.stderr.write(`${reason.message}\n`);
+  }
+
+  return 1;
+};
+
 // The mutation test runner imports this file into its test process, where the CLI must not run.
 if (import.meta.main) {
   const args = process.argv.slice(2);
-  const effects = createEffects(defaultStoreRoot, defaultCachePath);
+  const syncDelays = parseSyncDelays(Bun.env);
 
-  if (startsTerminal(args)) {
-    await runTerminal(effects);
+  if (!syncDelays.ok) {
+    process.exitCode = rejectSyncDelays(args, syncDelays.reason);
   } else {
-    process.exitCode = await runCli(args, effects, {
-      stdout: (text) => process.stdout.write(text),
-      stderr: (text) => process.stderr.write(text),
-    });
+    const effects = createEffects(defaultStoreRoot, defaultCachePath, syncDelays.value);
+
+    if (startsTerminal(args)) {
+      await runTerminal(effects);
+    } else {
+      process.exitCode = await runCli(args, effects, {
+        stdout: (text) => process.stdout.write(text),
+        stderr: (text) => process.stderr.write(text),
+      });
+    }
   }
 }
