@@ -23,6 +23,7 @@ export interface SyncCommitFunctions {
   readFile: (path: string) => Promise<string>;
   readdir: (directory: string) => Promise<string[]>;
   now: () => number;
+  settleMilliseconds: number;
 }
 
 export interface SyncCommit {
@@ -31,7 +32,6 @@ export interface SyncCommit {
 }
 
 const storePathspecs = ['facts', 'logs', 'tickets', 'tikk.json', '.gitattributes'];
-const settleMilliseconds = 2000;
 const ticketPathSegments = 3;
 const emptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
@@ -110,7 +110,7 @@ const listChangedPaths = async (
 };
 
 // A hand edit may still be in progress, so a ticket file is committed only when it parses and has
-// not changed for two seconds. The age is read after the text, so an edit in between makes it fresh.
+// not changed for the settle delay (two seconds by default). The age is read after the text, so an edit in between makes it fresh.
 const isSettledText = async (
   functions: SyncCommitFunctions,
   root: string,
@@ -120,7 +120,7 @@ const isSettledText = async (
   try {
     const { mtimeMs } = await functions.stat(join(root, path));
 
-    return functions.now() - mtimeMs >= settleMilliseconds && parseTicketFile(text).ok;
+    return functions.now() - mtimeMs >= functions.settleMilliseconds && parseTicketFile(text).ok;
   } catch {
     return false;
   }

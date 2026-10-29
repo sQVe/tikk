@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import { defaultSyncDelays } from './syncDelays.ts';
 import { runBackgroundSync, scheduleSync } from './syncSchedule.ts';
 import type { SyncScheduleFunctions } from './syncSchedule.ts';
 
@@ -82,6 +83,7 @@ const makeFake = (options: FakeOptions = {}): Fake => {
 
       return Promise.resolve();
     },
+    debounceMilliseconds: defaultSyncDelays.debounceMilliseconds,
     startBackground: () => {
       startCount += 1;
 

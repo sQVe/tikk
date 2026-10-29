@@ -1,3 +1,6 @@
+export { defaultSyncDelays, parseSyncDelays, syncDelayEnvironment } from './syncDelays.ts';
+export type { SyncDelayFailure, SyncDelays } from './syncDelays.ts';
+
 export { settlingPaths } from './syncCommit.ts';
 export type { SyncReason } from './syncCommit.ts';
 

@@ -1,5 +1,6 @@
 import type { Result } from '../result.ts';
 import type { MovedFactReference } from './syncClashFacts.ts';
+import { defaultSyncDelays } from './syncDelays.ts';
 import type { RemoteInitFunctions } from './syncRemote.ts';
 
 type GitReply = Result<string, { message: string }>;
@@ -121,6 +122,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   let initCount = 0;
 
   const functions: RemoteInitFunctions = {
+    settleMilliseconds: defaultSyncDelays.settleMilliseconds,
     runGit: (args, signal) => {
       gitCalls.push({ args, signal: signal !== undefined, underLock: locked });
 
