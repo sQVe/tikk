@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
-import { buildSliceIndex, criterionFingerprint, deriveSliceState } from './fact.ts';
+import {
+  buildSliceIndex,
+  criterionFingerprint,
+  deriveShownSliceState,
+  deriveSliceState,
+} from './fact.ts';
 import type { Fact } from './fact.ts';
 import { makeFact, makeTicket, now, instructionId } from './factHarness.ts';
 
@@ -38,6 +43,29 @@ const derive = (
   facts: Parameters<typeof buildSliceIndex>[1],
   at: Date,
 ) => deriveSliceState(target, buildSliceIndex(tickets, facts), at);
+
+describe('deriveShownSliceState', () => {
+  const claim = makeFact('3478', {
+    kind: 'claim',
+    holder: 'agent',
+    leaseEnd: '2026-10-20T13:00:00.000Z',
+    at: '2026-10-20T11:00:00.000Z',
+  });
+
+  it('shows a draft slice its stored status, even when an instruction has started', () => {
+    const draft = makeTicket('3469', { kind: 'slice', status: 'draft' });
+    const index = buildSliceIndex([draft, instruction], [claim]);
+
+    expect(deriveShownSliceState(draft, index, now).state).toBe('draft');
+  });
+
+  it('shows an open slice its derived state', () => {
+    const open = makeTicket('3469', { kind: 'slice', status: 'open' });
+    const index = buildSliceIndex([open, instruction], [claim]);
+
+    expect(deriveShownSliceState(open, index, now).state).toBe('active');
+  });
+});
 
 describe('deriveSliceState', () => {
   it('derives mergedUnverified from a merged PR with no audit', () => {

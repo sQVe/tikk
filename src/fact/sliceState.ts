@@ -36,6 +36,12 @@ export interface SliceState {
   pr: SlicePr | null;
 }
 
+export type SliceShownStateName = SliceStateName | 'draft' | 'canceled';
+
+export interface ShownSliceState extends Omit<SliceState, 'state'> {
+  state: SliceShownStateName;
+}
+
 export interface SliceIndex {
   factsByTicket: Map<TicketId, Fact[]>;
   instructionsBySlice: Map<TicketId, SliceTicket[]>;
@@ -212,4 +218,20 @@ export const deriveSliceState = (slice: SliceTicket, index: SliceIndex, now: Dat
   const state = hasOpenWork ? 'flagged' : 'done';
 
   return pending(state, [pr.at, audit.at], now, open);
+};
+
+// A slice that is not open shows its stored status.
+export const deriveShownSliceState = (
+  slice: SliceTicket,
+  index: SliceIndex,
+  now: Date,
+): ShownSliceState => {
+  const derived = deriveSliceState(slice, index, now);
+  const { status } = slice.frontMatter;
+
+  if (status === 'open') {
+    return derived;
+  }
+
+  return { ...derived, state: status };
 };

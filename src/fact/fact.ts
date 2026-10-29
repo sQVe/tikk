@@ -16,10 +16,17 @@ export type { ProjectTree, TreeProject, TreeSlice, TreeStateName } from './planT
 export { selectReady } from './readyQueue.ts';
 export { selectTicketHistory } from './ticketHistory.ts';
 export { compareRank } from './rankOrder.ts';
-export { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
+
+export {
+  buildSliceIndex,
+  deriveShownSliceState,
+  deriveSliceState,
+  selectSlicePr,
+} from './sliceState.ts';
+
 export { derivePlanState } from './planState.ts';
 export type { PlanStateName } from './planState.ts';
-export type { SliceIndex, SliceState } from './sliceState.ts';
+export type { ShownSliceState, SliceIndex, SliceState } from './sliceState.ts';
 export { deriveInstructionState } from './instructionState.ts';
 
 export { latestSubmission, selectOpenQuestions, selectPassedUp } from './instructionItems.ts';

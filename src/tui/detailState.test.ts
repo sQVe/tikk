@@ -2,6 +2,8 @@ import { expect, it } from 'bun:test';
 
 import type { CliFailure, NeedView, TicketDetail } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
+import { createDetailLoader } from './detailState.ts';
+import type { LoadDetail } from './detailState.ts';
 import { needView, ticketDetail } from './tuiHarness.tsx';
 import { createTuiSession } from './tuiSession.ts';
 import type { TuiSession } from './tuiSession.ts';
@@ -186,6 +188,38 @@ it('shows the failure of a detail load', async () => {
   await settle();
 
   expect(fake.session.getSnapshot().detail.load).toEqual({ status: 'failed', message: 'Gone.' });
+});
+
+const publishedWhenLoadFails = async (load: LoadDetail): Promise<unknown[]> => {
+  const published: unknown[] = [];
+
+  const loader = createDetailLoader(load, (id, outcome) => {
+    published.push([id, outcome]);
+  });
+
+  loader.request('demo-3400');
+  await settle();
+  loader.stop();
+
+  return published;
+};
+
+it('shows the message of a detail load that rejects with an Error', async () => {
+  const published = await publishedWhenLoadFails(() =>
+    Promise.reject(new Error('The store is busy.')),
+  );
+
+  expect(published).toEqual([['demo-3400', { ok: false, reason: 'The store is busy.' }]]);
+});
+
+it('shows the fallback message when a detail load rejects with a non-Error', async () => {
+  const nonError: unknown = 'plain text';
+
+  const published = await publishedWhenLoadFails(async () => {
+    throw nonError;
+  });
+
+  expect(published).toEqual([['demo-3400', { ok: false, reason: 'The ticket did not load.' }]]);
 });
 
 it('publishes no detail that settles after stop', async () => {

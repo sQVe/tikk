@@ -5,12 +5,16 @@ import type { InstructionStateName, InstructionTicket } from './instructionState
 import { derivePlanState } from './planState.ts';
 import type { PlanStateName } from './planState.ts';
 import { compareRank } from './rankOrder.ts';
-import { buildSliceIndex, deriveSliceState, selectSlicePr } from './sliceState.ts';
-import type { SliceIndex, SliceStateName } from './sliceState.ts';
+import { buildSliceIndex, deriveShownSliceState, selectSlicePr } from './sliceState.ts';
+import type { SliceIndex, SliceShownStateName } from './sliceState.ts';
 
 type TaskStateName = 'open' | 'done';
 
-export type TreeStateName = PlanStateName | SliceStateName | InstructionStateName | TaskStateName;
+export type TreeStateName =
+  | PlanStateName
+  | SliceShownStateName
+  | InstructionStateName
+  | TaskStateName;
 
 interface TreeTask {
   id: TicketId;
@@ -27,7 +31,7 @@ interface TreeInstruction {
 export interface TreeSlice {
   id: TicketId;
   title: string;
-  state: SliceStateName;
+  state: SliceShownStateName;
   pr: number | null;
   tasks: TreeTask[];
   instructions: TreeInstruction[];
@@ -133,7 +137,7 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
   const treeSlice = (slice: InstructionTicket): TreeSlice => ({
     id: slice.id,
     title: slice.frontMatter.title,
-    state: deriveSliceState(slice, index, now).state,
+    state: deriveShownSliceState(slice, index, now).state,
     pr: selectSlicePr(slice.id, index)?.number ?? null,
     tasks: tasksOf(slice.id),
     instructions: (instructionsByParent.get(slice.id) ?? []).map(treeInstruction),

@@ -171,7 +171,7 @@ it('keeps the status of a draft slice', async () => {
     await show(['demo-3469'], [makeKindTicket('demo-3469', 'slice', 'draft')]),
   );
 
-  expect(output.json).not.toHaveProperty('pr');
+  expect(output.json).toMatchObject({ state: 'draft', pr: null });
   expect(output.text).toContain('demo-3469  draft');
 });
 

@@ -2,11 +2,11 @@ import {
   buildSliceIndex,
   deriveInstructionState,
   derivePlanState,
-  deriveSliceState,
+  deriveShownSliceState,
 } from '../fact/fact.ts';
 import type {
   PlanStateName,
-  SliceState,
+  ShownSliceState,
   InstructionClaim,
   InstructionRejection,
   InstructionState,
@@ -47,7 +47,7 @@ export interface InstructionView extends TicketView {
   rejection: InstructionRejection | null;
 }
 
-interface SliceView extends TicketView, SliceState {}
+interface SliceView extends TicketView, ShownSliceState {}
 
 interface PlanView extends TicketView {
   state: PlanStateName;
@@ -60,7 +60,7 @@ export interface TicketChild {
 }
 
 export type ShownState =
-  | { kind: 'slice'; derived: SliceState }
+  | { kind: 'slice'; derived: ShownSliceState }
   | { kind: 'instruction'; derived: InstructionState }
   | { kind: 'plan'; state: PlanStateName }
   | { kind: 'status'; state: CliTicket['frontMatter']['status'] };
@@ -178,7 +178,7 @@ const deriveSlice = async (
     return { ok: false, reason: storeError(facts.reason.message) };
   }
 
-  const derived = deriveSliceState(ticket, buildSliceIndex(tickets, facts.value), now);
+  const derived = deriveShownSliceState(ticket, buildSliceIndex(tickets, facts.value), now);
 
   return { ok: true, value: { kind: 'slice', derived } };
 };
@@ -223,7 +223,7 @@ export const deriveShownState = async (
 ): Promise<Result<ShownState, CliFailure>> => {
   const { kind, status } = ticket.frontMatter;
 
-  if (kind === 'slice' && status === 'open') {
+  if (kind === 'slice') {
     return deriveSlice(session, now, ticket);
   }
 
