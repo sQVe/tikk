@@ -7,6 +7,7 @@ import {
   noProjects,
   projectName,
   projectTree,
+  ticketDetail,
   ticketId,
 } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
@@ -179,6 +180,40 @@ it('opens the design of the selected plan with D and ignores D on a slice', asyn
   await press('D');
 
   expect(designEdited).toEqual(['demo-3401']);
+});
+
+it('does not run plan keys behind help while the full-screen detail of a plan is open', async () => {
+  const plan = ticketDetail(
+    'demo-3401',
+    { kind: 'plan', title: 'Plan title', state: 'open', parent: null },
+    { body: 'OVERVIEW-MARKER' },
+  );
+
+  const { designEdited, press, selectedLine, setup } = await mount(
+    [],
+    { width: 80, height: 44 },
+    [],
+    projectTree(),
+    { loadDetail: () => Promise.resolve({ ok: true, value: plan }) },
+  );
+
+  await press('s');
+  await press('j');
+  await press('j');
+
+  expect(selectedLine()).toContain('demo-3401');
+
+  await press('RETURN');
+
+  expect(setup.captureCharFrame()).toContain('OVERVIEW-MARKER');
+
+  await press('?');
+  await press('D');
+  await press(']');
+  await press('?');
+
+  expect(designEdited).toEqual([]);
+  expect(setup.captureCharFrame()).toContain('OVERVIEW-MARKER');
 });
 
 it('opens the design of a plan listed in the home view with D', async () => {

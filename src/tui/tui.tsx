@@ -109,7 +109,7 @@ const isScopeActiveIn = (scope: CommandScope, state: ActivityState): boolean => 
   const active: Record<CommandScope, boolean> = {
     global: true,
     list: state.overlay === 'none' && !state.detailOpen,
-    detail: state.detailOpen,
+    detail: state.overlay === 'none' && state.detailOpen,
     input: false,
     rank: false,
     visual: false,

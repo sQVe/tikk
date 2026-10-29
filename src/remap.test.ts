@@ -148,10 +148,9 @@ it('displaces a default key only in the layer where a config entry conflicts wit
 
   expect(keysOf(loaded.bindings, 'list', 'selectNext')).toEqual(['j', 'down']);
   expect(keysOf(loaded.bindings, 'help', 'selectNext')).toEqual(['down']);
-  expect(keysOf(loaded.bindings, 'detail', 'scrollDetailDown')).toEqual(['down']);
+  expect(keysOf(loaded.bindings, 'detail', 'scrollDetailDown')).toEqual(['j', 'down']);
 
   expect(loaded.messages).toEqual([
-    'Key "j" of closeHelp replaces the default "j" of scrollDetailDown in the detail layer.',
     'Key "j" of closeHelp replaces the default "j" of selectNext in the help layer.',
   ]);
 });
