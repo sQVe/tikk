@@ -26,5 +26,6 @@ export {
   collectTicketTree,
   findWaitCycle,
   groupTicketChildren,
+  isAllowedParentKind,
   type TicketLookup,
 } from './ticketTree.ts';

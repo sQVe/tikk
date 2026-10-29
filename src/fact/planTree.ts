@@ -1,3 +1,4 @@
+import { isAllowedParentKind } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
 import type { Fact } from './factLine.ts';
 import { deriveInstructionStateFromOwnFacts } from './instructionState.ts';
@@ -73,6 +74,13 @@ interface TreeInput {
 const isShown = (ticket: InstructionTicket): boolean =>
   ticket.frontMatter.archived === undefined && ticket.frontMatter.status !== 'canceled';
 
+const acceptsAsParent = (ticket: InstructionTicket, parent: InstructionTicket): boolean => {
+  const sameProject = parent.frontMatter.project === ticket.frontMatter.project;
+  const allowedKind = isAllowedParentKind(ticket.frontMatter.kind, parent.frontMatter.kind);
+
+  return sameProject && allowedKind;
+};
+
 const ofKind = (
   tickets: InstructionTicket[],
   kind: InstructionTicket['frontMatter']['kind'],
@@ -102,10 +110,10 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
   const shownById = new Map(shown.map((ticket) => [ticket.id, ticket]));
 
   const shownParentOf = (ticket: InstructionTicket): TicketId | undefined => {
-    const { parent, project } = ticket.frontMatter;
+    const { parent } = ticket.frontMatter;
     const found = parent === undefined ? undefined : shownById.get(parent);
 
-    return found?.frontMatter.project === project ? parent : undefined;
+    return found !== undefined && acceptsAsParent(ticket, found) ? parent : undefined;
   };
 
   const childrenByParent = (tickets: InstructionTicket[]) => Map.groupBy(tickets, shownParentOf);

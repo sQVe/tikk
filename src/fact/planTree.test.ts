@@ -313,3 +313,22 @@ it('derives states from the state tickets, and still lists every shown ticket', 
   expect(project?.slices[0]?.state).toBe('planned');
   expect(project?.slices[0]?.instructions.map((entry) => entry.id)).toEqual([instruction.id]);
 });
+
+it('shows a slice whose parent is a task as a root at plan depth', () => {
+  const task = makeTicket('333a', { kind: 'task', rank: 1 });
+  const slice = makeTicket('333b', { kind: 'slice', parent: '333a', rank: 2 });
+
+  const tree = treeOf([task, slice], [], now, me);
+
+  expect(tree.projects[0]?.inbox.map((entry) => entry.id)).toEqual([task.id]);
+  expect(tree.projects[0]?.slices.map((shown) => shown.id)).toEqual([slice.id]);
+});
+
+it('shows a plan whose parent is a plan as a plan root', () => {
+  const plan = makeTicket('333a', { kind: 'plan', rank: 1 });
+  const nestedPlan = makeTicket('333b', { kind: 'plan', parent: '333a', rank: 2 });
+
+  const tree = treeOf([plan, nestedPlan], [], now, me);
+
+  expect(tree.projects[0]?.plans.map((shown) => shown.id)).toEqual([plan.id, nestedPlan.id]);
+});

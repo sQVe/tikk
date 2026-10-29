@@ -29,6 +29,9 @@ const allowedParentKinds: Record<TicketKind, TicketKind[]> = {
   instruction: ['slice'],
 };
 
+export const isAllowedParentKind = (kind: TicketKind, parentKind: TicketKind): boolean =>
+  allowedParentKinds[kind].includes(parentKind);
+
 const fail = (message: string): { ok: false; reason: TreeFailure } => ({
   ok: false,
   reason: { message },
