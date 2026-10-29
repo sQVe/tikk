@@ -53,12 +53,12 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.2
+      # Throwaway ME-1017 timing run: mutate PR #32's changed lines with the ME-1017 setup.
+      - run: git checkout --detach origin/me-1017-measure-tree
       - run: bun install --frozen-lockfile
       - name: Find the merge base
         id: base
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: echo "sha=$(git merge-base HEAD "origin/${BASE_REF}")" >> "${GITHUB_OUTPUT}"
+        run: echo "sha=b9c0eb0" >> "${GITHUB_OUTPUT}"
       # The command runner reports the whole suite as one test, so Stryker cannot see a changed test.
       # The key must change with every file that can change a mutant's result.
       - name: Restore the incremental report
