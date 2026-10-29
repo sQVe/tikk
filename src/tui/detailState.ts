@@ -126,7 +126,6 @@ const readDetail = async (load: LoadDetail, id: string): Promise<DetailOutcome> 
   }
 };
 
-// Publishes only the newest request, and nothing after stop.
 export const createDetailLoader = (
   load: LoadDetail,
   publish: (id: string, outcome: DetailOutcome) => void,

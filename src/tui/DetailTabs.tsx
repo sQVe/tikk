@@ -138,7 +138,6 @@ const stripTextOf = (label: TabLabel): string =>
 const stripWidthOf = (labels: readonly TabLabel[]): number =>
   labels.reduce((total, label) => total + stripTextOf(label).length, 0);
 
-// Keeps the active label and adds neighbors, right first, while the strip fits the columns.
 export const tabStripOf = (labels: readonly TabLabel[], columns: number): TabLabel[] => {
   const active = labels.findIndex((label) => label.active);
   let first = Math.max(0, active);

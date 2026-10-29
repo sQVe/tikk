@@ -146,7 +146,6 @@ export const startTerminalTikk = (
       `"${text}" selected`,
     );
 
-  // The plan sits below its project row and the Inbox row of the current project.
   const selectPlan = async (text: string): Promise<void> => {
     type('s');
     await waitForScreen(text);

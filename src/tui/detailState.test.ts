@@ -32,7 +32,6 @@ const instructionDetail = (id: string): TicketDetail =>
     parent: null,
   });
 
-// Each detail load waits until the test resolves it, unless details answers it at once.
 const createFake = async (
   items: NeedView[],
   details: ReadonlyMap<string, TicketDetail> = new Map(),

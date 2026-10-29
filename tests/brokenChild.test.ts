@@ -28,7 +28,6 @@ const cli = (): CliFixture => {
 
 const showJson = (id: string): Promise<Shown> => cli().runJson<Shown>(['show', id]);
 
-// A planned slice whose one instruction is accepted, which makes the slice active.
 const createSliceWithAcceptedInstruction = async (): Promise<{ slice: string; child: string }> => {
   const criteria = join(cli().home, 'criteria.yaml');
 

@@ -50,7 +50,6 @@ const extraCriterion = '- id: extra\n  check: Run it again\n  expected: It still
 
 const showJson = (id: string): Promise<Shown> => cli().runJson<Shown>(['show', id]);
 
-// A plan whose only slice is merged and audited against the criterion it has now.
 const createAuditedPlan = async (): Promise<{ plan: string; slice: string }> => {
   const criteria = await writeFixtureFile('criteria.yaml', worksCriterion);
 

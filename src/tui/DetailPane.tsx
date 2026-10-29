@@ -11,7 +11,6 @@ import type { DetailFact, ListRow } from './rowList.tsx';
 
 const labelWidth = 8;
 
-// The columns the pane's left border and padding take from its width.
 export const detailPaneChromeColumns = 2;
 
 const FactRows = (props: { facts: readonly DetailFact[]; palette: Palette }): ReactNode => {

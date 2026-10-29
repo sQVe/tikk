@@ -16,7 +16,6 @@ const cli = (): CliFixture => {
   return fixture;
 };
 
-// Writes the path it receives, so the test can read which file the editor was given.
 const recordingEditor = (recordPath: string): string =>
   `#!/bin/sh\nprintf '%s' "$1" > '${recordPath}'\n`;
 

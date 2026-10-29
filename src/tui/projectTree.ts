@@ -165,7 +165,6 @@ const nodesOf = (tree: ProjectTree, needs: readonly NeedView[]): TreeNode[] => {
 const allNodes = (nodes: readonly TreeNode[]): TreeNode[] =>
   nodes.flatMap((node) => [node, ...allNodes(node.children)]);
 
-// A node folds by default only the first time it shows, so a reload keeps the folds the user made.
 export const foldsAfterLoad = (folds: FoldState, tree: ProjectTree): FoldState => {
   const added = allNodes(nodesOf(tree, [])).filter((node) => !folds.seen.has(node.key));
 

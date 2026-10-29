@@ -10,5 +10,4 @@ const entryOf = (fact: Fact): string[] => {
   return detail === '' ? [header] : [header, ...detail.split(lineBreak).map((line) => `  ${line}`)];
 };
 
-// The facts arrive newest first from the same query as `tikk history`.
 export const activityLinesOf = (facts: readonly Fact[]): string[] => facts.flatMap(entryOf);

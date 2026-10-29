@@ -17,7 +17,6 @@ const projectName = (raw: string): ProjectName => {
 
 const me = projectName('me');
 
-// Every ticket parses in these fixtures, so all of them count toward states.
 const treeOf = (
   tickets: InstructionTicket[],
   facts: Fact[],

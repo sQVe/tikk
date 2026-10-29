@@ -26,7 +26,6 @@ const cli = (): CliFixture => {
 
 const textOf = (fact: Fact): string => ('text' in fact && fact.text !== undefined ? fact.text : '');
 
-// The two progress logs share one time, so their order comes from the order of the fact file.
 const appendFacts = async (ticket: string): Promise<void> => {
   const lines = [
     {
@@ -102,7 +101,6 @@ it('lists the same facts in the same order on the Activity tab as tikk history -
   invariant(opened.ok, 'The needs session should open.');
   needs = opened.value;
 
-  // The TUI loads the home list before it loads a detail, and that load refreshes the store.
   const reading = await needs.load();
 
   invariant(reading.ok, 'The needs list should load.');

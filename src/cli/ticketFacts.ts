@@ -4,8 +4,6 @@ import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import type { CliFailure, CliSession } from './cliEffects.ts';
 
-// `tikk history` and the TUI Activity tab both read through this, so they list the same facts
-// in the same order.
 export const readTicketFacts = async (
   session: CliSession,
   id: TicketId,

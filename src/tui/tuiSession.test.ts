@@ -244,7 +244,6 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
       return gate.promise;
     },
     loadErrors: async () => ({ ok: true, value: listings.shift() ?? [] }),
-    // Holds the detail load, so only the list loads notify.
     loadDetail: () => Promise.withResolvers<never>().promise,
   });
 

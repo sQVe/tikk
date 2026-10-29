@@ -24,7 +24,6 @@ interface ListRowBase {
   marks?: RowMarks;
 }
 
-// A group row has no ticket, so the detail pane shows its facts instead of a ticket window.
 interface GroupListRow extends ListRowBase {
   id: null;
   facts: readonly DetailFact[];

@@ -126,7 +126,6 @@ it('cuts a ten-line question to four lines and expands it with x down to ten bod
   expect(tabBarIndex(collapsed) - headerEnd - 1).toBe(4);
   expect(collapsed.join('\n')).toContain('QUESTION-LINE-1');
   expect(collapsed.join('\n')).not.toContain('QUESTION-LINE-10');
-  // The reason line and the first two question lines show, so the cut hides eight lines.
   expect(collapsed.join('\n')).toMatch(/\+8 more/);
   expect(bodyRowsOf(collapsed)).toBeGreaterThanOrEqual(10);
 
@@ -333,7 +332,6 @@ it('shows the active Links label in the tab strip of the side pane at 90 by 24',
 
   const stripOf = () => linesOf(mounted).find((line) => line.includes('Criteria 1')) ?? '';
 
-  // The pane has 30 columns, so the strip keeps whole labels that fit beside the active one.
   expect(stripOf()).toMatch(/\[Overview\] Criteria 1 \s*$/);
 
   await mounted.press('[');

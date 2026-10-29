@@ -114,7 +114,6 @@ export const needView = (index: number, title: string): NeedView => ({
 
 export const noProjects = (): ProjectTree => ({ current: null, projects: [] });
 
-// One current project with a plan, an active slice with a PR, and one instruction.
 export const projectTree = (): ProjectTree => ({
   current: projectName('demo'),
   projects: [
@@ -253,7 +252,6 @@ const treeDetailsOf = (tree: ProjectTree): Map<string, TicketDetail> => {
   return entries;
 };
 
-// Reads the detail of a ticket from the tree, or of a home item as an open instruction.
 const demoLoadDetail =
   (items: readonly NeedView[], tree: ProjectTree): TuiEffects['loadDetail'] =>
   (rawId) => {

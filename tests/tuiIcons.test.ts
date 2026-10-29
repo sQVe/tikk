@@ -7,7 +7,6 @@ import { createCliFixture } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
 import { screenOf, startTerminalTikk, writeEditorScript } from './tuiTerminalFixture.ts';
 
-// The Nerd Font glyph for a plan, and the Unicode glyph the default set uses for it.
 const nerdFontPlanIcon = '\uf279';
 const unicodePlanIcon = '◆';
 
@@ -35,7 +34,6 @@ afterEach(async () => {
   await fixture?.cleanup();
 });
 
-// Starts the TUI, opens the Projects view, and returns the screen line that shows the plan.
 const planLineInProjects = async (): Promise<string> => {
   const plan = await cli().runJson<{ id: string }>(['new', 'plan', 'aaaa', '--status', 'draft']);
   const editorPath = await writeEditorScript(cli().home, '#!/bin/sh\n');

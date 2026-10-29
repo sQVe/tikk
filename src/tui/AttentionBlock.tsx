@@ -32,7 +32,6 @@ export const attentionLinesOf = (
     .flatMap((need) => needLinesOf(need, icons))
     .flatMap((line) => wrapCells(line, Math.max(1, columns)));
 
-// The `+n more` line counts toward the limit.
 export const cutAttention = (lines: readonly string[], limit: number): string[] => {
   if (lines.length <= limit) {
     return [...lines];

@@ -97,7 +97,6 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
   const { shown, index, now } = input;
   const shownById = new Map(shown.map((ticket) => [ticket.id, ticket]));
 
-  // A parent in another project counts as not shown, so every ticket stays in its own project.
   const shownParentOf = (ticket: InstructionTicket): TicketId | undefined => {
     const { parent, project } = ticket.frontMatter;
     const found = parent === undefined ? undefined : shownById.get(parent);
@@ -161,7 +160,6 @@ const buildProjects = (input: TreeInput): ((name: ProjectName) => TreeProject) =
   };
 };
 
-// Every shown ticket becomes a row. Only stateTickets count toward a slice or plan state.
 export const buildProjectTree = (
   tickets: InstructionTicket[],
   facts: Fact[],

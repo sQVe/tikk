@@ -46,7 +46,6 @@ const unicodeIcons: IconSet = {
   attention: '!',
 };
 
-// Nerd Font glyphs sit in the Private Use Area, so they are written as escapes.
 const nerdFontIcons: IconSet = {
   kinds: {
     project: '\uf1b2',

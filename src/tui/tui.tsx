@@ -300,7 +300,6 @@ const scrollDetail = (
   });
 };
 
-// A reload can shorten the body, so the stored top is clamped to what the pane can show.
 const useClampedTop = (
   session: TuiSession,
   top: number,

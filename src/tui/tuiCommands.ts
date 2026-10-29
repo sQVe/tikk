@@ -176,8 +176,6 @@ const paneCommands: readonly PaneCommand[] = [
   },
 ];
 
-// The panel shows beside the list or full-screen, so its commands work in both scopes. Help lists
-// each once.
 const paneCommandsIn = (scope: CommandScope): Command[] =>
   paneCommands.map((command) =>
     Object.assign({ scope }, command, scope === 'list' ? {} : { hiddenFromHelp: true as const }),

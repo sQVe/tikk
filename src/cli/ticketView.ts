@@ -142,8 +142,6 @@ export const storeFailure = (message: string): CommandResult => ({
 
 const storeError = (message: string): CliFailure => ({ code: 'storeError', message });
 
-// A file that no longer parses keeps its old front matter in the cache, so it must not count
-// toward a state. The Projects tree uses the same rule.
 export const parsedTickets = (tickets: CliTicket[]): CliTicket[] =>
   tickets.filter((ticket) => ticket.error === null);
 
