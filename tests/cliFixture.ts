@@ -18,7 +18,6 @@ export interface CliFixtureOptions {
   remotePath?: string;
   // A folder that goes first on PATH, such as one that holds a fake gh.
   pathPrefix?: string;
-  // Replaces the default sync delays for every CLI run, including its background sync.
   syncDelays?: SyncDelays | undefined;
 }
 
