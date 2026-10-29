@@ -20,7 +20,7 @@ import {
   tryStoreLock,
   writeTicketFile,
 } from './store/store.ts';
-import type { Store } from './store/store.ts';
+import type { Store, TicketFileFunctions } from './store/store.ts';
 import {
   factFiles,
   logFiles,
@@ -80,10 +80,35 @@ const listTicketFolderFiles = async (
   }
 };
 
-const sessionFor = (store: Store, cache: TicketCache): CliSession => {
+const checkIdUnshared = (
+  cache: TicketCache,
+  id: TicketId,
+): ReturnType<CliSession['checkIdUnshared']> => {
+  const shared = cache.isIdShared(id);
+
+  if (!shared.ok) {
+    return { ok: false, reason: { kind: 'failed', message: shared.reason.message } };
+  }
+
+  return shared.value
+    ? {
+        ok: false,
+        reason: {
+          kind: 'shared',
+          message: `Ticket ID ${id} is shared by two ticket files. Run tikk sync to resolve it.`,
+        },
+      }
+    : { ok: true, value: undefined };
+};
+
+const sessionFor = (
+  store: Store,
+  cache: TicketCache,
+  fileFunctions: TicketFileFunctions,
+): CliSession => {
   const files: CacheFiles = {
-    listTicketFiles: () => listTicketFiles(ticketFiles, store),
-    readTicketFile: (path) => readTicketFile(ticketFiles, path),
+    listTicketFiles: () => listTicketFiles(fileFunctions, store),
+    readTicketFile: (path) => readTicketFile(fileFunctions, path),
     listFactFiles: () => listFactFiles(factFiles, store),
     readFactFile: (path, fromByte) => readFactFile(factFiles, path, fromByte),
   };
@@ -105,16 +130,39 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
     listArchiveFacts: () => listFactsRecovering(cache, files, () => cache.listArchiveFacts()),
     lockStore: () => acquireStoreLock(storeLock, store),
     tryLockStore: () => tryStoreLock(storeLock, store),
-    appendFact: (machine, fact) => appendFact(factFiles, store, machine, fact),
+    checkIdUnshared: (id) => checkIdUnshared(cache, id),
+    appendFact: async (machine, fact) => {
+      const unshared = checkIdUnshared(cache, fact.ticket);
+
+      if (!unshared.ok) {
+        return unshared;
+      }
+
+      return appendFact(factFiles, store, machine, fact);
+    },
     storeLog: async (text) => {
       const stored = await storeLog(logFiles, store, text);
 
       return stored.ok ? stored : { ok: false, reason: { message: stored.reason.message } };
     },
-    createTicketFile: (project, title, text) =>
-      createTicketFile(ticketFiles, store, project, title, text),
+    createTicketFile: async (project, title, text) => {
+      const destinations = cache.aliasDestinations();
+
+      if (!destinations.ok) {
+        return { ok: false, reason: { kind: 'failed', message: destinations.reason.message } };
+      }
+
+      return createTicketFile(
+        fileFunctions,
+        store,
+        project,
+        title,
+        text,
+        new Set(destinations.value),
+      );
+    },
     writeTicketFile: (path, expectedHash, text) =>
-      writeTicketFile(ticketFiles, path, expectedHash, text),
+      writeTicketFile(fileFunctions, path, expectedHash, text),
     [Symbol.dispose]: () => {
       cache[Symbol.dispose]();
     },
@@ -122,7 +170,11 @@ const sessionFor = (store: Store, cache: TicketCache): CliSession => {
 };
 
 export const createOpenSession =
-  (storeRoot: string, cachePath: string): CliEffects['openSession'] =>
+  (
+    storeRoot: string,
+    cachePath: string,
+    fileFunctions: TicketFileFunctions = ticketFiles,
+  ): CliEffects['openSession'] =>
   async () => {
     const store = await openStore(storeRoot, storeFiles);
 
@@ -133,7 +185,7 @@ export const createOpenSession =
         return { ok: false, reason: { code: 'storeError', message: cache.reason.message } };
       }
 
-      return { ok: true, value: sessionFor(store.value, cache.value) };
+      return { ok: true, value: sessionFor(store.value, cache.value, fileFunctions) };
     }
 
     const code = openFailureCode(storeRoot);

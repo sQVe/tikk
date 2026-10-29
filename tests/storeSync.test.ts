@@ -15,10 +15,15 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
+import { openCache } from '../src/cache/cache.ts';
+import { parseFactLine } from '../src/fact/fact.ts';
+import type { Fact } from '../src/fact/fact.ts';
 import { invariant } from '../src/invariant.ts';
+import { createOpenSession } from '../src/sessionEffects.ts';
+import { nodeTicketFiles } from '../src/store/storeHarness.ts';
 import { ticketFolderPath } from '../src/store/storePaths.ts';
 import { parseProjectName, parseTicketId } from '../src/ticket/ticket.ts';
-import { createCliFixture, createCloneFixtures } from './cliFixture.ts';
+import { createCliFixture, createCloneFixtures, waitForBackgroundSync } from './cliFixture.ts';
 import type { CliFixture, CloneFixtures } from './cliFixture.ts';
 
 interface ShownInstruction {
@@ -565,6 +570,1667 @@ it('an ID clash found at merge gives the newer ticket a new ID and writes an ali
   expect(facts).toContain('"from":"demo-aaaa"');
   expect(facts).toContain(`"ticket":"${alias?.to}"`);
   expect(await gitOutput(second.storePath, ['status', '--porcelain'])).toBe('');
+});
+
+const removeOrigin = (fixture: CliFixture): Promise<string> =>
+  gitOutput(fixture.storePath, ['remote', 'remove', 'origin']);
+
+const addOrigin = (fixture: CliFixture, remotePath: string): Promise<string> =>
+  gitOutput(fixture.storePath, ['remote', 'add', 'origin', remotePath]);
+
+const writeClashTicket = async (
+  fixture: CliFixture,
+  id: string,
+  slug: string,
+  parentId: string,
+  aged = true,
+  kind = 'instruction',
+): Promise<void> => {
+  const directory = join(fixture.storePath, 'tickets', 'demo');
+  const path = join(directory, `${id}-${slug}.md`);
+  const text = `---\nkind: ${kind}\ntitle: ${slug}\nproject: demo\nparent: ${parentId}\nblockedBy: []\nstatus: open\n---\n`;
+
+  await mkdir(directory, { recursive: true });
+  await writeFile(path, text);
+
+  if (aged) {
+    await ageFile(path);
+  }
+};
+
+const touchFile = async (path: string): Promise<void> => {
+  const now = new Date();
+
+  await utimes(path, now, now);
+};
+
+const settleWaitMilliseconds = 2100;
+
+const commitOn = async (root: string, date: string): Promise<void> => {
+  const child = Bun.spawn(
+    [
+      'git',
+      '-C',
+      root,
+      '-c',
+      'user.name=tikk',
+      '-c',
+      'user.email=tikk@example.test',
+      'commit',
+      '--quiet',
+      '-m',
+      'Offline ticket',
+    ],
+    {
+      env: { ...Bun.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date },
+      stdout: 'ignore',
+      stderr: 'ignore',
+    },
+  );
+
+  const exitCode = await child.exited;
+
+  invariant(exitCode === 0, `git commit exited with ${exitCode}.`);
+};
+
+const aliasLinesOf = (facts: string): string[] =>
+  facts.split('\n').filter((line) => line.includes('"kind":"alias"'));
+
+const runJsonError = (stdout: string): string | undefined => {
+  const parsed = JSON.parse(stdout) as { error?: { code?: string } };
+
+  return parsed.error?.code;
+};
+
+const gitShowOrEmpty = async (root: string, object: string): Promise<string> => {
+  const child = Bun.spawn(['git', '-C', root, 'show', object], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+
+  const [stdout, exitCode] = await Promise.all([child.stdout.text(), child.exited]);
+
+  return exitCode === 0 ? stdout : '';
+};
+
+const readFactFiles = async (fixture: CliFixture): Promise<Map<string, string>> => {
+  const factsDirectory = join(fixture.storePath, 'facts');
+  const entries = await readdir(factsDirectory, { recursive: true });
+  const files = entries.filter((entry) => entry.endsWith('.jsonl'));
+
+  const texts = await Promise.all(
+    files.map(async (file) => [file, await readFile(join(factsDirectory, file), 'utf8')] as const),
+  );
+
+  return new Map(texts);
+};
+
+const kindOf = (line: string): string => {
+  const parsed = parseFactLine(line);
+
+  invariant(parsed.ok, 'The appended line should be a fact.');
+
+  return parsed.value.kind;
+};
+
+const expectOnlyAliasAppended = (before: Map<string, string>, after: Map<string, string>): void => {
+  const appended = [...before].flatMap(([file, text]) => {
+    const current = after.get(file) ?? '';
+
+    expect(current.startsWith(text)).toBe(true);
+
+    return current
+      .slice(text.length)
+      .split('\n')
+      .filter((line) => line !== '');
+  });
+
+  expect(appended.map(kindOf)).toEqual(['alias']);
+};
+
+const listTicketFacts = (fixture: CliFixture, id: string): Fact[] => {
+  const ticketId = parseTicketId(id);
+  const opened = openCache(join(fixture.home, '.cache', 'tikk', 'index.db'));
+
+  invariant(ticketId.ok && opened.ok, 'The cache and the ticket ID should open.');
+
+  const listed = opened.value.listFacts([ticketId.value]);
+
+  opened.value[Symbol.dispose]();
+  invariant(listed.ok, 'The cached facts should read.');
+
+  return listed.value;
+};
+
+const logTexts = (facts: Fact[]): string[] =>
+  facts.flatMap((fact) => (fact.kind === 'log' ? [fact.text] : []));
+
+const dropCache = async (fixture: CliFixture): Promise<void> => {
+  await waitForBackgroundSync(fixture.storePath);
+  await rm(join(fixture.home, '.cache', 'tikk'), { recursive: true, force: true });
+};
+
+it('an ID clash keeps pre-clash facts with the renamed ticket on both clones', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  const question = await second.runJson<{ item: string }>([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'question',
+    '--text',
+    'B question before clash',
+  ]);
+
+  await second.runChecked(['pass-up', 'demo-aaaa', '--item', question.item]);
+  await second.runChecked(['sync']);
+
+  const before = await readFactFiles(second);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+  expect(alias.path).toContain('-second.md');
+
+  await first.runChecked(['sync']);
+  expectOnlyAliasAppended(before, await readFactFiles(second));
+
+  const expectBClashFacts = async (fixture: CliFixture): Promise<void> => {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+    const old = await fixture.runJson<ShownInstruction>(['show', 'demo-aaaa']);
+    const ready = await fixture.runJson<{ candidates: { id: string }[] }>(['ready']);
+    const needs = await fixture.runJson<{ items: { id: string; reason: string }[] }>(['needs']);
+
+    expect(renamed.claim?.holder).toBe('second-agent');
+    expect(old.claim).toBeNull();
+    expect(ready.candidates.map((candidate) => candidate.id)).toContain('demo-aaaa');
+    expect(ready.candidates.map((candidate) => candidate.id)).not.toContain(alias.to);
+    expect(needs.items.map((item) => [item.id, item.reason])).toEqual([[alias.to, 'question']]);
+
+    const renamedFacts = listTicketFacts(fixture, alias.to);
+
+    expect(renamedFacts.filter((fact) => fact.kind !== 'alias').map((fact) => fact.kind)).toEqual([
+      'claim',
+      'log',
+      'log',
+      'passUp',
+    ]);
+
+    expect(logTexts(renamedFacts)).toEqual(['B progress before clash', 'B question before clash']);
+    expect(listTicketFacts(fixture, 'demo-aaaa')).toEqual([]);
+  };
+
+  for (const fixture of [second, first]) {
+    await expectBClashFacts(fixture);
+  }
+
+  for (const fixture of [second, first]) {
+    await dropCache(fixture);
+    await expectBClashFacts(fixture);
+  }
+});
+
+it("an ID clash that renames the other clone's ticket moves that clone's pre-clash facts with it", async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['claim', 'demo-aaaa', '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress before clash',
+  ]);
+
+  await first.runChecked(['sync']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  await second.runChecked(['sync']);
+
+  const before = await readFactFiles(second);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+  expect(alias.path).toContain('-first.md');
+
+  await first.runChecked(['sync']);
+  expectOnlyAliasAppended(before, await readFactFiles(second));
+
+  const expectAClashFacts = async (fixture: CliFixture): Promise<void> => {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+    const old = await fixture.runJson<ShownInstruction>(['show', 'demo-aaaa']);
+    const ready = await fixture.runJson<{ candidates: { id: string }[] }>(['ready']);
+
+    expect(renamed.claim?.holder).toBe('first-agent');
+    expect(old.claim).toBeNull();
+    expect(ready.candidates.map((candidate) => candidate.id)).toContain('demo-aaaa');
+    expect(ready.candidates.map((candidate) => candidate.id)).not.toContain(alias.to);
+
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual(['A progress before clash']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual(['B progress before clash']);
+  };
+
+  for (const fixture of [second, first]) {
+    await expectAClashFacts(fixture);
+  }
+
+  for (const fixture of [second, first]) {
+    await dropCache(fixture);
+    await expectAClashFacts(fixture);
+  }
+});
+
+it('an ID clash keeps pre-clash facts with a renamed ticket that is not committed yet', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['sync']);
+
+  const secondTicketPath = join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md');
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+  await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+  await touchFile(secondTicketPath);
+
+  const before = await readFactFiles(second);
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+  expect(alias.path).toContain('-second.md');
+
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+  expectOnlyAliasAppended(before, await readFactFiles(second));
+
+  for (const fixture of [second, first]) {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+    const old = await fixture.runJson<ShownInstruction>(['show', 'demo-aaaa']);
+
+    expect(renamed.claim?.holder).toBe('second-agent');
+    expect(old.claim).toBeNull();
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual(['B progress before clash']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
+  }
+});
+
+it('a second ID clash keeps the renamed ticket claim and log with it, and the clone that kept the intermediate ID shows none', async () => {
+  const { first, second, remotePath } = clonePair();
+  const third = await createCliFixture('tikk-sync-third-', { machine: 'third', remotePath });
+
+  try {
+    await first.runChecked(['init', '--remote', remotePath]);
+    await second.runChecked(['init', '--remote', remotePath]);
+
+    const parent = await first.runJson<ShownInstruction>([
+      'new',
+      'slice',
+      'Shared parent',
+      '--status',
+      'draft',
+    ]);
+
+    await ageFile(parent.path);
+    await first.runChecked(['sync']);
+    await second.runChecked(['sync']);
+    await third.runChecked(['init', '--remote', remotePath]);
+    await removeOrigin(first);
+    await removeOrigin(second);
+    await removeOrigin(third);
+
+    await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+    await first.runChecked(['sync']);
+    await Bun.sleep(1100);
+
+    await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+    await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+    await second.runChecked([
+      'log',
+      'demo-aaaa',
+      '--type',
+      'progress',
+      '--text',
+      'B progress before clash',
+    ]);
+
+    await second.runChecked(['sync']);
+
+    await addOrigin(first, remotePath);
+    await addOrigin(second, remotePath);
+    await first.runChecked(['sync']);
+    const firstReport = await second.runJson<AliasSyncReport>(['sync']);
+    const firstAlias = firstReport.aliases[0];
+
+    invariant(firstAlias !== undefined, 'The first clash should write one alias.');
+
+    await writeClashTicket(third, firstAlias.to, 'third', parent.id);
+    await gitOutput(third.storePath, ['add', '--', 'tickets']);
+    await commitOn(third.storePath, '2026-10-01T10:00:00Z');
+    await addOrigin(third, remotePath);
+
+    const secondReport = await third.runJson<AliasSyncReport>(['sync']);
+    const secondAlias = secondReport.aliases[0];
+
+    invariant(secondAlias !== undefined, 'The second clash should write one alias.');
+    expect(secondAlias.from).toBe(firstAlias.to);
+
+    await first.runChecked(['sync']);
+
+    for (const fixture of [third, first]) {
+      const renamed = await fixture.runJson<ShownInstruction>(['show', secondAlias.to]);
+      const kept = await fixture.runJson<ShownInstruction>(['show', firstAlias.to]);
+
+      expect(renamed.claim?.holder).toBe('second-agent');
+      expect(kept.claim).toBeNull();
+
+      expect(logTexts(listTicketFacts(fixture, secondAlias.to))).toEqual([
+        'B progress before clash',
+      ]);
+
+      expect(logTexts(listTicketFacts(fixture, firstAlias.to))).toEqual([]);
+    }
+  } finally {
+    await third.cleanup();
+  }
+});
+
+const aliasTicketOf = (facts: string): string => {
+  const aliasLine = facts.split('\n').find((line) => line.includes('"kind":"alias"'));
+  const parsed = parseFactLine(aliasLine ?? '');
+
+  invariant(parsed.ok && parsed.value.kind === 'alias', 'The facts should hold one alias.');
+
+  return parsed.value.ticket;
+};
+
+const failNextTreeRead = async (fixture: CliFixture, fileName: string): Promise<string> => {
+  const folder = join(fixture.home, 'failing-git');
+  const marker = join(fixture.home, 'fail-next-ls-tree');
+  const realGit = Bun.which('git');
+
+  invariant(realGit !== null, 'git should be on PATH.');
+
+  await mkdir(folder, { recursive: true });
+
+  await writeFile(
+    join(folder, 'git'),
+    `#!/bin/sh\ncase "$*" in\n  *ls-tree*${fileName}*)\n    if [ -e "${marker}" ]; then\n      rm -f "${marker}"\n      echo "injected history failure" >&2\n      exit 1\n    fi\n    ;;\nesac\nexec "${realGit}" "$@"\n`,
+  );
+
+  await chmod(join(folder, 'git'), 0o755);
+  await writeFile(marker, '');
+
+  return `${folder}:${Bun.env.PATH ?? ''}`;
+};
+
+it('a failed clash commit leaves pre-clash facts on the old ID until the retry renames the ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  const offline = join(first.home, 'offline.git');
+
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', offline]);
+  await writeClashTicket(first, 'demo-aaaa', 'older', parent.id);
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeClashTicket(second, 'demo-aaaa', 'newer', parent.id);
+  await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  await second.runChecked(['sync']);
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', remotePath]);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const aliasTicket = aliasTicketOf(await readAllFacts(first));
+
+  await first.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(first, 'demo-aaaa'))).toEqual(['B progress before clash']);
+  expect(logTexts(listTicketFacts(first, aliasTicket))).toEqual([]);
+
+  await rm(hook);
+  await first.runChecked(['sync']);
+  await first.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(first, aliasTicket))).toEqual(['B progress before clash']);
+  expect(logTexts(listTicketFacts(first, 'demo-aaaa'))).toEqual([]);
+});
+
+it('a clash retry after a fact-history read fails keeps the pre-clash facts with the renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['sync']);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+  await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+
+  const failingPath = await failNextTreeRead(second, 'demo-aaaa-second.md');
+  const failed = await second.run(['sync'], { path: failingPath });
+
+  expect(existsSync(join(second.home, 'fail-next-ls-tree'))).toBe(false);
+  expect(failed.exitCode).not.toBe(0);
+  expect(existsSync(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'))).toBe(true);
+  expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
+
+  await Bun.sleep(settleWaitMilliseconds);
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+
+    expect(renamed.claim?.holder).toBe('second-agent');
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual(['B progress before clash']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
+  }
+});
+
+it('a clash retry after a newer merge keeps the pre-clash facts with the renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['claim', 'demo-aaaa', '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+
+  const failingPath = await failNextTreeRead(second, 'demo-aaaa-first.md');
+  const failed = await second.run(['sync'], { path: failingPath });
+
+  expect(existsSync(join(second.home, 'fail-next-ls-tree'))).toBe(false);
+  expect(failed.exitCode).not.toBe(0);
+  expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
+  expect(existsSync(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'))).toBe(true);
+
+  const advance = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Advance',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(advance.path);
+  await first.runChecked(['sync']);
+
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+  expect(alias.path).toContain('-first.md');
+
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+    const old = await fixture.runJson<ShownInstruction>(['show', 'demo-aaaa']);
+
+    expect(renamed.claim?.holder).toBe('first-agent');
+    expect(old.claim).toBeNull();
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual(['A progress before clash']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
+  }
+});
+
+it('a clash retry refuses writes under the shared ID and keeps the pre-clash facts with the renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['claim', 'demo-aaaa', '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+
+  const failingPath = await failNextTreeRead(second, 'demo-aaaa-first.md');
+  const failed = await second.run(['sync'], { path: failingPath });
+
+  expect(existsSync(join(second.home, 'fail-next-ls-tree'))).toBe(false);
+  expect(failed.exitCode).not.toBe(0);
+  expect(aliasLinesOf(await readAllFacts(second))).toEqual([]);
+
+  {
+    const refused = await second.run([
+      'log',
+      'demo-aaaa',
+      '--type',
+      'progress',
+      '--text',
+      'Written in the window',
+      '--json',
+    ]);
+
+    expect(refused.exitCode).not.toBe(0);
+    expect(runJsonError(refused.stdout)).toBe('idShared');
+  }
+
+  await first.runChecked(['sync']);
+
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+  expect(alias.path).toContain('-first.md');
+
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    const renamed = await fixture.runJson<ShownInstruction>(['show', alias.to]);
+
+    expect(renamed.claim?.holder).toBe('first-agent');
+
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual(['A progress before clash']);
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
+  }
+});
+
+it('a pending renamed ticket keeps its own facts when the other clone merged facts it pushed before the ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B log published before its ticket',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A log for surviving ticket',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+  expect(alias.from).toBe('demo-aaaa');
+
+  await second.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(second, alias.to))).toEqual([
+    'B log published before its ticket',
+  ]);
+
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A log for surviving ticket']);
+
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    await fixture.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual([
+      'B log published before its ticket',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual(['A log for surviving ticket']);
+  }
+});
+
+it('a fact write refuses a ticket ID that two ticket files share and appends no fact', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await writeClashTicket(fixture, 'demo-aaaa', 'first', parent.id);
+  await writeClashTicket(fixture, 'demo-aaaa', 'second', parent.id);
+
+  const before = await readAllFacts(fixture).catch(() => '');
+
+  const logged = await fixture.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written under a shared ID',
+    '--json',
+  ]);
+
+  expect(logged.exitCode).not.toBe(0);
+  expect(runJsonError(logged.stdout)).toBe('idShared');
+  expect(logged.stdout).toContain('demo-aaaa');
+  expect(await readAllFacts(fixture).catch(() => '')).toBe(before);
+});
+
+it('a fact write accepts an ID when the other file with it sits in another project folder', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await writeClashTicket(fixture, 'demo-aaaa', 'first', parent.id);
+
+  const misplaced = join(fixture.storePath, 'tickets', 'other', 'demo-aaaa-second.md');
+
+  const text = await readFile(
+    join(fixture.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'),
+    'utf8',
+  );
+
+  await mkdir(dirname(misplaced), { recursive: true });
+  await writeFile(misplaced, text);
+
+  const logged = await fixture.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written under an ID only one demo ticket has',
+    '--json',
+  ]);
+
+  expect(logged.stdout).not.toContain('idShared');
+  expect(logged.exitCode).toBe(0);
+  expect(await readAllFacts(fixture)).toContain('Written under an ID only one demo ticket has');
+});
+
+const sharedIdPaths = (fixture: CliFixture): [string, string] => [
+  join(fixture.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'),
+  join(fixture.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'),
+];
+
+const createSharedIdStore = async (kind = 'instruction'): Promise<CliFixture> => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const parent = await fixture.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await writeClashTicket(fixture, 'demo-aaaa', 'first', parent.id, true, kind);
+  await writeClashTicket(fixture, 'demo-aaaa', 'second', parent.id, true, kind);
+
+  return fixture;
+};
+
+const expectSharedRefusalWithoutWrites = async (
+  fixture: CliFixture,
+  args: string[],
+): Promise<void> => {
+  const paths = sharedIdPaths(fixture);
+  const textsBefore = await Promise.all(paths.map((path) => readFile(path, 'utf8')));
+  const factsBefore = await readAllFacts(fixture).catch(() => '');
+
+  const refused = await fixture.run([...args, '--json']);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+  expect(await Promise.all(paths.map((path) => readFile(path, 'utf8')))).toEqual(textsBefore);
+  expect(await readAllFacts(fixture).catch(() => '')).toBe(factsBefore);
+};
+
+it('done refuses a shared ID before it writes the ticket file or a status fact', async () => {
+  const fixture = await createSharedIdStore('task');
+
+  await expectSharedRefusalWithoutWrites(fixture, ['done', 'demo-aaaa']);
+});
+
+it('cancel refuses a shared ID before it writes the ticket file or a status fact', async () => {
+  const fixture = await createSharedIdStore();
+
+  await expectSharedRefusalWithoutWrites(fixture, ['cancel', 'demo-aaaa']);
+});
+
+it('unarchive refuses a shared ID before it writes the ticket file or an unarchive fact', async () => {
+  const fixture = await createSharedIdStore('task');
+  const [first, second] = sharedIdPaths(fixture);
+  const parent = (await readFile(second, 'utf8')).match(/^parent: (\S+)$/m)?.[1] ?? '';
+
+  await writeFile(
+    first,
+    `---\nkind: task\ntitle: first\nproject: demo\nparent: ${parent}\nblockedBy: []\nstatus: done\narchived: 2026-10-01\n---\n`,
+  );
+
+  await expectSharedRefusalWithoutWrites(fixture, ['unarchive', 'demo-aaaa']);
+});
+
+it('a log refuses an ID whose second ticket file does not parse, and appends no fact', async () => {
+  const fixture = await createSharedIdStore();
+  const [, second] = sharedIdPaths(fixture);
+
+  await writeFile(second, '---\nkind: broken\n---\n');
+
+  const before = await readAllFacts(fixture).catch(() => '');
+
+  const refused = await fixture.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written under a shared ID with a broken file',
+    '--json',
+  ]);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+  expect(await readAllFacts(fixture).catch(() => '')).toBe(before);
+});
+
+it('a pending renamed ticket keeps its pre-clash facts when the sync that renames it fast-forwards', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B pending progress',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A survivor progress',
+  ]);
+
+  await first.runChecked(['sync']);
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const report = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = report.aliases[0];
+
+  invariant(alias !== undefined, 'The clash should write one alias.');
+
+  await second.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(second, alias.to))).toEqual(['B pending progress']);
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A survivor progress']);
+});
+
+it('a pending clash that a failed resolution left shared keeps the write refused and each ticket its own facts', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B pending-ticket progress',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A surviving-ticket progress',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  const failingPath = await failNextTreeRead(second, 'demo-aaaa-second.md');
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const failed = await second.run(['sync'], { path: failingPath });
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const refused = await second.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress for surviving A after merge',
+    '--json',
+  ]);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should write one alias.');
+  await second.runChecked(['ls']);
+
+  expect(logTexts(listTicketFacts(second, alias.to))).toEqual(['B pending-ticket progress']);
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual(['A surviving-ticket progress']);
+});
+
+it('a write refused after a failed clash commit leaves the retry with each ticket its own facts', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  const offline = join(first.home, 'offline.git');
+
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', offline]);
+  await writeClashTicket(first, 'demo-aaaa', 'older', parent.id);
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeClashTicket(second, 'demo-aaaa', 'newer', parent.id);
+  await second.runChecked(['claim', 'demo-aaaa', '--holder', 'second-agent']);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B progress before clash',
+  ]);
+
+  await second.runChecked(['sync']);
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', remotePath]);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const refused = await first.run([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'Written after the failed commit',
+    '--json',
+  ]);
+
+  expect(refused.exitCode).not.toBe(0);
+  expect(runJsonError(refused.stdout)).toBe('idShared');
+
+  await rm(hook);
+  await first.runChecked(['sync']);
+  await first.runChecked(['ls']);
+
+  const aliasTicket = aliasTicketOf(await readAllFacts(first));
+
+  expect(logTexts(listTicketFacts(first, aliasTicket))).toEqual(['B progress before clash']);
+  expect(logTexts(listTicketFacts(first, 'demo-aaaa'))).toEqual([]);
+});
+
+it('a second pending clash leaves a fact that an earlier alias moved with the earlier renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B log published before its ticket',
+  ]);
+
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A log for surviving ticket',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await first.runChecked(['sync']);
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-second.md'));
+  const firstReport = await second.runJson<AliasSyncReport>(['sync']);
+  const firstAlias = firstReport.aliases[0];
+
+  invariant(firstAlias !== undefined, 'The first clash should write one alias.');
+
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+
+  await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'));
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(second, 'demo-aaaa', 'third', parent.id, false);
+
+  await second.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'B second pending progress',
+  ]);
+
+  await second.runChecked(['sync']);
+
+  await writeClashTicket(first, 'demo-aaaa', 'fourth', parent.id);
+  await first.runChecked(['log', 'demo-aaaa', '--type', 'progress', '--text', 'A second survivor']);
+  await first.runChecked(['sync']);
+
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-third.md'));
+  const secondReport = await second.runJson<AliasSyncReport>(['sync']);
+  const secondAlias = secondReport.aliases[0];
+
+  invariant(secondAlias !== undefined, 'The second clash should write one alias.');
+
+  await Bun.sleep(settleWaitMilliseconds);
+  await second.runChecked(['sync']);
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    await fixture.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(fixture, firstAlias.to))).toEqual([
+      'B log published before its ticket',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, secondAlias.to))).toEqual([
+      'B second pending progress',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([
+      'A log for surviving ticket',
+      'A second survivor',
+    ]);
+  }
+});
+
+it('a retry after a failed clash commit moves a fact written on the other clone after the failure to the renamed ticket', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+  await removeOrigin(first);
+  await removeOrigin(second);
+
+  await writeClashTicket(second, 'demo-aaaa', 'second', parent.id);
+  await second.runChecked(['sync']);
+  await Bun.sleep(1100);
+
+  await writeClashTicket(first, 'demo-aaaa', 'first', parent.id);
+  await first.runChecked(['claim', 'demo-aaaa', '--holder', 'first-agent']);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress before clash',
+  ]);
+
+  await addOrigin(first, remotePath);
+  await addOrigin(second, remotePath);
+  await first.runChecked(['sync']);
+
+  const hook = join(second.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await second.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A progress after failed commit',
+  ]);
+
+  await first.runChecked(['sync']);
+
+  await rm(hook);
+  const retry = await second.runJson<AliasSyncReport>(['sync']);
+  const alias = retry.aliases[0];
+
+  invariant(alias !== undefined, 'The retry should reuse the alias.');
+  expect(alias.from).toBe('demo-aaaa');
+
+  await first.runChecked(['sync']);
+
+  for (const fixture of [second, first]) {
+    await fixture.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(fixture, alias.to))).toEqual([
+      'A progress before clash',
+      'A progress after failed commit',
+    ]);
+
+    expect(logTexts(listTicketFacts(fixture, 'demo-aaaa'))).toEqual([]);
+  }
+});
+
+it('a second clash after a failed alias commit moves the renamed ticket later facts to it', async () => {
+  const { first, second, remotePath } = clonePair();
+  const third = await createCliFixture('tikk-sync-third-', { machine: 'third', remotePath });
+
+  try {
+    await first.runChecked(['init', '--remote', remotePath]);
+    await second.runChecked(['init', '--remote', remotePath]);
+    await third.runChecked(['init', '--remote', remotePath]);
+
+    const parent = await first.runJson<ShownInstruction>([
+      'new',
+      'slice',
+      'Shared parent',
+      '--status',
+      'draft',
+    ]);
+
+    await ageFile(parent.path);
+    await first.runChecked(['sync']);
+    await second.runChecked(['sync']);
+    await removeOrigin(third);
+
+    await writeClashTicket(third, 'demo-bbbb', 'older-b', parent.id);
+    await third.runChecked(['sync']);
+
+    await writeClashTicket(first, 'demo-aaaa', 'older-a', parent.id);
+    await first.runChecked(['sync']);
+    await Bun.sleep(1100);
+
+    await removeOrigin(second);
+    await writeClashTicket(second, 'demo-aaaa', 'newer-a', parent.id);
+    await second.runChecked(['sync']);
+    await addOrigin(second, remotePath);
+
+    const hook = join(second.storePath, '.git', 'hooks', 'pre-commit');
+
+    await mkdir(dirname(hook), { recursive: true });
+
+    await writeFile(
+      hook,
+      '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+    );
+
+    await chmod(hook, 0o755);
+
+    const failed = await second.run(['sync']);
+
+    expect(failed.exitCode).not.toBe(0);
+    await rm(hook);
+
+    await removeOrigin(second);
+    await writeClashTicket(second, 'demo-bbbb', 'newer-b', parent.id);
+
+    await second.runChecked([
+      'log',
+      'demo-bbbb',
+      '--type',
+      'progress',
+      '--text',
+      'B fact after pending alias',
+    ]);
+
+    await second.runChecked(['sync']);
+
+    for (const [file, diskText] of await readFactFiles(second)) {
+      const headText = await gitShowOrEmpty(second.storePath, `HEAD:facts/${file}`);
+
+      expect(diskText.startsWith(headText)).toBe(true);
+    }
+
+    await addOrigin(third, remotePath);
+    await third.runChecked(['sync']);
+    await addOrigin(second, remotePath);
+
+    const retry = await second.runJson<AliasSyncReport>(['sync']);
+    const alias = retry.aliases.find((entry) => entry.from === 'demo-bbbb');
+
+    invariant(alias !== undefined, 'The retry should rename the newer demo-bbbb.');
+
+    await second.runChecked(['ls']);
+
+    expect(logTexts(listTicketFacts(second, alias.to))).toEqual(['B fact after pending alias']);
+    expect(logTexts(listTicketFacts(second, 'demo-bbbb'))).toEqual([]);
+  } finally {
+    await third.cleanup();
+  }
+});
+
+it('a later sync commits an alias whose clash was abandoned by hand, with the facts after it', async () => {
+  const { first, second, remotePath } = clonePair();
+
+  await first.runChecked(['init', '--remote', remotePath]);
+  await second.runChecked(['init', '--remote', remotePath]);
+
+  const parent = await first.runJson<ShownInstruction>([
+    'new',
+    'slice',
+    'Shared parent',
+    '--status',
+    'draft',
+  ]);
+
+  await ageFile(parent.path);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  const offline = join(first.home, 'offline.git');
+
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', offline]);
+  await writeClashTicket(first, 'demo-aaaa', 'older', parent.id);
+  await first.runChecked(['sync']);
+  await Bun.sleep(1100);
+  await writeClashTicket(second, 'demo-aaaa', 'newer', parent.id);
+  await second.runChecked(['sync']);
+  await gitOutput(first.storePath, ['remote', 'set-url', 'origin', remotePath]);
+
+  const hook = join(first.storePath, '.git', 'hooks', 'pre-commit');
+
+  await mkdir(dirname(hook), { recursive: true });
+
+  await writeFile(
+    hook,
+    '#!/bin/sh\ngit diff --cached --name-only | grep -q "^facts/" && exit 1\nexit 0\n',
+  );
+
+  await chmod(hook, 0o755);
+
+  const failed = await first.run(['sync']);
+
+  expect(failed.exitCode).not.toBe(0);
+
+  const abandoned = aliasTicketOf(await readAllFacts(first));
+
+  await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-newer.md'));
+
+  await first.runChecked([
+    'log',
+    'demo-aaaa',
+    '--type',
+    'progress',
+    '--text',
+    'A log after the abandoned clash',
+  ]);
+
+  await rm(hook);
+  await first.runChecked(['sync']);
+  await second.runChecked(['sync']);
+
+  await second.runChecked(['ls']);
+
+  expect(await readAllFacts(second)).toContain('A log after the abandoned clash');
+
+  expect(logTexts(listTicketFacts(second, 'demo-aaaa'))).toEqual([
+    'A log after the abandoned clash',
+  ]);
+
+  expect(logTexts(listTicketFacts(second, abandoned))).toEqual([]);
+
+  for (const [file, diskText] of await readFactFiles(first)) {
+    const headText = await gitShowOrEmpty(first.storePath, `HEAD:facts/${file}`);
+
+    expect(diskText.startsWith(headText)).toBe(true);
+  }
+});
+
+it('a new ticket skips an ID that a chained alias hides from the projected fact list', async () => {
+  const fixture = singleFixture();
+
+  await fixture.runChecked(['init']);
+
+  const factsDirectory = join(fixture.storePath, 'facts', 'desk');
+  const ticketsDirectory = join(fixture.storePath, 'tickets', 'demo');
+  const firstAlias = `${JSON.stringify({ version: 1, ticket: 'demo-bbbb', at: '2026-10-20T10:00:00.000Z', machine: 'desk', kind: 'alias', from: 'demo-aaaa' })}\n`;
+  const chainedAlias = `${JSON.stringify({ version: 1, ticket: 'demo-cccc', at: '2026-10-20T11:00:00.000Z', machine: 'desk', kind: 'alias', from: 'demo-bbbb', movedFacts: [{ path: 'desk/2026-10.jsonl', line: 1 }] })}\n`;
+
+  await mkdir(factsDirectory, { recursive: true });
+  await mkdir(ticketsDirectory, { recursive: true });
+  await writeFile(join(factsDirectory, '2026-10.jsonl'), firstAlias + chainedAlias);
+
+  await writeFile(
+    join(ticketsDirectory, 'demo-cccc-renamed.md'),
+    '---\nkind: task\ntitle: Renamed\nproject: demo\nstatus: open\n---\n',
+  );
+
+  const suffixes = ['bbbb', 'zzzz'];
+
+  const opened = await createOpenSession(
+    fixture.storePath,
+    join(fixture.home, '.cache', 'tikk', 'index.db'),
+    { ...nodeTicketFiles, randomIdSuffix: () => suffixes.shift() ?? 'zzzz' },
+  )();
+
+  invariant(opened.ok, 'The session should open.');
+
+  const session = opened.value;
+
+  await session.refresh();
+
+  const project = parseProjectName('demo');
+
+  invariant(project.ok, 'The project name should parse.');
+
+  const created = await session.createTicketFile(project.value, 'New', 'New ticket.\n');
+
+  expect(created).toMatchObject({ ok: true, value: { id: 'demo-zzzz' } });
+  session[Symbol.dispose]();
 });
 
 it('an ID clash after a sync merge moves the folder to the new ID', async () => {

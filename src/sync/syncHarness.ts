@@ -1,4 +1,5 @@
 import type { Result } from '../result.ts';
+import type { MovedFactReference } from './syncClashFacts.ts';
 import type { RemoteInitFunctions } from './syncRemote.ts';
 
 type GitReply = Result<string, { message: string }>;
@@ -17,7 +18,7 @@ export interface FakeSync {
   removed: string[];
   disk: Map<string, { text: string; mtimeMs: number }>;
   aliasWrites: () => number;
-  aliasRecords: { ticket: string; from: string; at: string }[];
+  aliasRecords: { ticket: string; from: string; at: string; movedFacts: MovedFactReference[] }[];
   suffixCalls: () => number;
   commands: () => string[];
   lockCalls: () => number;
@@ -105,7 +106,14 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
   const renames: [string, string][] = [];
   const removed: string[] = [];
   const disk = new Map(Object.entries(options.files ?? {}));
-  const aliasRecords: { ticket: string; from: string; at: string }[] = [];
+
+  const aliasRecords: {
+    ticket: string;
+    from: string;
+    at: string;
+    movedFacts: MovedFactReference[];
+  }[] = [];
+
   let suffixCount = 0;
   let aliasWrites = 0;
   let locked = false;
@@ -131,6 +139,7 @@ export const makeSync = (options: FakeSyncOptions = {}): FakeSync => {
         ? unsigned
         : [...unsigned, '-c', 'user.name=tikk', '-c', 'user.email=tikk@localhost'];
     },
+    localMachine: () => 'fake',
     writeBlob: (_root, text) => {
       if (options.blobFails !== undefined) {
         return Promise.resolve({ ok: false, reason: { message: options.blobFails } });

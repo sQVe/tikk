@@ -43,9 +43,17 @@ const archiveWorkSql = `WITH ${finishedRootsSql}, ${dueTreesSql}
 const finishedSql = `SELECT 1 WHERE EXISTS (SELECT 1 FROM tickets WHERE status IN ('canceled', 'done'))
   OR EXISTS (SELECT 1 FROM facts WHERE kind = 'accept')`;
 
+const movedFactsSql = `SELECT 1 FROM facts
+  WHERE kind = 'alias' AND json_valid(json) AND json_array_length(json, '$.movedFacts') > 0
+  LIMIT 1`;
+
 export const mayHaveArchiveWork = (database: Database, now: Date): boolean => {
   if (database.query(finishedSql).get() === null) {
     return false;
+  }
+
+  if (database.query(movedFactsSql).get() !== null) {
+    return true;
   }
 
   return database.query(archiveWorkSql).get(now.toISOString()) !== null;

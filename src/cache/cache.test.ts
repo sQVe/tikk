@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it } from 'bun:test';
 import { stat } from 'node:fs/promises';
 
 import { deriveInstructionState } from '../fact/fact.ts';
+import type { Fact } from '../fact/fact.ts';
 import { invariant } from '../invariant.ts';
 import { parseProjectName, parseTicketId } from '../ticket/ticket.ts';
 import type { CacheFiles, TicketCache } from './cache.ts';
@@ -711,4 +712,247 @@ it('reports a fact query that stays busy as failed, not as damaged', async () =>
   if (!busy.ok) {
     expect(busy.reason.kind).toBe('failed');
   }
+});
+
+it('reports a shared-ID check that stays busy as failed', async () => {
+  await seedOneTicket();
+
+  using cache = openTestCache(databasePath, 10);
+
+  const holder = lockDatabase(databasePath);
+  const busy = cache.isIdShared(tikkId());
+
+  holder.run('ROLLBACK');
+  holder.close();
+
+  expect(busy.ok).toBe(false);
+
+  if (!busy.ok) {
+    expect(busy.reason.kind).toBe('failed');
+  }
+});
+
+it('reports an alias destination query that stays busy as failed', async () => {
+  await seedOneTicket();
+
+  using cache = openTestCache(databasePath, 10);
+
+  const holder = lockDatabase(databasePath);
+  const busy = cache.aliasDestinations();
+
+  holder.run('ROLLBACK');
+  holder.close();
+
+  expect(busy.ok).toBe(false);
+
+  if (!busy.ok) {
+    expect(busy.reason.kind).toBe('failed');
+  }
+});
+
+const oldAndNewIds = () => {
+  const oldId = parseTicketId('tikk-3a4b');
+  const newId = parseTicketId('tikk-9fk4');
+
+  invariant(oldId.ok && newId.ok, 'The test IDs should parse.');
+
+  return { oldId: oldId.value, newId: newId.value };
+};
+
+const nonAliasKinds = (facts: Fact[]): string[] =>
+  facts.flatMap((fact) => (fact.kind === 'alias' ? [] : [fact.kind]));
+
+it('moves the facts an alias names to its new ticket in every fact query', async () => {
+  const { oldId, newId } = oldAndNewIds();
+  const fake = createFakeFiles();
+
+  const movedLines =
+    factText('tikk-3a4b', {
+      kind: 'claim',
+      holder: 'agent',
+      leaseEnd: '2026-10-20T13:00:00.000Z',
+    }) +
+    factText(
+      'tikk-3a4b',
+      { kind: 'log', type: 'progress', text: 'A note' },
+      '2026-10-20T10:01:00.000Z',
+    ) +
+    factText('tikk-3a4b', { kind: 'accept', item: '5ab0000000a1' }, '2026-10-20T10:02:00.000Z');
+
+  const unnamedLine = factText(
+    'tikk-3a4b',
+    { kind: 'log', type: 'progress', text: 'Later note' },
+    '2026-10-20T10:03:00.000Z',
+  );
+
+  const alias = factText(
+    'tikk-9fk4',
+    {
+      kind: 'alias',
+      from: 'tikk-3a4b',
+      movedFacts: [1, 2, 3].map((line) => ({ path: 'laptop/2026-10.jsonl', line })),
+    },
+    '2026-10-20T10:05:00.000Z',
+  );
+
+  fake.set(ticketPath('tikk-9fk4'), ticketText({ title: 'Renamed' }));
+  fake.setFactFile(factPath(), movedLines + unnamedLine);
+  fake.setFactFile(factPath('desk'), alias);
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  const expectMovedFacts = (): void => {
+    expect(nonAliasKinds(factsOf(cache, [oldId]))).toEqual(['log']);
+    expect(nonAliasKinds(factsOf(cache, [newId]))).toEqual(['claim', 'log', 'accept']);
+
+    const state = cache.listStateFacts([newId]);
+
+    expect(state.ok && nonAliasKinds(state.value)).toEqual(['claim', 'accept']);
+    expect(cache.listStateFacts([oldId])).toEqual({ ok: true, value: [] });
+
+    const archived = cache.listArchiveFacts();
+
+    expect(archived.ok && archived.value.map((fact) => [fact.kind, fact.ticket])).toEqual([
+      ['accept', newId],
+    ]);
+  };
+
+  expectMovedFacts();
+
+  await cache.rebuildFacts(fake.files);
+
+  expectMovedFacts();
+});
+
+it('an alias with no moved facts leaves the facts on its old ticket', async () => {
+  const { oldId, newId } = oldAndNewIds();
+  const fake = createFakeFiles();
+
+  fake.setFactFile(
+    factPath(),
+    factText('tikk-3a4b', { kind: 'log', type: 'progress', text: 'A note' }),
+  );
+
+  fake.setFactFile(factPath('desk'), factText('tikk-9fk4', { kind: 'alias', from: 'tikk-3a4b' }));
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  expect(nonAliasKinds(factsOf(cache, [oldId]))).toEqual(['log']);
+  expect(nonAliasKinds(factsOf(cache, [newId]))).toEqual([]);
+});
+
+const idOf = (value: string) => {
+  const parsed = parseTicketId(value);
+
+  invariant(parsed.ok, 'The test ID should parse.');
+
+  return parsed.value;
+};
+
+const logTextsOf = (facts: Fact[]): string[] =>
+  facts.flatMap((fact) => (fact.kind === 'log' ? [fact.text] : []));
+
+it('moves a reference through a second alias that moves the first alias line', async () => {
+  const fake = createFakeFiles();
+
+  const claimAndLog =
+    factText('tikk-3a4b', {
+      kind: 'claim',
+      holder: 'agent',
+      leaseEnd: '2026-10-20T13:00:00.000Z',
+    }) +
+    factText(
+      'tikk-3a4b',
+      { kind: 'log', type: 'progress', text: 'B progress' },
+      '2026-10-20T10:01:00.000Z',
+    );
+
+  fake.set(ticketPath('tikk-9fk4'), ticketText({ title: 'Renamed once' }));
+  fake.set(ticketPath('tikk-7wx4'), ticketText({ title: 'Renamed twice' }));
+  fake.setFactFile(factPath(), claimAndLog);
+
+  fake.setFactFile(
+    factPath('desk'),
+    factText(
+      'tikk-9fk4',
+      {
+        kind: 'alias',
+        from: 'tikk-3a4b',
+        movedFacts: [1, 2].map((line) => ({ path: 'laptop/2026-10.jsonl', line })),
+      },
+      '2026-10-20T10:05:00.000Z',
+    ),
+  );
+
+  fake.setFactFile(
+    factPath('third'),
+    factText(
+      'tikk-7wx4',
+      { kind: 'alias', from: 'tikk-9fk4', movedFacts: [{ path: 'desk/2026-10.jsonl', line: 1 }] },
+      '2026-10-20T10:06:00.000Z',
+    ),
+  );
+
+  fake.setFactFile(
+    factPath('clone'),
+    factText(
+      'tikk-9fk4',
+      { kind: 'log', type: 'progress', text: 'C progress' },
+      '2026-10-20T10:07:00.000Z',
+    ),
+  );
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  const expectOwners = (): void => {
+    expect(nonAliasKinds(factsOf(cache, [idOf('tikk-7wx4')]))).toEqual(['claim', 'log']);
+    expect(logTextsOf(factsOf(cache, [idOf('tikk-7wx4')]))).toEqual(['B progress']);
+    expect(logTextsOf(factsOf(cache, [idOf('tikk-9fk4')]))).toEqual(['C progress']);
+    expect(factsOf(cache, [idOf('tikk-3a4b')])).toEqual([]);
+  };
+
+  expectOwners();
+
+  await cache.rebuildFacts(fake.files);
+
+  expectOwners();
+});
+
+it('applies an alias move only once the ticket file under its new ID exists', async () => {
+  const { oldId, newId } = oldAndNewIds();
+  const fake = createFakeFiles();
+
+  fake.setFactFile(
+    factPath(),
+    factText('tikk-3a4b', { kind: 'log', type: 'progress', text: 'B progress' }),
+  );
+
+  fake.setFactFile(
+    factPath('desk'),
+    factText(
+      'tikk-9fk4',
+      { kind: 'alias', from: 'tikk-3a4b', movedFacts: [{ path: 'laptop/2026-10.jsonl', line: 1 }] },
+      '2026-10-20T10:05:00.000Z',
+    ),
+  );
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  expect(logTextsOf(factsOf(cache, [oldId]))).toEqual(['B progress']);
+  expect(logTextsOf(factsOf(cache, [newId]))).toEqual([]);
+
+  fake.set(ticketPath('tikk-9fk4'), ticketText({ title: 'Renamed' }));
+
+  await cache.refresh(fake.files);
+
+  expect(logTextsOf(factsOf(cache, [newId]))).toEqual(['B progress']);
+  expect(logTextsOf(factsOf(cache, [oldId]))).toEqual([]);
 });

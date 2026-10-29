@@ -3,6 +3,8 @@ import { join, relative } from 'node:path';
 import type { Result } from '../result.ts';
 import { parseProjectName, parseTicketFileName, parseTicketId } from '../ticket/ticket.ts';
 import type { ProjectName, TicketId } from '../ticket/ticket.ts';
+import { aliasDestinations, isCommittedAlias, movedFactReferences } from './syncClashFacts.ts';
+import type { MovedFactReference } from './syncClashFacts.ts';
 import { resetIndex, stageRemoval, stageText } from './syncCommit.ts';
 import type { SyncCommitFunctions, SyncReason } from './syncCommit.ts';
 
@@ -14,6 +16,7 @@ export interface SyncClashFunctions extends SyncCommitFunctions {
   unlink: (path: string) => Promise<void>;
   randomIdSuffix: () => string;
   appendAlias: (alias: AliasRecord) => Promise<Result<{ path: string }, { message: string }>>;
+  localMachine: () => string | undefined;
   // The alias facts this machine has written.
   listAliases: () => Promise<{ from: string; to: string; path: string }[]>;
 }
@@ -22,6 +25,7 @@ interface AliasRecord {
   ticket: TicketId;
   from: TicketId;
   at: string;
+  movedFacts: MovedFactReference[];
 }
 
 export interface SyncAlias {
@@ -63,6 +67,11 @@ interface FolderMove {
 interface Renames extends ClashResolution {
   factPaths: string[];
   folders: FolderMove[];
+}
+
+interface IdSets {
+  taken: Set<string>;
+  reserved: Set<string>;
 }
 
 const maxIdAttempts = 100;
@@ -178,12 +187,12 @@ const newerClashingFiles = async (
 const freeId = (
   functions: SyncClashFunctions,
   project: ProjectName,
-  taken: Set<string>,
+  ids: IdSets,
 ): TicketId | undefined => {
   for (let attempt = 0; attempt < maxIdAttempts; attempt += 1) {
     const parsed = parseTicketId(`${project}-${functions.randomIdSuffix()}`);
 
-    if (parsed.ok && !taken.has(parsed.value)) {
+    if (parsed.ok && !ids.taken.has(parsed.value) && !ids.reserved.has(parsed.value)) {
       return parsed.value;
     }
   }
@@ -191,13 +200,13 @@ const freeId = (
   return undefined;
 };
 
-// One clash gets one alias, even when an earlier sync wrote the fact and failed to commit the rename.
 const reusableId = async (
   functions: SyncClashFunctions,
+  root: string,
   project: ProjectName,
   file: ProjectFile,
   taken: Set<string>,
-): Promise<{ id: TicketId; path: string } | undefined> => {
+): Promise<Result<{ id: TicketId; path: string } | undefined, SyncReason>> => {
   const aliases = await functions.listAliases();
 
   for (const alias of aliases) {
@@ -205,25 +214,56 @@ const reusableId = async (
     const isOwnAlias = alias.from === file.id && alias.to.startsWith(`${project}-`);
 
     if (isOwnAlias && parsed.ok && !taken.has(parsed.value)) {
-      return { id: parsed.value, path: alias.path };
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Each alias is checked in turn.
+      const committed = await isCommittedAlias(functions, root, alias);
+
+      if (!committed.ok) {
+        return committed;
+      }
+
+      if (!committed.value) {
+        return { ok: true, value: { id: parsed.value, path: alias.path } };
+      }
     }
   }
 
-  return undefined;
+  return { ok: true, value: undefined };
 };
 
-// A reused alias already has its fact, so only a new alias appends one.
 const aliasFactPath = async (
   functions: SyncClashFunctions,
   root: string,
-  record: { ticket: TicketId; from: TicketId; reusedPath: string | undefined },
+  record: {
+    ticket: TicketId;
+    from: TicketId;
+    renamedPath: string;
+    reusedPath: string | undefined;
+  },
 ): Promise<Result<string, SyncReason>> => {
-  if (record.reusedPath !== undefined) {
+  const movedFacts = await movedFactReferences(
+    functions,
+    root,
+    record.renamedPath,
+    record.from,
+    functions.localMachine(),
+  );
+
+  if (!movedFacts.ok) {
+    return movedFacts;
+  }
+
+  if (record.reusedPath !== undefined && movedFacts.value.length === 0) {
     return { ok: true, value: record.reusedPath };
   }
 
   const at = new Date(functions.now()).toISOString();
-  const appended = await functions.appendAlias({ ticket: record.ticket, from: record.from, at });
+
+  const appended = await functions.appendAlias({
+    ticket: record.ticket,
+    from: record.from,
+    at,
+    movedFacts: movedFacts.value,
+  });
 
   return appended.ok
     ? { ok: true, value: relative(root, appended.value.path) }
@@ -235,20 +275,29 @@ const renameFile = async (
   root: string,
   project: ProjectName,
   file: ProjectFile,
-  taken: Set<string>,
+  ids: IdSets,
 ): Promise<Result<{ alias: SyncAlias; factPath: string }, SyncReason>> => {
-  const reused = await reusableId(functions, project, file, taken);
-  const to = reused?.id ?? freeId(functions, project, taken);
+  const reusable = await reusableId(functions, root, project, file, ids.taken);
+
+  if (!reusable.ok) {
+    return reusable;
+  }
+
+  const reused = reusable.value;
+  const to = reused?.id ?? freeId(functions, project, ids);
 
   if (to === undefined) {
     return failed(`No free ticket ID found for project "${project}".`);
   }
 
-  taken.add(to);
+  ids.taken.add(to);
+
+  const from = join('tickets', project, file.fileName);
 
   const fact = await aliasFactPath(functions, root, {
     ticket: to,
     from: file.id,
+    renamedPath: from,
     reusedPath: reused?.path,
   });
 
@@ -257,7 +306,6 @@ const renameFile = async (
   }
 
   const path = join('tickets', project, `${to}-${file.slug}.md`);
-  const from = join('tickets', project, file.fileName);
 
   try {
     await functions.rename(join(root, from), join(root, path));
@@ -368,12 +416,19 @@ const renameClashes = async (
   const files = await listProjectFiles(functions, root, project);
   const folderNames = await folderIds(functions, root, project);
   const taken = new Set<string>([...files.map((file) => file.id), ...folderNames]);
+  const destinations = await aliasDestinations(functions, root);
+
+  if (!destinations.ok) {
+    return destinations;
+  }
+
+  const ids: IdSets = { taken, reserved: new Set(destinations.value) };
   const clashing = await newerClashingFiles(functions, root, project, files);
 
   for (const { file, addedAt: addedTime } of clashing) {
     // Renames run one at a time, since each new ID must differ from the ones chosen before it.
     // oxlint-disable-next-line eslint/no-await-in-loop -- See above.
-    const renamed = await renameFile(functions, root, project, file, taken);
+    const renamed = await renameFile(functions, root, project, file, ids);
 
     if (!renamed.ok) {
       return renamed;

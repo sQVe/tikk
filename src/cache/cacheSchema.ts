@@ -13,7 +13,7 @@ export interface CacheOpenReason {
 
 type VersionCheck = 'current' | 'outdated' | 'busy';
 
-const cacheVersion = 9;
+const cacheVersion = 10;
 
 // Other tikk processes write the same cache, so a query waits for their lock instead of failing.
 const defaultBusyTimeoutMilliseconds = 5000;
@@ -73,6 +73,7 @@ const createTables = (database: Database): void => {
   );
 
   database.run('CREATE INDEX facts_ticket ON facts (ticket, kind, at)');
+  database.run('CREATE INDEX facts_kind ON facts (kind)');
 
   database.run(
     `CREATE TABLE fact_errors (

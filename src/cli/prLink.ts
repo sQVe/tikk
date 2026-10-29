@@ -3,6 +3,7 @@ import type { PullRequestObservation, PullRequestRef } from '../github.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, parseCommandArguments } from './cliArguments.ts';
 import type { CommandInput, CommandResult } from './cliEffects.ts';
+import { appendFailure } from './factAppendFailure.ts';
 import { withLockedTicket } from './instructionLock.ts';
 import { differsFromObservation, makePrFact } from './prGithub.ts';
 import { resolveMachine } from './ticketStatus.ts';
@@ -49,9 +50,7 @@ const appendLink = async (
     const appended = await input.session.appendFact(machine, fact);
 
     if (!appended.ok) {
-      const { kind, message } = appended.reason;
-
-      return kind === 'invalid' ? invalidArguments(message) : storeFailure(message);
+      return appendFailure(appended.reason);
     }
   }
 

@@ -239,3 +239,52 @@ it('answers no for a store with no finished root', async () => {
 
   expect(await answersFor(tickets, [])).toEqual({ precheck: false, rules: false });
 });
+
+it('answers yes when an alias moves the canceled status that makes a task due', async () => {
+  const fake = createFakeFiles();
+
+  fake.set(ticketPath('tikk-3a4b'), textOf({ id: 'tikk-3a4b', kind: 'task', status: 'canceled' }));
+  fake.set(ticketPath('tikk-9fk4'), textOf({ id: 'tikk-9fk4', kind: 'task', status: 'open' }));
+
+  fake.setFactFile(
+    factPath('first'),
+    factText('tikk-3a4b', { kind: 'status', status: 'canceled' }, '2026-10-01T12:00:00.000Z'),
+  );
+
+  fake.setFactFile(
+    factPath('second'),
+    factText('tikk-3a4b', { kind: 'status', status: 'canceled' }, '2026-10-18T12:00:00.000Z') +
+      factText('tikk-3a4b', { kind: 'status', status: 'open' }, '2026-10-19T12:00:00.000Z'),
+  );
+
+  fake.setFactFile(
+    factPath('third'),
+    factText(
+      'tikk-9fk4',
+      {
+        kind: 'alias',
+        from: 'tikk-3a4b',
+        movedFacts: [1, 2].map((line) => ({ path: 'second/2026-10.jsonl', line })),
+      },
+      '2026-10-20T11:00:00.000Z',
+    ),
+  );
+
+  using cache = openTestCache(databasePath);
+
+  await cache.refresh(fake.files);
+
+  const archived = cache.listArchiveFacts();
+
+  invariant(archived.ok, 'The archive facts must decode.');
+
+  const due = findArchiveDue(okValueOf(cache.listTicketOutlines()), archived.value, now);
+  const rules = due.archive.length > 0 || due.statusFacts.length > 0;
+
+  expect(rules).toBe(true);
+
+  expect({ precheck: okValueOf(cache.mayHaveArchiveWork(now)), rules }).toEqual({
+    precheck: true,
+    rules: true,
+  });
+});

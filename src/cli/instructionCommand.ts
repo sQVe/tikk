@@ -6,6 +6,7 @@ import type { Result } from '../result.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput, CommandResult } from './cliEffects.ts';
+import { appendFailure } from './factAppendFailure.ts';
 import { conflict } from './instructionLock.ts';
 import type { LockedInstruction } from './instructionLock.ts';
 import { checkSessionTree } from './ticketStatus.ts';
@@ -57,10 +58,7 @@ const appendInstructionFact = async (
   const appended = await input.session.appendFact(fact.machine, fact);
 
   if (!appended.ok) {
-    const { kind, message } = appended.reason;
-    const code = kind === 'invalid' ? 'invalidArguments' : 'storeError';
-
-    return { ok: false, reason: { code, message } };
+    return appendFailure(appended.reason);
   }
 
   return { ok: true, value: undefined };

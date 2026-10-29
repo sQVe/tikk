@@ -2,9 +2,10 @@ import type { Fact } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
 import type { CliFailure, CliTicket, CommandInput, CommandResult } from './cliEffects.ts';
+import { appendFailure } from './factAppendFailure.ts';
 import { conflict, refuseFileErrors, withLockedTicket } from './instructionLock.ts';
 import { resolveMachine } from './ticketStatus.ts';
-import { showOutput, storeFailure } from './ticketView.ts';
+import { showOutput } from './ticketView.ts';
 
 const waitUsage = 'Usage: tikk wait <id> [--text <what the user should do> | --done] [--json]';
 
@@ -47,9 +48,7 @@ const appendWaiting = async (
   const appended = await input.session.appendFact(machine.value, fact);
 
   if (!appended.ok) {
-    const { kind, message } = appended.reason;
-
-    return kind === 'invalid' ? invalidArguments(message) : storeFailure(message);
+    return appendFailure(appended.reason);
   }
 
   return showOutput(input.session, input.effects.now(), ticket);

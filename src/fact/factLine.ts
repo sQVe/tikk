@@ -93,10 +93,16 @@ const unarchiveSchema = z.strictObject({
   kind: z.literal('unarchive'),
 });
 
+const movedFactSchema = z.strictObject({
+  path: z.string().min(1),
+  line: z.number().int().positive(),
+});
+
 const aliasSchema = z.strictObject({
   ...baseShape,
   kind: z.literal('alias'),
   from: ticketIdSchema,
+  movedFacts: z.array(movedFactSchema).optional(),
 });
 
 const repositorySchema = z

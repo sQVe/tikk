@@ -31,6 +31,7 @@ export interface ReconcileOutcome {
   checked: TicketId[];
   updated: UpdatedSlice[];
   problems: ReconcileProblem[];
+  sharedId?: string;
 }
 
 interface ReconcileInput {
@@ -129,6 +130,10 @@ const appendSelected = async (
     if (appended.ok) {
       outcome.updated.push({ id: change.ticket, state: change.seen.state });
     } else {
+      if (appended.reason.kind === 'shared') {
+        outcome.sharedId = appended.reason.message;
+      }
+
       outcome.problems.push(changeProblem(change, appended.reason.message));
     }
   }
@@ -300,6 +305,11 @@ export const reconcileCommand = async (input: CommandInput): Promise<CommandResu
   }
 
   const outcome = reconciled.value;
+
+  if (outcome.sharedId !== undefined) {
+    return { ok: false, reason: { code: 'idShared', message: outcome.sharedId } };
+  }
+
   const updatedLines = outcome.updated.map((slice) => `${slice.id}  ${slice.state}\n`).join('');
 
   return {

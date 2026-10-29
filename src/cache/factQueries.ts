@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -26,6 +27,12 @@ interface FactRow {
 export interface FactDamage {
   kind: 'damaged';
   message: string;
+}
+
+interface FactMove {
+  from: TicketId;
+  to: TicketId;
+  aliasKey: string;
 }
 
 const errorRowSchema = z.object({ path: z.string(), line: z.number(), message: z.string() });
@@ -82,11 +89,11 @@ const stateFactsSql = `(kind IN ('claim', 'release', 'accept', 'reject', 'status
 
 const archiveFactsSql = `(kind IN ('accept', 'status', 'unarchive') OR (kind = 'log' AND log_type = 'submitted'))`;
 
-const readFacts = (
+const readPlacedFacts = (
   database: Database,
   ticketIds: TicketId[] | undefined,
   kindFilter: string | undefined,
-): Result<Fact[], FactDamage> => {
+): Result<PlacedFact[], FactDamage> => {
   const conditions: string[] = [];
   const parameters: string[] = [];
 
@@ -117,7 +124,97 @@ const readFacts = (
     placed.push(row.value);
   }
 
-  return { ok: true, value: placed.toSorted(comparePlaced).map((item) => item.fact) };
+  return { ok: true, value: placed };
+};
+
+const factFileKey = (path: string): string => join(basename(dirname(path)), basename(path));
+
+const moveKey = (path: string, line: number): string => `${factFileKey(path)}:${line}`;
+
+const loadFactMoves = (database: Database): Result<Map<string, FactMove>, FactDamage> => {
+  const aliases = readPlacedFacts(
+    database,
+    undefined,
+    "kind = 'alias' AND ticket IN (SELECT id FROM tickets)",
+  );
+
+  if (!aliases.ok) {
+    return aliases;
+  }
+
+  const moves = new Map<string, FactMove>();
+
+  for (const { fact, path, line } of aliases.value) {
+    if (fact.kind === 'alias') {
+      const aliasKey = moveKey(path, line);
+
+      for (const reference of fact.movedFacts ?? []) {
+        moves.set(moveKey(reference.path, reference.line), {
+          from: fact.from,
+          to: fact.ticket,
+          aliasKey,
+        });
+      }
+    }
+  }
+
+  return { ok: true, value: moves };
+};
+
+const ownerAfterMoves = (
+  moves: Map<string, FactMove>,
+  key: string,
+  ticket: TicketId,
+  visited: Set<string>,
+): TicketId => {
+  const move = moves.get(key);
+
+  if (move === undefined || move.from !== ticket || visited.has(key)) {
+    return ticket;
+  }
+
+  visited.add(key);
+
+  return ownerAfterMoves(moves, move.aliasKey, move.to, visited);
+};
+
+const projectFact = (item: PlacedFact, moves: Map<string, FactMove>): PlacedFact => {
+  const ticket = ownerAfterMoves(moves, moveKey(item.path, item.line), item.fact.ticket, new Set());
+
+  if (ticket === item.fact.ticket) {
+    return item;
+  }
+
+  return { ...item, fact: { ...item.fact, ticket } };
+};
+
+const readFacts = (
+  database: Database,
+  ticketIds: TicketId[] | undefined,
+  kindFilter: string | undefined,
+): Result<Fact[], FactDamage> => {
+  const moves = loadFactMoves(database);
+
+  if (!moves.ok) {
+    return moves;
+  }
+
+  const movedFromTickets = [...moves.value.values()].map((move) => move.from);
+  const sourceTickets = ticketIds === undefined ? undefined : [...ticketIds, ...movedFromTickets];
+  const placed = readPlacedFacts(database, sourceTickets, kindFilter);
+
+  if (!placed.ok) {
+    return placed;
+  }
+
+  const projected = placed.value.map((item) => projectFact(item, moves.value));
+
+  const selected =
+    ticketIds === undefined
+      ? projected
+      : projected.filter((item) => ticketIds.includes(item.fact.ticket));
+
+  return { ok: true, value: selected.toSorted(comparePlaced).map((item) => item.fact) };
 };
 
 export const listFacts = (database: Database, ticketIds?: TicketId[]): Result<Fact[], FactDamage> =>
@@ -143,4 +240,14 @@ export const listFactErrors = (database: Database): CachedError[] => {
 
     return { path: `${row.data.path}:${row.data.line}`, message: row.data.message };
   });
+};
+
+export const listAliasDestinations = (database: Database): Result<TicketId[], FactDamage> => {
+  const aliases = readPlacedFacts(database, undefined, "kind = 'alias'");
+
+  if (!aliases.ok) {
+    return aliases;
+  }
+
+  return { ok: true, value: aliases.value.map((item) => item.fact.ticket) };
 };

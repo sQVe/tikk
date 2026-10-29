@@ -533,3 +533,71 @@ it('lists the slices it checked and updated', async () => {
     problems: [],
   });
 });
+
+it('an explicit reconcile of a shared ID returns idShared and appends no fact', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: {
+      appendFact: () =>
+        Promise.resolve({
+          ok: false as const,
+          reason: {
+            kind: 'shared',
+            message:
+              'Ticket ID demo-3467 is shared by two ticket files. Run tikk sync to resolve it.',
+          },
+        }),
+    },
+  });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'CLOSED' } }),
+  });
+
+  const result = await reconcileCommand({
+    args: [],
+    json: true,
+    effects: fakeEffects.effects,
+    session: fakeSession.session,
+  });
+
+  expect(result.ok).toBe(false);
+  expect(result.ok ? undefined : result.reason.code).toBe('idShared');
+  expect(fakeSession.appends).toEqual([]);
+});
+
+it('automatic reconcile reports a problem for a shared-ID update and does not fail', async () => {
+  const fakeSession = makeSession({
+    tickets: [makeKindTicket('demo-3467', 'slice')],
+    facts: [prFact('demo-3467', {})],
+    overrides: {
+      appendFact: () =>
+        Promise.resolve({
+          ok: false as const,
+          reason: {
+            kind: 'shared',
+            message:
+              'Ticket ID demo-3467 is shared by two ticket files. Run tikk sync to resolve it.',
+          },
+        }),
+    },
+  });
+
+  const { effects } = makeEffects({
+    session: fakeSession,
+    runGh: fakeGh({ 7: { state: 'CLOSED' } }),
+  });
+
+  const result = await reconcileBeforeRead({ effects, session: fakeSession.session });
+
+  expect(result.ok && result.value.map((problem) => [problem.ticket, problem.message])).toEqual([
+    [
+      'demo-3467',
+      'Ticket ID demo-3467 is shared by two ticket files. Run tikk sync to resolve it.',
+    ],
+  ]);
+
+  expect(fakeSession.appends).toEqual([]);
+});

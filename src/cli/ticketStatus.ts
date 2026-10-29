@@ -15,6 +15,7 @@ import type {
   CommandInput,
   CommandResult,
 } from './cliEffects.ts';
+import { unsharedIdFailure } from './factAppendFailure.ts';
 import { showAfterRefresh } from './ticketView.ts';
 
 interface StatusWrite {
@@ -127,6 +128,30 @@ export const checkCovers = (
   return { ok: true, value: undefined };
 };
 
+const statusFactGate = async (
+  input: CommandInput,
+  ticket: CliTicket,
+  status: TicketFrontMatter['status'] | undefined,
+): Promise<Result<string | undefined, CliFailure>> => {
+  if (status === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  const machine = await resolveMachine(input);
+
+  if (!machine.ok) {
+    return machine;
+  }
+
+  const unshared = unsharedIdFailure(input.session, ticket.id);
+
+  if (!unshared.ok) {
+    return unshared;
+  }
+
+  return { ok: true, value: machine.value };
+};
+
 // Writes the file first, then the fact. A failed append leaves the file written.
 export const writeTicketWithStatus = async (
   input: CommandInput,
@@ -134,10 +159,10 @@ export const writeTicketWithStatus = async (
 ): Promise<Result<{ hash: string }, CliFailure>> => {
   const { ticket, frontMatter } = write;
   const status = frontMatter.status === ticket.frontMatter.status ? undefined : frontMatter.status;
-  const machine = status === undefined ? undefined : await resolveMachine(input);
+  const gate = await statusFactGate(input, ticket, status);
 
-  if (machine !== undefined && !machine.ok) {
-    return machine;
+  if (!gate.ok) {
+    return gate;
   }
 
   const text = serializeTicketFile({ frontMatter, body: write.body ?? ticket.body });
@@ -149,6 +174,8 @@ export const writeTicketWithStatus = async (
     return { ok: false, reason: { code, message: written.reason.message } };
   }
 
+  const machine = gate.value;
+
   if (machine === undefined || status === undefined) {
     return written;
   }
@@ -158,12 +185,12 @@ export const writeTicketWithStatus = async (
     kind: 'status',
     ticket: ticket.id,
     at: input.effects.now().toISOString(),
-    machine: machine.value,
+    machine,
     status,
     ...(write.forced === undefined ? {} : { forced: write.forced }),
   };
 
-  const appended = await input.session.appendFact(machine.value, fact);
+  const appended = await input.session.appendFact(machine, fact);
 
   if (!appended.ok) {
     const message = `${ticket.path} was written, but the status fact was not appended: ${appended.reason.message}`;

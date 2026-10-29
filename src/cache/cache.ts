@@ -9,6 +9,7 @@ import { openDatabase } from './cacheSchema.ts';
 import type { CacheOpenReason } from './cacheSchema.ts';
 import {
   hasValidFactErrorRows,
+  listAliasDestinations,
   listArchiveFacts,
   listFactErrors,
   listFacts,
@@ -20,6 +21,7 @@ import {
   findTicketPath,
   getTicket,
   hasValidRows,
+  isIdShared,
   listErrors,
   listTicketOutlines,
   listTickets,
@@ -162,6 +164,10 @@ export class TicketCache implements Disposable {
     return readResult(() => findTicketPath(this.#database, id));
   }
 
+  isIdShared(id: TicketId): Result<boolean, CacheQueryFailure> {
+    return readValue(() => isIdShared(this.#database, id));
+  }
+
   listTickets(options: ListTicketsOptions): Result<CachedTicket[], CacheQueryFailure> {
     return readValue(() => listTickets(this.#database, options));
   }
@@ -180,6 +186,10 @@ export class TicketCache implements Disposable {
 
   listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage | CacheQueryFailure> {
     return readResult(() => listStateFacts(this.#database, ticketIds));
+  }
+
+  aliasDestinations(): Result<TicketId[], FactDamage | CacheQueryFailure> {
+    return readResult(() => listAliasDestinations(this.#database));
   }
 
   listArchiveFacts(): Result<Fact[], FactDamage | CacheQueryFailure> {

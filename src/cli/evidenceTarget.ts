@@ -5,6 +5,7 @@ import type { TicketId } from '../ticket/ticket.ts';
 import { invalidArguments, stringValue } from './cliArguments.ts';
 import type { ParsedArguments } from './cliArguments.ts';
 import type { CliFailure, CommandInput } from './cliEffects.ts';
+import { appendFailure } from './factAppendFailure.ts';
 import { readTarget, requireValue } from './instructionCommand.ts';
 import { findTicket } from './ticketView.ts';
 
@@ -120,11 +121,5 @@ export const appendEvidence = async (
     return { ok: true, value: undefined };
   }
 
-  const { kind, message } = appended.reason;
-
-  if (kind === 'invalid') {
-    return invalidArguments(message);
-  }
-
-  return { ok: false, reason: { code: 'storeError', message } };
+  return appendFailure(appended.reason);
 };
