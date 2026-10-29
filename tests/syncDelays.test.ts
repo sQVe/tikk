@@ -88,7 +88,6 @@ it('the background sync that a write starts waits for the debounce the CLI was s
 
   await first.runChecked(['init', '--remote', remotePath]);
 
-  // The default debounce is 3000 milliseconds, so a child that ignored the variable would finish sooner.
   const started = Date.now();
   const parentSlice = await createParentSlice(first);
 

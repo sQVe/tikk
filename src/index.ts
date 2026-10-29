@@ -355,7 +355,6 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
 const startsTerminal = (args: string[]): boolean =>
   args.length === 0 && process.stdin.isTTY && process.stdout.isTTY;
 
-// Reports a rejected sync delay the way runCli reports a failed command.
 const rejectSyncDelays = (args: string[], reason: SyncDelayFailure): number => {
   if (args.includes('--json')) {
     process.stdout.write(`${JSON.stringify({ error: reason })}\n`);

@@ -56,7 +56,6 @@ interface AliasSyncReport extends SyncReport {
 // Each test runs the CLI and Git in child processes, which takes seconds on a busy machine.
 setDefaultTimeout(30_000);
 
-// Short sync delays keep each test from waiting out the default debounce and settle windows.
 const syncDelays: SyncDelays = { debounceMilliseconds: 1000, settleMilliseconds: 1000 };
 
 let clones: CloneFixtures | undefined;
