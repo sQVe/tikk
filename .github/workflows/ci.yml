@@ -66,8 +66,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .tau/stryker-incremental.json
-          key: mutation-${{ github.event.pull_request.number }}-${{ hashFiles('src/**', 'tests/**', 'bun.lock', 'package.json', 'tsconfig.json', 'stryker.config.json', '.pi/tau.json') }}-${{ steps.base.outputs.sha }}-${{ github.sha }}
-          restore-keys: mutation-${{ github.event.pull_request.number }}-${{ hashFiles('src/**', 'tests/**', 'bun.lock', 'package.json', 'tsconfig.json', 'stryker.config.json', '.pi/tau.json') }}-${{ steps.base.outputs.sha }}-
+          key: mutation-${{ github.event.pull_request.number }}-${{ hashFiles('src/**', 'tests/**', 'scripts/**', 'bun.lock', 'package.json', 'tsconfig.json', 'vite.config.ts', 'stryker.config.json', '.pi/tau.json') }}-${{ steps.base.outputs.sha }}-${{ github.sha }}
+          restore-keys: mutation-${{ github.event.pull_request.number }}-${{ hashFiles('src/**', 'tests/**', 'scripts/**', 'bun.lock', 'package.json', 'tsconfig.json', 'vite.config.ts', 'stryker.config.json', '.pi/tau.json') }}-${{ steps.base.outputs.sha }}-
       # Incremental mode stays out of stryker.config.json, because local runs have no key that
       # invalidates a result when a test changes.
       - name: Mutate the changed lines
