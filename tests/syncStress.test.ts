@@ -6,7 +6,8 @@ import { createCloneFixtures, createParentSlice, waitForBackgroundSync } from '.
 import type { CliFixture, CloneFixtures } from './cliFixture.ts';
 
 const processCount = 10;
-const durationMilliseconds = 60_000;
+// The mutation run shortens the loop; plain `bun test` keeps the full minute.
+const durationMilliseconds = Number(Bun.env['TIKK_SYNC_STRESS_MILLISECONDS'] ?? 60_000);
 
 let clones: CloneFixtures | undefined;
 
