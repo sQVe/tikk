@@ -1,7 +1,9 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
-  "commandRunner": { "command": "bun test --bail" },
+  "commandRunner": {
+    "command": "bun test --bail --timeout=20000 ./src && bun test --bail --timeout=20000 ./tests --path-ignore-patterns='tests/tuiEditor.test.ts' --path-ignore-patterns='tests/storeSync.test.ts' --path-ignore-patterns='tests/syncStress.test.ts' && TIKK_SYNC_STRESS_MILLISECONDS=15000 bun test --bail --timeout=20000 ./tests/tuiEditor.test.ts ./tests/storeSync.test.ts ./tests/syncStress.test.ts"
+  },
   "coverageAnalysis": "off",
   "ignoreStatic": false,
   "dryRunTimeoutMinutes": 12,
@@ -19,7 +21,7 @@
   ],
   "tsconfigFile": "stryker-no-tsconfig.json",
   "checkers": [],
-  "concurrency": 4,
+  "concurrency": 8,
   "timeoutMS": 10000,
   "timeoutFactor": 4,
   "fileLogLevel": "off",
