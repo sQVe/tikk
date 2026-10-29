@@ -54,13 +54,37 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - name: Mutate the changed lines
+      - name: Find the merge base
+        id: base
         env:
           BASE_REF: ${{ github.base_ref }}
+        run: echo "sha=$(git merge-base HEAD "origin/${BASE_REF}")" >> "${GITHUB_OUTPUT}"
+      # The command runner reports the whole suite as one test, so Stryker cannot see a changed test.
+      # The key must change with every file that can change a mutant's result.
+      - name: Restore the incremental report
+        id: incremental
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tau/stryker-incremental.json
+          key: mutation-${{ github.event.pull_request.number }}-${{ hashFiles('src/**', 'tests/**', 'scripts/**', 'bun.lock', 'package.json', 'tsconfig.json', 'vite.config.ts', 'stryker.config.json', '.pi/tau.json') }}-${{ steps.base.outputs.sha }}-${{ github.sha }}
+          restore-keys: mutation-${{ github.event.pull_request.number }}-${{ hashFiles('src/**', 'tests/**', 'scripts/**', 'bun.lock', 'package.json', 'tsconfig.json', 'vite.config.ts', 'stryker.config.json', '.pi/tau.json') }}-${{ steps.base.outputs.sha }}-
+      # Incremental mode stays out of stryker.config.json, because local runs have no key that
+      # invalidates a result when a test changes.
+      - name: Mutate the changed lines
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
         run: |
-          base="$(git merge-base HEAD "origin/${BASE_REF}")"
+          config="${RUNNER_TEMP}/stryker.config.json"
+          jq '.incremental = true | .incrementalFile = ".tau/stryker-incremental.json"' stryker.config.json > "${config}"
           mapfile -t command < <(jq --raw-output '.mutation.argv[]' .pi/tau.json)
           status=0
-          "${command[@]}" changed "$base" > mutation.json || status=$?
+          "${command[@]}" changed "${BASE_SHA}" --config "${config}" > mutation.json || status=$?
           cat mutation.json
           exit "$status"
+      # The job fails when a mutant survives, and actions/cache saves only after a passing job.
+      - name: Save the incremental report
+        if: ${{ !cancelled() && steps.incremental.outputs.cache-hit != 'true' && hashFiles('.tau/stryker-incremental.json') != '' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .tau/stryker-incremental.json
+          key: ${{ steps.incremental.outputs.cache-primary-key }}
