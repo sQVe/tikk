@@ -333,12 +333,15 @@ const runTerminal = async (effects: CliEffects): Promise<void> => {
 
   const { startTerminal } = await import('./terminal.tsx');
   const { loadBindings } = await import('./remap.ts');
-  const config = loadBindings(readSettings(homeDirectory), configPathOf(homeDirectory));
+  const settings = readSettings(homeDirectory);
+  const config = loadBindings(settings, configPathOf(homeDirectory));
+  const icons = settings.ok ? settings.value.icons : 'unicode';
 
   await startTerminal({
     needs: opened.value,
     watch: watchStore(defaultStoreRoot),
     bindings: config.bindings,
+    icons,
     notices: config.messages,
   });
 };

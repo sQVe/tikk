@@ -148,6 +148,7 @@ it('displaces a default key only in the layer where a config entry conflicts wit
 
   expect(keysOf(loaded.bindings, 'list', 'selectNext')).toEqual(['j', 'down']);
   expect(keysOf(loaded.bindings, 'help', 'selectNext')).toEqual(['down']);
+  expect(keysOf(loaded.bindings, 'detail', 'scrollDetailDown')).toEqual(['j', 'down']);
 
   expect(loaded.messages).toEqual([
     'Key "j" of closeHelp replaces the default "j" of selectNext in the help layer.',
@@ -155,10 +156,10 @@ it('displaces a default key only in the layer where a config entry conflicts wit
 });
 
 it('accepts a key listed twice for quit, and quit still runs on it and on Ctrl+C', () => {
-  const loaded = configOf({ keys: { quit: ['x', 'x'] } });
+  const loaded = configOf({ keys: { quit: ['w', 'w'] } });
 
   expect(loaded.messages).toEqual([]);
-  expect(keysOf(loaded.bindings, 'global', 'quit')).toEqual(['x', 'ctrl+c']);
+  expect(keysOf(loaded.bindings, 'global', 'quit')).toEqual(['w', 'ctrl+c']);
 });
 
 it('accepts a key listed twice for a command that is not quit', () => {

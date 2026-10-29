@@ -1,7 +1,7 @@
 import { afterEach, expect, it } from 'bun:test';
 
-import type { NeedView, TreeGroup } from '../cli/cli.ts';
-import { createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import type { NeedView, ProjectTree } from '../cli/cli.ts';
+import { createTuiFixture, needView, projectTree } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -28,7 +28,7 @@ it.each([
   const item: NeedView = { ...needView(0, 'First'), ageSeconds };
   const { setup } = await mount([item], { width: 120, height: 20 });
 
-  expect(setup.captureCharFrame()).toMatch(new RegExp(`Age\\s+${label}(?!\\w)`));
+  expect(setup.captureCharFrame()).toMatch(new RegExp(`submitted\\s+${label}(?!\\w)`));
 });
 
 it('shows no age in the detail of an item that has none', async () => {
@@ -36,23 +36,20 @@ it('shows no age in the detail of an item that has none', async () => {
   const { setup } = await mount([item], { width: 120, height: 20 });
 
   expect(setup.captureCharFrame()).toContain('demo-3400');
-  expect(setup.captureCharFrame()).not.toMatch(/Age\s/);
+  expect(setup.captureCharFrame()).toMatch(/! submitted\s*$/m);
 });
 
-const treeWithPr = (pr: number | null): TreeGroup[] => {
-  const [group] = treeGroups();
-
-  if (group === undefined) {
-    throw new Error('The demo tree has no group.');
-  }
-
-  const [slice] = group.slices;
+const treeWithPr = (pr: number | null): ProjectTree => {
+  const tree = projectTree();
+  const slice = tree.projects[0]?.plans[0]?.slices[0];
 
   if (slice === undefined) {
     throw new Error('The demo tree has no slice.');
   }
 
-  return [{ ...group, slices: [{ ...slice, pr }] }];
+  slice.pr = pr;
+
+  return tree;
 };
 
 it('shows the PR number of a slice in the tree detail', async () => {
@@ -65,8 +62,13 @@ it('shows the PR number of a slice in the tree detail', async () => {
 
   await press('s');
   await press('j');
+  await press('j');
+  await press('j');
 
   expect(selectedLine()).toContain('demo-3402');
+
+  await press('[');
+
   expect(setup.captureCharFrame()).toMatch(/PR\s+#12/);
 });
 
@@ -80,55 +82,68 @@ it('leaves the PR row out of the tree detail for a slice without a PR', async ()
 
   await press('s');
   await press('j');
+  await press('j');
+  await press('j');
 
   expect(selectedLine()).toContain('demo-3402');
+  expect(selectedLine()).not.toContain('#');
+
+  await press('[');
+
+  expect(setup.captureCharFrame()).toMatch(/Parent\s+demo-3401/);
   expect(setup.captureCharFrame()).not.toMatch(/\bPR\b/);
 });
 
-it('shows the plan and instruction facts of a tree row in the detail', async () => {
+it('shows the plan and instruction titles and states in the detail header', async () => {
   const { setup, press, selectedLine } = await mount(
     [],
     { width: 120, height: 20 },
     [],
-    treeGroups(),
+    projectTree(),
   );
 
   await press('s');
+  await press('j');
+  await press('j');
 
   expect(selectedLine()).toContain('demo-3401');
   expect(setup.captureCharFrame()).toMatch(/Plan title\s*$/m);
-  expect(setup.captureCharFrame()).toMatch(/Plan\s*$/m);
+  expect(setup.captureCharFrame()).toMatch(/Plan\s+open\s*$/m);
 
   await press('j');
+  await press('j');
+  await press(' ');
   await press('j');
 
   expect(selectedLine()).toContain('demo-3403');
   expect(setup.captureCharFrame()).toMatch(/Instruction title\s*$/m);
-  expect(setup.captureCharFrame()).toMatch(/Instruction\s*$/m);
+  expect(setup.captureCharFrame()).toMatch(/Instruction\s+open\s*$/m);
 });
 
 const lastNonEmptyRow = (frame: string): string =>
   frame.split('\n').findLast((row) => row.trim() !== '') ?? '';
 
-it('shows no file error in the detail of the row without a plan', async () => {
-  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
-
-  const { setup, press, selectedLine } = await mount([], { width: 120, height: 20 }, [], groups, {
-    loadErrors: () =>
-      Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
-  });
+it('shows no file error in the detail of a project row', async () => {
+  const { setup, press, selectedLine } = await mount(
+    [],
+    { width: 120, height: 20 },
+    [],
+    projectTree(),
+    {
+      loadErrors: () =>
+        Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
+    },
+  );
 
   await press('s');
 
-  expect(selectedLine()).toBeDefined();
+  expect(selectedLine()).toContain('demo');
   expect(setup.captureCharFrame()).not.toContain('Broken');
   expect(setup.captureCharFrame()).not.toContain('broken.md');
 });
 
 it('counts a file error with no ticket row as a file error on the tree', async () => {
-  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
-
-  const { setup, press } = await mount([], { width: 120, height: 20 }, [], groups, {
+  const { setup, press } = await mount([], { width: 120, height: 20 }, [], projectTree(), {
     loadErrors: () =>
       Promise.resolve({ ok: true, value: [{ path: 'broken.md', id: null, message: 'Broken' }] }),
   });
@@ -150,8 +165,8 @@ it('keeps each detail fact on its own row when the title is long at 80 by 24', a
   expect(titleAt).toBeGreaterThan(-1);
   // The cut is marked, so the user sees that the title was shortened.
   expect(lines[titleAt] ?? '').toMatch(/\.{3}|…/);
-  expect(lines[titleAt + 1] ?? '').toMatch(/\bsubmitted\b/);
-  expect(lines[titleAt + 2] ?? '').toMatch(/\b1m\b/);
+  expect(lines[titleAt + 1] ?? '').toMatch(/^\S*\s*Instruction\s+open\s*$/);
+  expect(lines[titleAt + 3] ?? '').toMatch(/\bsubmitted\s+1m\b/);
 });
 
 it('keeps the status line free of detail text when the detail is short at 80 by 3', async () => {

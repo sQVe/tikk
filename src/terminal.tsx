@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 
 import type { NeedsSession } from './cli/cli.ts';
 import { App, createTuiSession } from './tui/tui.tsx';
-import type { AppProps, BindingTable, TuiEffects, TuiSession } from './tui/tui.tsx';
+import type { AppProps, BindingTable, IconChoice, TuiEffects, TuiSession } from './tui/tui.tsx';
 
 type ProcessEvent = 'SIGINT' | 'SIGTERM' | 'uncaughtException' | 'unhandledRejection';
 
@@ -38,6 +38,7 @@ export interface TerminalDependencies {
   needs: NeedsSession;
   watch: StoreWatch;
   bindings: BindingTable;
+  icons: IconChoice;
   notices: readonly string[];
 }
 
@@ -316,7 +317,13 @@ export const startTerminal = async (
     });
 
     root.render(
-      <App session={session} keymap={keymap} bindings={dependencies.bindings} onQuit={quit} />,
+      <App
+        session={session}
+        keymap={keymap}
+        bindings={dependencies.bindings}
+        icons={dependencies.icons}
+        onQuit={quit}
+      />,
     );
   } catch (error) {
     fail(error);

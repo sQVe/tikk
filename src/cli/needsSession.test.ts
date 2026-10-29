@@ -2,11 +2,13 @@ import { expect, it } from 'bun:test';
 
 import type { TicketId } from '../ticket/ticket.ts';
 import {
+  failed,
   makeEffects,
   makeFact,
   makeKindTicket,
   makeSession,
   makeTicket,
+  projectNameOf,
   stalledGh,
 } from './cliHarness.ts';
 import { openNeedsSession } from './needsSession.ts';
@@ -115,7 +117,37 @@ it('loads the plan tree from the session tickets and facts', async () => {
   expect(tree.ok).toBe(true);
 
   if (tree.ok) {
-    expect(tree.value.map((group) => String(group.plan?.id))).toEqual(['demo-3467']);
+    expect(tree.value.current).toBe(projectNameOf('demo'));
+    expect(tree.value.projects[0]?.plans.map((plan) => String(plan.id))).toEqual(['demo-3467']);
+    expect(tree.value.projects[0]?.inbox.map((task) => String(task.id))).toEqual(['demo-3468']);
+  }
+});
+
+it('loads the tree with no current project when the project does not resolve', async () => {
+  const fakeSession = makeSession({ tickets: [makeKindTicket('demo-3467', 'plan')] });
+
+  const fakeEffects = makeEffects({
+    session: fakeSession,
+    overrides: { resolveProject: () => failed('No git remote for /work.') },
+  });
+
+  const opened = await openNeedsSession(fakeEffects.effects);
+
+  expect(opened.ok).toBe(true);
+
+  if (!opened.ok) {
+    return;
+  }
+
+  const tree = await opened.value.loadTree();
+
+  await opened.value.close();
+
+  expect(tree.ok).toBe(true);
+
+  if (tree.ok) {
+    expect(tree.value.current).toBeNull();
+    expect(tree.value.projects.map((project) => String(project.name))).toEqual(['demo']);
   }
 });
 
@@ -164,11 +196,11 @@ it('keeps a slice active when an archived accepted instruction is its only start
   expect(tree.ok).toBe(true);
 
   if (tree.ok) {
-    const [group] = tree.value;
+    const [project] = tree.value.projects;
 
-    expect(group?.slices.map((entry) => entry.state)).toEqual(['active']);
+    expect(project?.slices.map((entry) => entry.state)).toEqual(['active']);
 
-    expect(group?.slices[0]?.instructions.map((instruction) => String(instruction.id))).toEqual([
+    expect(project?.slices[0]?.instructions.map((instruction) => String(instruction.id))).toEqual([
       'demo-3469',
     ]);
   }

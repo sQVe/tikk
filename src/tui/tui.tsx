@@ -5,7 +5,10 @@ import { useTerminalDimensions } from '@opentui/react';
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 
-import { DetailPane } from './DetailPane.tsx';
+import { DetailPane, detailPaneChromeColumns } from './DetailPane.tsx';
+import type { DetailStep } from './detailState.ts';
+import { detailWindowOf } from './detailWindow.ts';
+import type { DetailWindow } from './detailWindow.ts';
 import { strayErrorsOf } from './fileErrors.ts';
 import { HelpOverlay } from './HelpOverlay.tsx';
 import { helpWindowOf } from './helpWindow.ts';
@@ -13,7 +16,10 @@ import { MessageOverlay } from './MessageOverlay.tsx';
 import { messageWindowOf } from './messageWindow.ts';
 import { palette } from './palette.ts';
 import { RowList } from './rowList.tsx';
+import type { ListRow } from './rowList.tsx';
 import { StatusLine } from './StatusLine.tsx';
+import { iconSets } from './ticketIcons.ts';
+import type { IconChoice, IconSet } from './ticketIcons.ts';
 import { commandScopes, keysOfAction, scopePriority } from './tuiCommands.ts';
 import type { Binding, BindingTable, CommandScope } from './tuiCommands.ts';
 import type { TuiIntent, TuiSession, TuiSnapshot } from './tuiSession.ts';
@@ -30,6 +36,7 @@ export {
 } from './tuiCommands.ts';
 
 export type { Binding, BindingTable, Command, CommandScope, KeyChoice } from './tuiCommands.ts';
+export type { IconChoice } from './ticketIcons.ts';
 
 export { createTuiSession } from './tuiSession.ts';
 export type { TuiEffects, TuiSession } from './tuiSession.ts';
@@ -38,7 +45,13 @@ export interface AppProps {
   session: TuiSession;
   keymap: ReturnType<typeof createDefaultOpenTuiKeymap>;
   bindings: BindingTable;
+  icons: IconChoice;
   onQuit: () => void;
+}
+
+interface PaneSize {
+  width: number;
+  height: number;
 }
 
 interface LayerProps {
@@ -84,7 +97,7 @@ const statusOf = (snapshot: TuiSnapshot, strayCount: number): string =>
     .filter((part) => part !== '')
     .join('; ');
 
-const viewLabels: Record<TuiSnapshot['view'], string> = { home: 'Home', tree: 'Tree' };
+const viewLabels: Record<TuiSnapshot['view'], string> = { home: 'Home', tree: 'Projects' };
 
 const sideLayoutMinimumWidth = 90;
 const detailMaximumWidth = 44;
@@ -96,7 +109,7 @@ const isScopeActiveIn = (scope: CommandScope, state: ActivityState): boolean => 
   const active: Record<CommandScope, boolean> = {
     global: true,
     list: state.overlay === 'none' && !state.detailOpen,
-    detail: state.detailOpen,
+    detail: state.overlay === 'none' && state.detailOpen,
     input: false,
     rank: false,
     visual: false,
@@ -226,9 +239,85 @@ const PendingSequence = ({ run, session, bindings }: Omit<LayerProps, 'scope'>):
 const isRedundantDetail = (intent: TuiIntent, sideLayout: boolean): boolean =>
   sideLayout && intent.kind === 'openDetail';
 
-const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactNode => {
+const paneIntentKinds = new Set<TuiIntent['kind']>(['previousTab', 'nextTab', 'toggleAttention']);
+
+const isHiddenPaneIntent = (intent: TuiIntent, showsPane: boolean): boolean =>
+  !showsPane && paneIntentKinds.has(intent.kind);
+
+const isSentIntent = (intent: TuiIntent, sideLayout: boolean, showsPane: boolean): boolean =>
+  !isRedundantDetail(intent, sideLayout) && !isHiddenPaneIntent(intent, showsPane);
+
+const paneWindowOf = (
+  snapshot: TuiSnapshot,
+  row: ListRow | undefined,
+  size: PaneSize,
+  icons: IconSet,
+): DetailWindow | undefined => {
+  if (typeof row?.id !== 'string') {
+    return undefined;
+  }
+
+  return detailWindowOf({
+    state: snapshot.detail,
+    id: row.id,
+    needs: snapshot.needs,
+    errors: snapshot.fileErrors,
+    icons,
+    columns: size.width - detailPaneChromeColumns,
+    rows: size.height,
+  });
+};
+
+const selectedRowOf = (snapshot: TuiSnapshot): ListRow | undefined => {
+  const view = snapshot.views[snapshot.view];
+
+  return view.rows[view.selection.index];
+};
+
+const linesOfStep = (step: DetailStep, bodyRows: number): number => {
+  const lines = step.unit === 'line' ? 1 : Math.max(1, Math.floor(bodyRows / 2));
+
+  return lines * step.direction;
+};
+
+const scrollDetail = (
+  session: TuiSession,
+  step: DetailStep,
+  size: PaneSize,
+  icons: IconSet,
+): void => {
+  const current = session.getSnapshot();
+  const detailWindow = paneWindowOf(current, selectedRowOf(current), size, icons);
+
+  if (detailWindow === undefined) {
+    return;
+  }
+
+  session.send({
+    kind: 'scrollDetail',
+    move: { kind: 'lines', lines: linesOfStep(step, detailWindow.bodyRows) },
+    maximumTop: detailWindow.maximumTop,
+  });
+};
+
+const useClampedTop = (
+  session: TuiSession,
+  top: number,
+  detailWindow: DetailWindow | undefined,
+): void => {
+  const maximumTop = detailWindow?.maximumTop;
+
+  useEffect(() => {
+    if (maximumTop !== undefined && top > maximumTop) {
+      session.send({ kind: 'scrollDetail', move: { kind: 'lines', lines: 0 }, maximumTop });
+    }
+  }, [session, top, maximumTop]);
+};
+
+const Screen = ({ session, onQuit, bindings, icons }: Omit<AppProps, 'keymap'>): ReactNode => {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   const { width, height } = useTerminalDimensions();
+  const iconSet = iconSets[icons];
   const view = snapshot.views[snapshot.view];
   const sideLayout = width >= sideLayoutMinimumWidth;
   const fullDetail = snapshot.detailOpen && !sideLayout;
@@ -240,6 +329,8 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
   const rows = [...snapshot.views.home.rows, ...snapshot.views.tree.rows];
   const strayCount = strayErrorsOf(snapshot.fileErrors, rows).length;
   const helpKeys = keysOfAction(bindings, 'global', 'help').join('/');
+  const listHeight = Math.max(0, height - statusRows);
+  const hasContentRows = listHeight > 0;
 
   const run = useCallback(
     (binding: Binding) => {
@@ -262,11 +353,26 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
 
       if (intent.kind === 'quit') {
         onQuit();
-      } else if (!isRedundantDetail(intent.intent, sideLayout)) {
+      } else if (intent.kind === 'scrollDetail') {
+        if (showsPane) {
+          scrollDetail(session, intent.step, { width: paneWidth, height: listHeight }, iconSet);
+        }
+      } else if (isSentIntent(intent.intent, sideLayout, showsPane)) {
         session.send(intent.intent);
       }
     },
-    [session, onQuit, bindings, width, height, sideLayout],
+    [
+      session,
+      onQuit,
+      bindings,
+      width,
+      height,
+      sideLayout,
+      showsPane,
+      paneWidth,
+      listHeight,
+      iconSet,
+    ],
   );
 
   useEffect(() => {
@@ -275,8 +381,14 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
     }
   }, [session, sideLayout, snapshot.detailOpen]);
 
-  const listHeight = Math.max(0, height - statusRows);
-  const hasContentRows = listHeight > 0;
+  const detailWindow = paneWindowOf(
+    snapshot,
+    selectedRow,
+    { width: paneWidth, height: listHeight },
+    iconSet,
+  );
+
+  useClampedTop(session, snapshot.detail.top, detailWindow);
 
   return (
     <box flexDirection="column" flexGrow={1}>
@@ -294,18 +406,17 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
                   selected={view.selection.index}
                   height={listHeight}
                   palette={palette}
-                  emptyMessage={
-                    snapshot.view === 'home' ? 'Nothing needs you.' : 'No plans or slices.'
-                  }
+                  icons={iconSet}
+                  emptyMessage={snapshot.view === 'home' ? 'Nothing needs you.' : 'No projects.'}
                 />
               </box>
             )}
             {showsPane ? (
               <DetailPane
                 row={selectedRow}
-                errors={snapshot.fileErrors}
                 palette={palette}
                 width={paneWidth}
+                detailWindow={detailWindow}
               />
             ) : null}
           </box>
@@ -338,8 +449,8 @@ const Screen = ({ session, onQuit, bindings }: Omit<AppProps, 'keymap'>): ReactN
   );
 };
 
-export const App = ({ session, keymap, onQuit, bindings }: AppProps): ReactNode => (
+export const App = ({ session, keymap, onQuit, bindings, icons }: AppProps): ReactNode => (
   <KeymapProvider keymap={keymap}>
-    <Screen session={session} onQuit={onQuit} bindings={bindings} />
+    <Screen session={session} onQuit={onQuit} bindings={bindings} icons={icons} />
   </KeymapProvider>
 );

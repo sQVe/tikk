@@ -1,7 +1,12 @@
+import { detailOf } from './detailState.ts';
+import type { DetailStep } from './detailState.ts';
 import type { OverlayMove } from './overlayScroll.ts';
 import type { TuiIntent, TuiSnapshot } from './tuiSession.ts';
 
-type CommandIntent = { kind: 'session'; intent: TuiIntent } | { kind: 'quit' };
+type CommandIntent =
+  | { kind: 'session'; intent: TuiIntent }
+  | { kind: 'scrollDetail'; step: DetailStep }
+  | { kind: 'quit' };
 
 export type CommandScope =
   | 'global'
@@ -50,6 +55,8 @@ type KeyChoices = (command: Command) => readonly KeyChoice[];
 
 export type BindingTable = Readonly<Record<CommandScope, readonly Binding[]>>;
 
+type PaneCommand = Omit<Command, 'scope' | 'hiddenFromHelp'>;
+
 export const commandScopes: readonly CommandScope[] = [
   'global',
   'list',
@@ -91,7 +98,88 @@ const selectedTicketReason = (snapshot: TuiSnapshot): string | undefined => {
   return id === undefined ? 'No ticket is selected.' : undefined;
 };
 
+const foldReason = (snapshot: TuiSnapshot): string | undefined => {
+  const view = snapshot.views[snapshot.view];
+  const fold = view.rows[view.selection.index]?.marks?.fold ?? null;
+
+  return fold === null ? 'This row does not fold.' : undefined;
+};
+
+const planReason = (snapshot: TuiSnapshot): string | undefined => {
+  const ticketReason = selectedTicketReason(snapshot);
+
+  if (ticketReason !== undefined) {
+    return ticketReason;
+  }
+
+  const detail = detailOf(snapshot.detail.load);
+
+  if (detail === undefined) {
+    return snapshot.detail.load.status === 'failed'
+      ? 'The ticket did not load, so its kind is unknown.'
+      : 'The ticket is still loading.';
+  }
+
+  return detail.ticket.kind === 'plan' ? undefined : 'The selected row is not a plan.';
+};
+
 const session = (intent: TuiIntent): CommandIntent => ({ kind: 'session', intent });
+
+const paneCommands: readonly PaneCommand[] = [
+  {
+    id: 'previousTab',
+    label: 'Show the previous detail tab',
+    section: 'tickets',
+    keys: ['['],
+    disabledReason: enabled,
+    intent: session({ kind: 'previousTab' }),
+  },
+  {
+    id: 'nextTab',
+    label: 'Show the next detail tab',
+    section: 'tickets',
+    keys: [']'],
+    disabledReason: enabled,
+    intent: session({ kind: 'nextTab' }),
+  },
+  {
+    id: 'toggleAttention',
+    label: 'Expand or shrink what needs you',
+    section: 'tickets',
+    keys: ['x'],
+    disabledReason: enabled,
+    intent: session({ kind: 'toggleAttention' }),
+  },
+  {
+    id: 'editDesign',
+    label: 'Edit the plan design.md in $EDITOR',
+    section: 'tickets',
+    keys: ['shift+d'],
+    disabledReason: planReason,
+    intent: session({ kind: 'editDesign' }),
+  },
+  {
+    id: 'scrollDetailHalfDown',
+    label: 'Scroll the detail down half a page',
+    section: 'moving',
+    keys: ['ctrl+d'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'halfPage', direction: 1 } },
+  },
+  {
+    id: 'scrollDetailHalfUp',
+    label: 'Scroll the detail up half a page',
+    section: 'moving',
+    keys: ['ctrl+u'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'halfPage', direction: -1 } },
+  },
+];
+
+const paneCommandsIn = (scope: CommandScope): Command[] =>
+  paneCommands.map((command) =>
+    Object.assign({ scope }, command, scope === 'list' ? {} : { hiddenFromHelp: true as const }),
+  );
 
 export const catalog: readonly Command[] = [
   {
@@ -163,8 +251,35 @@ export const catalog: readonly Command[] = [
     intent: session({ kind: 'moveLast' }),
   },
   {
+    id: 'toggleFold',
+    label: 'Fold or unfold the selected row',
+    scope: 'list',
+    section: 'moving',
+    keys: ['za', 'space'],
+    disabledReason: foldReason,
+    intent: session({ kind: 'fold', fold: 'toggle' }),
+  },
+  {
+    id: 'openFold',
+    label: 'Unfold the selected row',
+    scope: 'list',
+    section: 'moving',
+    keys: ['zo'],
+    disabledReason: foldReason,
+    intent: session({ kind: 'fold', fold: 'open' }),
+  },
+  {
+    id: 'closeFold',
+    label: 'Fold the selected row',
+    scope: 'list',
+    section: 'moving',
+    keys: ['zc'],
+    disabledReason: foldReason,
+    intent: session({ kind: 'fold', fold: 'close' }),
+  },
+  {
     id: 'switchView',
-    label: 'Switch between home and tree',
+    label: 'Switch between home and projects',
     scope: 'list',
     section: 'tickets',
     keys: ['s'],
@@ -188,6 +303,26 @@ export const catalog: readonly Command[] = [
     keys: ['return'],
     disabledReason: selectedRowReason,
     intent: session({ kind: 'openDetail' }),
+  },
+  ...paneCommandsIn('list'),
+  ...paneCommandsIn('detail'),
+  {
+    id: 'scrollDetailDown',
+    label: 'Scroll the full-screen detail down',
+    scope: 'detail',
+    section: 'moving',
+    keys: ['j', 'down'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'line', direction: 1 } },
+  },
+  {
+    id: 'scrollDetailUp',
+    label: 'Scroll the full-screen detail up',
+    scope: 'detail',
+    section: 'moving',
+    keys: ['k', 'up'],
+    disabledReason: enabled,
+    intent: { kind: 'scrollDetail', step: { unit: 'line', direction: -1 } },
   },
   {
     id: 'closeDetail',

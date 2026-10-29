@@ -5,6 +5,7 @@ import { runCli } from './cli.ts';
 import {
   failed,
   makeEffects,
+  makeFact,
   makeKindTicket,
   makeSession,
   makeTicket,
@@ -107,6 +108,25 @@ it('writes json output with a trailing newline', async () => {
   expect(stdout).toHaveLength(1);
   expect(stdout[0]).toEndWith('\n');
   expect(JSON.parse(stdout.join(''))).toMatchObject({ id: 'demo-3467' });
+});
+
+it('runs history from the command line and lists the ticket facts', async () => {
+  const question = makeFact({
+    kind: 'log',
+    type: 'question',
+    text: 'Which store?',
+    item: '0123456789ab',
+    at: '2026-10-20T10:00:00.000Z',
+  });
+
+  const { exitCode, stdout } = await run(['history', 'demo-3467', '--json'], { facts: [question] });
+
+  expect(exitCode).toBe(0);
+
+  expect(JSON.parse(stdout.join(''))).toEqual({
+    id: 'demo-3467',
+    facts: [question],
+  });
 });
 
 it('writes nothing for an empty text listing', async () => {

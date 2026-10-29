@@ -76,7 +76,12 @@ const openHome = async () => {
 
   const setup = await act(() =>
     testRender(
-      <WithKeymap session={session} bindings={defaultBindings} onQuit={() => undefined} />,
+      <WithKeymap
+        session={session}
+        bindings={defaultBindings}
+        icons="unicode"
+        onQuit={() => undefined}
+      />,
       {
         width: 100,
         height: 20,

@@ -4,10 +4,10 @@ import { testRender } from '@opentui/react/test-utils';
 import { act, useLayoutEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 
-import type { NeedView, TreeGroup } from '../cli/cli.ts';
+import type { NeedView, ProjectTree, TicketDetail, TreeProject } from '../cli/cli.ts';
 import { invariant } from '../invariant.ts';
 import { App, catalog, createTuiSession, defaultBindings } from './tui.tsx';
-import type { AppProps, BindingTable, TuiEffects } from './tui.tsx';
+import type { AppProps, BindingTable, IconChoice, TuiEffects } from './tui.tsx';
 
 type Setup = Awaited<ReturnType<typeof testRender>>;
 
@@ -20,12 +20,22 @@ interface CommitProbeControls {
 export interface TuiFixture {
   setup: Setup;
   edited: string[];
+  designEdited: string[];
   quits: () => number;
   press: (key: string, modifiers?: { ctrl: boolean }) => Promise<void>;
   storeChanged: () => Promise<void>;
   selectedLine: () => string | undefined;
   pressAtNextCommit: (...keys: string[]) => void;
   cleanup: () => void;
+}
+
+type DetailKind = TicketDetail['ticket']['kind'];
+
+interface DetailEntry {
+  kind: DetailKind;
+  title: string;
+  state: TicketDetail['state'];
+  parent: string | null;
 }
 
 Reflect.set(globalThis, 'IS_REACT_ACT_ENVIRONMENT', true);
@@ -69,8 +79,16 @@ const WithKeymap = ({
 
 const isDemoId = (raw: string): raw is NeedView['id'] => /^demo-\d+$/.test(raw);
 
-const demoId = (raw: string): NeedView['id'] => {
+export const ticketId = (raw: string): NeedView['id'] => {
   invariant(isDemoId(raw), `Test ID ${raw} is invalid.`);
+
+  return raw;
+};
+
+const isProjectName = (raw: string): raw is TreeProject['name'] => /^[a-z][a-z0-9-]*$/.test(raw);
+
+export const projectName = (raw: string): TreeProject['name'] => {
+  invariant(isProjectName(raw), `Test project ${raw} is invalid.`);
 
   return raw;
 };
@@ -85,7 +103,7 @@ export const commandLabel = (id: string): string => {
 };
 
 export const needView = (index: number, title: string): NeedView => ({
-  id: demoId(`demo-${firstDemoNumber + index}`),
+  id: ticketId(`demo-${firstDemoNumber + index}`),
   title,
   reason: 'submitted',
   since: '2026-10-20T11:00:00.000Z',
@@ -94,38 +112,186 @@ export const needView = (index: number, title: string): NeedView => ({
   passedUp: true,
 });
 
-export const treeGroups = (): TreeGroup[] => {
-  const planId = demoId('demo-3401');
-  const activeId = demoId('demo-3402');
-  const instructionId = demoId('demo-3403');
+export const noProjects = (): ProjectTree => ({ current: null, projects: [] });
 
-  return [
+export const projectTree = (): ProjectTree => ({
+  current: projectName('demo'),
+  projects: [
     {
-      plan: { id: planId, title: 'Plan title', state: 'open' },
-      slices: [
+      name: projectName('demo'),
+      inbox: [],
+      plans: [
         {
-          id: activeId,
-          title: 'Slice title',
-          state: 'active',
-          pr: 12,
-          instructions: [{ id: instructionId, title: 'Instruction title', state: 'open' }],
+          id: ticketId('demo-3401'),
+          title: 'Plan title',
+          state: 'open',
+          tasks: [],
+          slices: [
+            {
+              id: ticketId('demo-3402'),
+              title: 'Slice title',
+              state: 'active',
+              pr: 12,
+              tasks: [],
+              instructions: [
+                { id: ticketId('demo-3403'), title: 'Instruction title', state: 'open' },
+              ],
+            },
+          ],
         },
       ],
+      slices: [],
     },
-  ];
+  ],
+});
+
+export const ticketDetail = (
+  id: string,
+  entry: DetailEntry,
+  overrides: Partial<Omit<TicketDetail, 'ticket'>> & {
+    ticket?: Partial<TicketDetail['ticket']>;
+  } = {},
+): TicketDetail => {
+  const { ticket, ...rest } = overrides;
+
+  return {
+    ticket: {
+      id,
+      path: `/s/${id}.md`,
+      hash: `hash-${id}`,
+      kind: entry.kind,
+      title: entry.title,
+      project: 'demo',
+      parent: entry.parent,
+      rank: null,
+      blockedBy: [],
+      discoveredFrom: [],
+      related: [],
+      criteria: null,
+      covers: null,
+      status: 'open',
+      archived: null,
+      error: null,
+      ...ticket,
+    },
+    body: '',
+    state: entry.state,
+    pr: null,
+    children: [],
+    facts: [],
+    ...rest,
+  };
 };
+
+const prOf = (number: number): TicketDetail['pr'] => ({
+  repository: 'acme/app',
+  number,
+  state: 'open',
+  base: 'main',
+  head: 'head1',
+  mergeCommit: null,
+  inTrunk: false,
+  checkedAt: '2026-10-20T11:00:00.000Z',
+});
+
+const treeDetailsOf = (tree: ProjectTree): Map<string, TicketDetail> => {
+  const entries = new Map<string, TicketDetail>();
+
+  const add = (
+    kind: DetailKind,
+    parent: string | null,
+    ticket: { id: string; title: string; state: DetailEntry['state'] },
+  ) => {
+    entries.set(
+      ticket.id,
+      ticketDetail(ticket.id, { kind, title: ticket.title, state: ticket.state, parent }),
+    );
+  };
+
+  const addSlice = (slice: TreeProject['slices'][number], parent: string | null) => {
+    entries.set(
+      slice.id,
+      ticketDetail(
+        slice.id,
+        { kind: 'slice', title: slice.title, state: slice.state, parent },
+        { pr: slice.pr === null ? null : prOf(slice.pr) },
+      ),
+    );
+
+    for (const task of slice.tasks) {
+      add('task', slice.id, task);
+    }
+
+    for (const instruction of slice.instructions) {
+      add('instruction', slice.id, instruction);
+    }
+  };
+
+  for (const project of tree.projects) {
+    for (const entry of project.inbox) {
+      add(entry.kind, null, entry);
+    }
+
+    for (const plan of project.plans) {
+      add('plan', null, plan);
+
+      for (const task of plan.tasks) {
+        add('task', plan.id, task);
+      }
+
+      for (const slice of plan.slices) {
+        addSlice(slice, plan.id);
+      }
+    }
+
+    for (const slice of project.slices) {
+      addSlice(slice, null);
+    }
+  }
+
+  return entries;
+};
+
+const demoLoadDetail =
+  (items: readonly NeedView[], tree: ProjectTree): TuiEffects['loadDetail'] =>
+  (rawId) => {
+    const item = items.find((candidate) => candidate.id === rawId);
+
+    const itemDetail =
+      item === undefined
+        ? undefined
+        : ticketDetail(rawId, {
+            kind: 'instruction',
+            title: item.title,
+            state: 'open',
+            parent: null,
+          });
+
+    const detail = treeDetailsOf(tree).get(rawId) ?? itemDetail;
+
+    if (detail === undefined) {
+      return Promise.resolve({
+        ok: false,
+        reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+      });
+    }
+
+    return Promise.resolve({ ok: true, value: detail });
+  };
 
 export const createTuiFixture = async (
   items: NeedView[],
   size: { width: number; height: number },
   problems: string[] = [],
-  groups: TreeGroup[] = [],
+  tree: ProjectTree = noProjects(),
   overrides: Partial<TuiEffects> = {},
   bindings: BindingTable = defaultBindings,
   notices: string[] = [],
+  icons: IconChoice = 'unicode',
 ): Promise<TuiFixture> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
+  const designEdited: string[] = [];
   let quitCount = 0;
 
   const probe: CommitProbeControls = {
@@ -155,7 +321,7 @@ export const createTuiFixture = async (
       });
     },
     loadTree: () => {
-      const loaded = Promise.resolve({ ok: true as const, value: structuredClone(groups) });
+      const loaded = Promise.resolve({ ok: true as const, value: structuredClone(tree) });
 
       return loaded.then((result) => {
         probe.reloaded();
@@ -164,8 +330,14 @@ export const createTuiFixture = async (
       });
     },
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
+    loadDetail: demoLoadDetail(items, tree),
     edit: (rawId) => {
       edited.push(rawId);
+
+      return Promise.resolve({ ok: true, value: undefined });
+    },
+    editDesign: (rawId) => {
+      designEdited.push(rawId);
 
       return Promise.resolve({ ok: true, value: undefined });
     },
@@ -186,6 +358,7 @@ export const createTuiFixture = async (
       <WithKeymap
         session={session}
         bindings={bindings}
+        icons={icons}
         onQuit={() => {
           quitCount += 1;
         }}
@@ -268,6 +441,7 @@ export const createTuiFixture = async (
   return {
     setup,
     edited,
+    designEdited,
     quits: () => quitCount,
     press,
     storeChanged,

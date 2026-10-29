@@ -33,7 +33,7 @@ interface FieldEdit {
 }
 
 const usage =
-  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] [--covers <criterion>]... [--clear-covers] --json, or tikk edit <id>';
+  'Usage: tikk edit <id> --hash <hash> [--title <t>] [--status <s>] [--kind <slice|plan>] [--parent <id>] [--criteria-file <f>] [--body-file <f>] [--covers <criterion>]... [--clear-covers] --json, or tikk edit <id>, or tikk edit <id> --design';
 
 const kindChange = (
   ticket: CliTicket,
@@ -249,8 +249,23 @@ const readFieldEdit = (
   };
 };
 
+const designEdit = async (
+  input: CommandInput,
+  rawId: string,
+  values: ParsedArguments['values'],
+): Promise<CommandResult> => {
+  const edit = readFieldEdit(values, false);
+
+  if (!edit.ok || edit.value !== undefined) {
+    return invalidArguments(`--design cannot be combined with field flags. ${usage}`);
+  }
+
+  return ticketEditor(input, rawId, 'design');
+};
+
 export const ticketEdit = async (input: CommandInput): Promise<CommandResult> => {
   const parsed = parseCommandArguments(input.args, {
+    design: { type: 'boolean' },
     hash: { type: 'string' },
     title: { type: 'string' },
     status: { type: 'string' },
@@ -272,6 +287,10 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
     return invalidArguments(usage);
   }
 
+  if (parsed.value.values['design'] === true) {
+    return designEdit(input, rawId, parsed.value.values);
+  }
+
   const edit = readFieldEdit(parsed.value.values, input.json);
 
   if (!edit.ok) {
@@ -279,7 +298,7 @@ export const ticketEdit = async (input: CommandInput): Promise<CommandResult> =>
   }
 
   if (edit.value === undefined) {
-    return ticketEditor(input, rawId);
+    return ticketEditor(input, rawId, 'ticket');
   }
 
   const fieldEdit = edit.value;

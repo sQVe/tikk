@@ -1,37 +1,70 @@
 import { TextAttributes } from '@opentui/core';
 import type { ReactNode } from 'react';
 
-import { errorsOfTicket } from './fileErrors.ts';
-import type { TicketFileError } from './fileErrors.ts';
+import { AttentionBlock } from './AttentionBlock.tsx';
+import { DetailHeader } from './DetailHeader.tsx';
+import { DetailTabs } from './DetailTabs.tsx';
+import type { DetailWindow } from './detailWindow.ts';
 import type { Palette } from './palette.ts';
 import { singleLine } from './rowList.tsx';
 import type { DetailFact, ListRow } from './rowList.tsx';
 
 const labelWidth = 8;
 
-const fileFactsOf = (id: string | null, errors: readonly TicketFileError[]): DetailFact[] => {
-  if (id === null) {
-    return [];
-  }
+export const detailPaneChromeColumns = 2;
 
-  return errorsOfTicket(errors, id).flatMap((error) => [
-    { label: 'File', value: error.path },
-    { label: 'Error', value: error.message },
-  ]);
+const FactRows = (props: { facts: readonly DetailFact[]; palette: Palette }): ReactNode => {
+  const { palette } = props;
+
+  return props.facts.map((fact) => (
+    <box flexDirection="row" height={1} flexShrink={0} key={`${fact.label}:${fact.value}`}>
+      <text
+        fg={palette.text}
+        attributes={TextAttributes.DIM}
+        width={labelWidth}
+        height={1}
+        flexShrink={0}
+      >
+        {fact.label}
+      </text>
+      <text fg={palette.text} wrapMode="none" truncate height={1} flexShrink={1}>
+        {singleLine(fact.value)}
+      </text>
+    </box>
+  ));
 };
 
-const factsOf = (row: ListRow, errors: readonly TicketFileError[]): DetailFact[] => [
-  ...row.facts,
-  ...fileFactsOf(row.id, errors),
-];
+const PaneContent = (props: {
+  row: ListRow | undefined;
+  palette: Palette;
+  detailWindow: DetailWindow | undefined;
+}): ReactNode => {
+  const { row, palette, detailWindow } = props;
+
+  if (row === undefined) {
+    return null;
+  }
+
+  if (detailWindow === undefined) {
+    return row.id === null ? <FactRows facts={row.facts} palette={palette} /> : null;
+  }
+
+  return (
+    <>
+      <DetailHeader lines={detailWindow.header} palette={palette} />
+      <AttentionBlock lines={detailWindow.attention} palette={palette} />
+      <DetailTabs labels={detailWindow.tabs} body={detailWindow.body} palette={palette} />
+    </>
+  );
+};
 
 export const DetailPane = (props: {
   row: ListRow | undefined;
-  errors: readonly TicketFileError[];
   palette: Palette;
   width: number;
+  detailWindow: DetailWindow | undefined;
 }): ReactNode => {
-  const { palette, row } = props;
+  const { palette } = props;
 
   return (
     <box
@@ -43,24 +76,7 @@ export const DetailPane = (props: {
       border={['left']}
       borderColor={palette.text}
     >
-      {row === undefined
-        ? null
-        : factsOf(row, props.errors).map((fact) => (
-            <box flexDirection="row" height={1} flexShrink={0} key={`${fact.label}:${fact.value}`}>
-              <text
-                fg={palette.text}
-                attributes={TextAttributes.DIM}
-                width={labelWidth}
-                height={1}
-                flexShrink={0}
-              >
-                {fact.label}
-              </text>
-              <text fg={palette.text} wrapMode="none" truncate height={1} flexShrink={1}>
-                {singleLine(fact.value)}
-              </text>
-            </box>
-          ))}
+      <PaneContent row={props.row} palette={palette} detailWindow={props.detailWindow} />
     </box>
   );
 };

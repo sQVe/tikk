@@ -1,5 +1,6 @@
 import { expect, it } from 'bun:test';
 
+import { criterionFingerprint } from '../fact/fact.ts';
 import type { Fact } from '../fact/fact.ts';
 import {
   failureOf,
@@ -170,6 +171,70 @@ it('keeps the status of a draft slice', async () => {
     await show(['demo-3469'], [makeKindTicket('demo-3469', 'slice', 'draft')]),
   );
 
-  expect(output.json).not.toHaveProperty('pr');
+  expect(output.json).toMatchObject({ state: 'draft', pr: null });
   expect(output.text).toContain('demo-3469  draft');
+});
+
+it('shows a plan as done in json once its only slice is done, and keeps its stored status', async () => {
+  const plan = makeKindTicket('demo-3466', 'plan');
+
+  const slice = makeTicket('demo-3469', {
+    frontMatter: {
+      ...makeKindTicket('demo-3469', 'slice').frontMatter,
+      parent: ticketIdOf('demo-3466'),
+      criteria: [{ id: 'works', check: 'Run it.', expected: 'It works.' }],
+    },
+  });
+
+  const merged = makeFact({
+    ticket: 'demo-3469',
+    kind: 'pr',
+    repository: 'sqve/tikk',
+    number: 7,
+    state: 'merged',
+    base: 'main',
+    head: 'aaa',
+    trunk: 'main',
+    inTrunk: true,
+  });
+
+  const audit = makeFact({
+    ticket: 'demo-3469',
+    kind: 'audit',
+    repository: 'sqve/tikk',
+    changeHash: 'hash1',
+    head: 'aaa',
+    base: 'main',
+    verdicts: [
+      {
+        criterion: 'works',
+        verdict: 'met',
+        evidence: 'Ran it.',
+        definition: criterionFingerprint({ check: 'Run it.', expected: 'It works.' }),
+      },
+    ],
+  });
+
+  const instruction = makeTicket('demo-3479', {
+    frontMatter: {
+      ...makeTicket('demo-3479').frontMatter,
+      parent: ticketIdOf('demo-3469'),
+    },
+  });
+
+  const submitted = makeFact({
+    ticket: 'demo-3479',
+    kind: 'log',
+    type: 'submitted',
+    text: '',
+    item: '5ab0000000a1',
+  });
+
+  const accepted = makeFact({ ticket: 'demo-3479', kind: 'accept', item: '5ab0000000a1' });
+
+  const output = successOf(
+    await show(['demo-3466'], [plan, slice, instruction], [merged, audit, submitted, accepted]),
+  );
+
+  expect(output.json).toMatchObject({ status: 'open', state: 'done' });
 });

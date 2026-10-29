@@ -2,7 +2,7 @@ import { afterEach, expect, it } from 'bun:test';
 
 import { act } from 'react';
 
-import { createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import { createTuiFixture, needView, projectTree } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -99,19 +99,20 @@ it('returns to the side-by-side layout when the terminal grows while the detail 
   await press('j');
 
   expect(selectedLine()).toContain('Second');
-  expect(setup.captureCharFrame()).toMatch(/\u2502 ID\s+demo-3401/);
+  expect(setup.captureCharFrame()).toMatch(/\u2502 .*demo-3401\s+Second/);
 });
 
 it('shows the kind and state of a tree row in the detail pane', async () => {
-  const { setup, press } = await mount([], { width: 120, height: 20 }, [], treeGroups());
+  const { setup, press } = await mount([], { width: 120, height: 20 }, [], projectTree());
 
   await press('s');
+  await press('j');
+  await press('j');
   await press('j');
 
   const frame = setup.captureCharFrame();
 
-  expect(frame).toMatch(/Slice\s*$/m);
-  expect(frame).toMatch(/active\s*$/m);
+  expect(frame).toMatch(/Slice\s+active\s*$/m);
 });
 
 it('quits on Ctrl+C while the full-screen detail is open', async () => {

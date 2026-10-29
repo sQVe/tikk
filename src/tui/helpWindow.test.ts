@@ -8,9 +8,15 @@ import type { TuiSnapshot } from './tuiSession.ts';
 const snapshotOf = async (): Promise<TuiSnapshot> => {
   const session = createTuiSession({
     load: () => Promise.resolve({ ok: true, value: { items: [], reconcileProblems: [] } }),
-    loadTree: () => Promise.resolve({ ok: true, value: [] }),
+    loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
+    loadDetail: (rawId) =>
+      Promise.resolve({
+        ok: false,
+        reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+      }),
     edit: () => Promise.resolve({ ok: true, value: undefined }),
+    editDesign: () => Promise.resolve({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: () => () => undefined,
     notices: [],

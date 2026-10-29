@@ -1,8 +1,8 @@
 import { expect, it } from 'bun:test';
 
-import type { CliFailure, NeedView, NeedsReading, TreeGroup } from '../cli/cli.ts';
+import type { CliFailure, NeedView, NeedsReading, ProjectTree } from '../cli/cli.ts';
 import type { Result } from '../result.ts';
-import { needView, treeGroups } from './tuiHarness.tsx';
+import { needView, noProjects, projectTree } from './tuiHarness.tsx';
 import { createTuiSession } from './tuiSession.ts';
 import type { TuiEffects, TuiSession, TuiSnapshot } from './tuiSession.ts';
 
@@ -11,9 +11,9 @@ type Reading = Result<NeedsReading, CliFailure>;
 interface FakeTui {
   session: TuiSession;
   items: NeedView[];
-  groups: TreeGroup[];
   fileErrors: { path: string; id: string | null; message: string }[];
   edited: string[];
+  designEdited: string[];
   changeListeners: Set<() => void>;
   setHomeFailure: (message: string | undefined) => void;
 }
@@ -27,11 +27,12 @@ const reading = (items: NeedView[]): Reading => ({
 
 const createFake = async (
   items: NeedView[],
-  groups: TreeGroup[] = [],
+  tree: ProjectTree = noProjects(),
   overrides: Partial<TuiEffects> = {},
 ): Promise<FakeTui> => {
   const changeListeners = new Set<() => void>();
   const edited: string[] = [];
+  const designEdited: string[] = [];
   const fileErrors: { path: string; id: string | null; message: string }[] = [];
   let homeFailure: string | undefined;
 
@@ -40,10 +41,19 @@ const createFake = async (
       homeFailure === undefined
         ? reading(items)
         : { ok: false, reason: { code: 'storeError', message: homeFailure } },
-    loadTree: async () => ({ ok: true, value: structuredClone(groups) }),
+    loadTree: async () => ({ ok: true, value: structuredClone(tree) }),
     loadErrors: async () => ({ ok: true, value: [...fileErrors] }),
+    loadDetail: async (rawId) => ({
+      ok: false,
+      reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+    }),
     edit: async (rawId) => {
       edited.push(rawId);
+
+      return { ok: true, value: undefined };
+    },
+    editDesign: async (rawId) => {
+      designEdited.push(rawId);
 
       return { ok: true, value: undefined };
     },
@@ -66,9 +76,9 @@ const createFake = async (
   return {
     session,
     items,
-    groups,
     fileErrors,
     edited,
+    designEdited,
     changeListeners,
     setHomeFailure: (message) => {
       homeFailure = message;
@@ -129,7 +139,7 @@ it('selects the first row of the same ticket when a reload removes the selected 
 });
 
 it('keeps the selected ticket on a view switch when the other view has it', async () => {
-  const fake = await createFake([needView(0, 'First'), needView(2, 'Instruction')], treeGroups());
+  const fake = await createFake([needView(0, 'First'), needView(2, 'Instruction')], projectTree());
 
   fake.session.send({ kind: 'moveDown' });
   fake.session.send({ kind: 'switchView' });
@@ -157,10 +167,12 @@ it('keeps the selected ticket on a view switch when the other view has it', asyn
 });
 
 it("keeps the other view's own selection on a view switch when it lacks the ticket", async () => {
-  const fake = await createFake([needView(0, 'First'), needView(7, 'Home only')], treeGroups());
+  const fake = await createFake([needView(0, 'First'), needView(7, 'Home only')], projectTree());
 
   fake.session.send({ kind: 'switchView' });
   await settle();
+  fake.session.send({ kind: 'moveDown' });
+  fake.session.send({ kind: 'moveDown' });
   fake.session.send({ kind: 'moveDown' });
   fake.session.send({ kind: 'switchView' });
   fake.session.send({ kind: 'moveDown' });
@@ -221,7 +233,7 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
   let started = 0;
   let notified = 0;
 
-  const fake = await createFake([], [], {
+  const fake = await createFake([], noProjects(), {
     load: () => {
       started += 1;
 
@@ -232,6 +244,7 @@ it('publishes neither the rows nor the file errors of a superseded load, and not
       return gate.promise;
     },
     loadErrors: async () => ({ ok: true, value: listings.shift() ?? [] }),
+    loadDetail: () => Promise.withResolvers<never>().promise,
   });
 
   fake.session.subscribe(() => {
@@ -264,7 +277,7 @@ it('starts no effect after stop, neither for a queued reload nor after the runni
   const gate = Promise.withResolvers<Reading>();
   const calls: string[] = [];
 
-  const fake = await createFake([], [], {
+  const fake = await createFake([], noProjects(), {
     load: () => {
       calls.push('load');
 
@@ -304,7 +317,7 @@ it('holds the ticket files that failed to parse after each reload', async () => 
 });
 
 it('opens the selected ticket in the editor and shows its failure as the notice', async () => {
-  const fake = await createFake([needView(0, 'First'), needView(1, 'Second')], [], {
+  const fake = await createFake([needView(0, 'First'), needView(1, 'Second')], noProjects(), {
     edit: async () => ({ ok: false, reason: { code: 'storeError', message: 'Editor failed.' } }),
   });
 
@@ -357,11 +370,11 @@ it('stops notifying a listener after it unsubscribes', async () => {
 it('loads the plan tree only on the first switch to it and on later store changes', async () => {
   let treeLoads = 0;
 
-  const fake = await createFake([needView(0, 'First')], treeGroups(), {
+  const fake = await createFake([needView(0, 'First')], projectTree(), {
     loadTree: async () => {
       treeLoads += 1;
 
-      return { ok: true, value: treeGroups() };
+      return { ok: true, value: projectTree() };
     },
   });
 
@@ -380,7 +393,9 @@ it('loads the plan tree only on the first switch to it and on later store change
 });
 
 it('stores the error of a load that throws', async () => {
-  const fake = await createFake([], [], { load: () => Promise.reject(new Error('Disk is gone.')) });
+  const fake = await createFake([], noProjects(), {
+    load: () => Promise.reject(new Error('Disk is gone.')),
+  });
 
   expect(fake.session.getSnapshot().views.home.failure).toBe('Disk is gone.');
 });
@@ -389,7 +404,7 @@ it('keeps the previous ticket file errors when listing them fails', async () => 
   const fileError = { path: 'tickets/demo-3400.md', id: null, message: 'Front matter is invalid.' };
   let listings = 0;
 
-  const fake = await createFake([], [], {
+  const fake = await createFake([], noProjects(), {
     loadErrors: () => {
       listings += 1;
 
@@ -406,7 +421,7 @@ it('keeps the previous ticket file errors when listing them fails', async () => 
 });
 
 it('stops growing the message history after many notices', async () => {
-  const fake = await createFake([needView(0, 'First')], [], {
+  const fake = await createFake([needView(0, 'First')], noProjects(), {
     edit: async () => ({ ok: false, reason: { code: 'storeError', message: 'Editor failed.' } }),
   });
 
@@ -434,7 +449,7 @@ it('keeps only the failure in the history when a later edit succeeds', async () 
     { ok: true as const, value: undefined },
   ];
 
-  const fake = await createFake([needView(0, 'First')], [], {
+  const fake = await createFake([needView(0, 'First')], noProjects(), {
     edit: async () => outcomes.shift() ?? { ok: true, value: undefined },
   });
 
@@ -449,8 +464,7 @@ it('keeps only the failure in the history when a later edit succeeds', async () 
 });
 
 it('does not edit when the selected row has no ticket, even if edit is sent', async () => {
-  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
-  const fake = await createFake([], groups);
+  const fake = await createFake([], projectTree());
 
   fake.session.send({ kind: 'switchView' });
   await settle();
@@ -498,7 +512,7 @@ it('does not report a file error for a ticket that has a row', async () => {
 });
 
 it('shows no problem for a tree that loads without one', async () => {
-  const fake = await createFake([needView(0, 'First')], treeGroups());
+  const fake = await createFake([needView(0, 'First')], projectTree());
 
   fake.session.send({ kind: 'switchView' });
   await settle();
@@ -513,7 +527,7 @@ it('refreshes the rows when listing the file errors fails', async () => {
 
   const session = createTuiSession({
     load: async () => ({ ok: true, value: { items: [needView(0, title)], reconcileProblems: [] } }),
-    loadTree: async () => ({ ok: true, value: [] }),
+    loadTree: async () => ({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: async () => {
       if (failListing) {
         throw new Error('Listing failed.');
@@ -521,7 +535,12 @@ it('refreshes the rows when listing the file errors fails', async () => {
 
       return { ok: true, value: [] };
     },
+    loadDetail: async (rawId) => ({
+      ok: false,
+      reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+    }),
     edit: async () => ({ ok: true, value: undefined }),
+    editDesign: async () => ({ ok: true, value: undefined }),
     lend: async (run) => ({ ok: true, value: await run() }),
     onChange: (listener) => {
       changes.add(listener);
@@ -547,4 +566,90 @@ it('refreshes the rows when listing the file errors fails', async () => {
   session.stop();
 
   expect(texts.some((text) => text.includes('After'))).toBe(true);
+});
+
+const instructionsRowOf = (snapshot: TuiSnapshot) =>
+  snapshot.views.tree.rows.find((row) => row.marks?.kind === 'instructions');
+
+it('recounts the Instructions badge when the needs reload after the tree loaded', async () => {
+  const items: NeedView[] = [];
+  const fake = await createFake(items, projectTree());
+
+  fake.session.send({ kind: 'switchView' });
+  await settle();
+
+  expect(instructionsRowOf(fake.session.getSnapshot())?.marks?.attention).toBe(0);
+
+  items.push(needView(3, 'Instruction need'));
+  await storeChanged(fake);
+
+  expect(instructionsRowOf(fake.session.getSnapshot())?.marks?.attention).toBe(1);
+});
+
+it('keeps the selected row on the row it folded, and folds nothing on a row without children', async () => {
+  const fake = await createFake([], projectTree());
+
+  fake.session.send({ kind: 'switchView' });
+  await settle();
+  fake.session.send({ kind: 'moveDown' });
+
+  const onInbox = fake.session.getSnapshot();
+
+  fake.session.send({ kind: 'fold', fold: 'toggle' });
+
+  expect(fake.session.getSnapshot()).toBe(onInbox);
+
+  fake.session.send({ kind: 'moveUp' });
+  fake.session.send({ kind: 'fold', fold: 'close' });
+
+  const folded = fake.session.getSnapshot();
+
+  expect(folded.views.tree.rows.map((row) => row.key)).toEqual(['project:demo']);
+  expect(selectedOf(folded).key).toBe('project:demo');
+
+  fake.session.send({ kind: 'fold', fold: 'close' });
+
+  expect(fake.session.getSnapshot().views.tree.rows).toHaveLength(1);
+
+  fake.session.send({ kind: 'fold', fold: 'open' });
+  fake.session.send({ kind: 'fold', fold: 'open' });
+
+  expect(fake.session.getSnapshot().views.tree.rows.length).toBeGreaterThan(1);
+  expect(selectedOf(fake.session.getSnapshot()).key).toBe('project:demo');
+});
+
+it('keeps an Instructions row the user unfolded open across a reload', async () => {
+  const fake = await createFake([], projectTree());
+
+  fake.session.send({ kind: 'switchView' });
+  await settle();
+  fake.session.send({ kind: 'moveLast' });
+  fake.session.send({ kind: 'fold', fold: 'open' });
+  await storeChanged(fake);
+
+  const keys = fake.session.getSnapshot().views.tree.rows.map((row) => row.key);
+
+  expect(keys.slice(-2)).toEqual(['instructions:demo-3402', 'demo-3403']);
+});
+
+it('keeps a failed tree refresh visible after a fold rebuilds the cached rows', async () => {
+  let failsTree = false;
+
+  const fake = await createFake([], projectTree(), {
+    loadTree: async () =>
+      failsTree
+        ? { ok: false, reason: { code: 'storeError', message: 'Tree refresh failed.' } }
+        : { ok: true, value: projectTree() },
+  });
+
+  fake.session.send({ kind: 'switchView' });
+  await settle();
+  failsTree = true;
+  await storeChanged(fake);
+  fake.session.send({ kind: 'fold', fold: 'close' });
+
+  const tree = fake.session.getSnapshot().views.tree;
+
+  expect(tree.rows.map((row) => row.key)).toEqual(['project:demo']);
+  expect(tree.failure).toBe('Tree refresh failed.');
 });

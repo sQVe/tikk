@@ -1,12 +1,16 @@
-import { buildPlanTree } from '../fact/fact.ts';
-import type { TreeGroup } from '../fact/fact.ts';
+import { buildProjectTree } from '../fact/fact.ts';
+import type { ProjectTree } from '../fact/fact.ts';
 import type { Result } from '../result.ts';
 import type { TicketId } from '../ticket/ticket.ts';
 import type { CliEffects, CliFailure, EditorCleanupFailure } from './cliEffects.ts';
 import { readNeeds } from './needsCommand.ts';
 import type { NeedsReading } from './needsCommand.ts';
 import { refreshSession } from './sessionRefresh.ts';
+import { readTicketDetail } from './ticketDetail.ts';
+import type { TicketDetail } from './ticketDetail.ts';
 import { ticketEditor } from './ticketEditor.ts';
+import type { EditTarget } from './ticketEditor.ts';
+import { parsedTickets } from './ticketView.ts';
 
 interface FileErrorRow {
   path: string;
@@ -16,9 +20,11 @@ interface FileErrorRow {
 
 export interface NeedsSession {
   load: () => Promise<Result<NeedsReading, CliFailure>>;
-  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
+  loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
   loadErrors: () => Promise<Result<FileErrorRow[], CliFailure>>;
+  loadDetail: (rawId: string) => Promise<Result<TicketDetail, CliFailure>>;
   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+  editDesign: (rawId: string) => Promise<Result<undefined, CliFailure>>;
   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
 }
 
@@ -62,7 +68,7 @@ export const openNeedsSession = async (
     return readNeeds({ effects: loadEffects, session });
   };
 
-  const readTree = async (): Promise<Result<TreeGroup[], CliFailure>> => {
+  const readTree = async (): Promise<Result<ProjectTree, CliFailure>> => {
     const refreshed = await refreshSession(loadEffects, session);
 
     if (!refreshed.ok) {
@@ -81,13 +87,25 @@ export const openNeedsSession = async (
       return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
     }
 
-    return { ok: true, value: buildPlanTree(listed.value, facts.value, effects.now()) };
+    const project = await effects.resolveProject();
+    const current = project.ok ? project.value : null;
+
+    const stateTickets = parsedTickets(listed.value);
+
+    return {
+      ok: true,
+      value: buildProjectTree(listed.value, facts.value, effects.now(), current, stateTickets),
+    };
   };
 
-  const edit = async (rawId: string): Promise<Result<undefined, CliFailure>> => {
+  const edit = async (
+    rawId: string,
+    target: EditTarget,
+  ): Promise<Result<undefined, CliFailure>> => {
     const edited = await ticketEditor(
       { args: [], json: true, effects: loadEffects, session },
       rawId,
+      target,
     );
 
     return edited.ok ? { ok: true, value: undefined } : edited;
@@ -131,7 +149,11 @@ export const openNeedsSession = async (
   };
 
   const loadErrors = () => track(() => Promise.resolve(readErrors()));
-  const editTicket = (rawId: string) => track(() => edit(rawId));
+  const editTicket = (rawId: string) => track(() => edit(rawId, 'ticket'));
+  const editDesignFile = (rawId: string) => track(() => edit(rawId, 'design'));
+
+  const loadDetail = (rawId: string) =>
+    track(() => readTicketDetail(session, effects.now(), rawId));
 
   const finishClose: NeedsSession['close'] = async () => {
     closing.abort();
@@ -149,5 +171,16 @@ export const openNeedsSession = async (
     return closingResult;
   };
 
-  return { ok: true, value: { load, loadTree, loadErrors, edit: editTicket, close } };
+  return {
+    ok: true,
+    value: {
+      load,
+      loadTree,
+      loadErrors,
+      loadDetail,
+      edit: editTicket,
+      editDesign: editDesignFile,
+      close,
+    },
+  };
 };

@@ -119,8 +119,14 @@ const start = async (options: StartOptions = {}) => {
 
       return Promise.resolve({ ok: true, value: { items: [needView], reconcileProblems: [] } });
     },
-    loadTree: () => Promise.resolve({ ok: true, value: [] }),
+    loadTree: () => Promise.resolve({ ok: true, value: { current: null, projects: [] } }),
     loadErrors: () => Promise.resolve({ ok: true, value: [] }),
+    loadDetail: (rawId) =>
+      Promise.resolve({
+        ok: false,
+        reason: { code: 'notFound', message: `Ticket ${rawId} does not exist.` },
+      }),
+    editDesign: () => Promise.resolve({ ok: true, value: undefined }),
     edit:
       options.edit ??
       (() => {
@@ -149,6 +155,7 @@ const start = async (options: StartOptions = {}) => {
         };
       },
       bindings: defaultBindings,
+      icons: 'unicode',
       notices: [],
     },
     effects,

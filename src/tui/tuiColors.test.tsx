@@ -3,7 +3,7 @@ import { afterEach, expect, it } from 'bun:test';
 import { TextAttributes } from '@opentui/core';
 import type { CapturedSpan } from '@opentui/core';
 
-import { createTuiFixture, needView } from './tuiHarness.tsx';
+import { createTuiFixture, needView, ticketDetail } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -37,6 +37,31 @@ const spanWith = (setup: TuiFixture['setup'], text: string): CapturedSpan | unde
 
 const isBold = (span: CapturedSpan | undefined): boolean =>
   ((span?.attributes ?? 0) & TextAttributes.BOLD) !== 0;
+
+const boldOf = (setup: TuiFixture['setup'], text: string): boolean => {
+  const span = spanWith(setup, text);
+
+  expect(span?.text).toContain(text);
+
+  return isBold(span);
+};
+
+const openDetail = async (): Promise<TuiFixture> => {
+  const detail = ticketDetail('demo-3400', {
+    kind: 'slice',
+    title: 'Detail title',
+    state: 'active',
+    parent: null,
+  });
+
+  const mounted = await mount(items, { width: 120, height: 30 }, [], undefined, {
+    loadDetail: () => Promise.resolve({ ok: true as const, value: detail }),
+  });
+
+  await mounted.press('RETURN');
+
+  return mounted;
+};
 
 it('draws the home view, the detail pane, and the status line in terminal colors', async () => {
   const { setup } = await mount(items, { width: 120, height: 12 });
@@ -77,4 +102,35 @@ it('marks only the selected row in bold', async () => {
 
   expect(isBold(spanWith(setup, 'submitted  First'))).toBe(true);
   expect(isBold(spanWith(setup, 'submitted  Second'))).toBe(false);
+});
+
+it('draws only the first detail header row in bold', async () => {
+  const { setup } = await openDetail();
+
+  expect(boldOf(setup, 'Detail title')).toBe(true);
+  expect(boldOf(setup, 'Slice  active')).toBe(false);
+});
+
+it('draws only the active detail tab in bold', async () => {
+  const { setup, press } = await openDetail();
+
+  expect(boldOf(setup, '[Overview]')).toBe(true);
+  expect(boldOf(setup, 'Activity')).toBe(false);
+
+  await press(']');
+
+  expect(boldOf(setup, '[Criteria')).toBe(true);
+  expect(boldOf(setup, 'Activity')).toBe(false);
+});
+
+it('draws only the active detail tab in the terminal heading color', async () => {
+  const { setup, press } = await openDetail();
+
+  expect(spanWith(setup, '[Overview]')?.fg.intent).toBe('indexed');
+  expect(spanWith(setup, 'Criteria')?.fg.intent).toBe('default');
+
+  await press(']');
+
+  expect(spanWith(setup, '[Criteria')?.fg.intent).toBe('indexed');
+  expect(spanWith(setup, 'Activity')?.fg.intent).toBe('default');
 });

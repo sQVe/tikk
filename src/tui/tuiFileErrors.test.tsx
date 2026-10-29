@@ -1,6 +1,6 @@
 import { afterEach, expect, it } from 'bun:test';
 
-import { createTuiFixture, needView } from './tuiHarness.tsx';
+import { createTuiFixture, noProjects, needView } from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -23,9 +23,15 @@ afterEach(() => {
 });
 
 it('puts a file error with no ticket row in the message history and counts it in the status line', async () => {
-  const { setup, press } = await mount([needView(0, 'First')], { width: 120, height: 12 }, [], [], {
-    loadErrors: () => Promise.resolve({ ok: true, value: [strayError] }),
-  });
+  const { setup, press } = await mount(
+    [needView(0, 'First')],
+    { width: 120, height: 12 },
+    [],
+    noProjects(),
+    {
+      loadErrors: () => Promise.resolve({ ok: true, value: [strayError] }),
+    },
+  );
 
   expect(setup.captureCharFrame()).toContain('1 file error');
 
@@ -40,7 +46,7 @@ it('does not repeat a file error in the message history when the store changes a
     [needView(0, 'First')],
     { width: 120, height: 12 },
     [],
-    [],
+    noProjects(),
     { loadErrors: () => Promise.resolve({ ok: true, value: [strayError] }) },
   );
 
@@ -57,9 +63,15 @@ it('does not repeat a file error in the message history when the store changes a
 it('shows the path and parse error in the detail pane of the row with that ticket ID', async () => {
   const error = { path: '/s/demo-3400-first.md', id: 'demo-3400', message: 'Bad front matter.' };
 
-  const { setup } = await mount([needView(0, 'First')], { width: 120, height: 12 }, [], [], {
-    loadErrors: () => Promise.resolve({ ok: true, value: [error] }),
-  });
+  const { setup } = await mount(
+    [needView(0, 'First')],
+    { width: 120, height: 12 },
+    [],
+    noProjects(),
+    {
+      loadErrors: () => Promise.resolve({ ok: true, value: [error] }),
+    },
+  );
 
   const frame = setup.captureCharFrame();
 
@@ -79,7 +91,7 @@ it('keeps an error of ticket demo-3467-abcd out of the detail of demo-3467 and c
     [needView(67, 'Target')],
     { width: 120, height: 12 },
     [],
-    [],
+    noProjects(),
     {
       loadErrors: () => Promise.resolve({ ok: true, value: [error] }),
     },
@@ -103,9 +115,15 @@ it('publishes an error that first matched a row to the history once that row is 
     message: 'Bad front matter.',
   };
 
-  const { setup, press, storeChanged } = await mount(items, { width: 120, height: 12 }, [], [], {
-    loadErrors: () => Promise.resolve({ ok: true, value: [error] }),
-  });
+  const { setup, press, storeChanged } = await mount(
+    items,
+    { width: 120, height: 12 },
+    [],
+    noProjects(),
+    {
+      loadErrors: () => Promise.resolve({ ok: true, value: [error] }),
+    },
+  );
 
   expect(setup.captureCharFrame()).not.toContain('1 file error');
 

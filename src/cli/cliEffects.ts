@@ -13,7 +13,7 @@ export interface CliTicket {
 
 export interface CliTicketOutline {
   id: TicketId;
-  frontMatter: Pick<TicketFrontMatter, 'kind' | 'status' | 'parent' | 'archived'>;
+  frontMatter: Pick<TicketFrontMatter, 'kind' | 'title' | 'status' | 'parent' | 'archived'>;
 }
 
 export interface CliFailure {
@@ -77,6 +77,7 @@ export interface CliSession extends Disposable {
     project: ProjectName,
     id: TicketId,
   ) => Promise<Result<string[], CliMessage>>;
+  designFilePath: (project: ProjectName, id: TicketId) => string;
   listFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listStateFacts: (ticketIds?: TicketId[]) => Promise<Result<Fact[], CliMessage>>;
   listArchiveFacts: () => Promise<Result<Fact[], CliMessage>>;

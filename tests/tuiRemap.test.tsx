@@ -4,7 +4,7 @@ import { readSettings } from '../src/config.ts';
 import type { ConfigEffects } from '../src/config.ts';
 import { loadBindings } from '../src/remap.ts';
 import type { TuiEffects } from '../src/tui/tui.tsx';
-import { commandLabel, createTuiFixture, needView } from '../src/tui/tuiHarness.tsx';
+import { commandLabel, createTuiFixture, noProjects, needView } from '../src/tui/tuiHarness.tsx';
 import type { TuiFixture } from '../src/tui/tuiHarness.tsx';
 
 const rowsOfFrame = (frame: string): string[] => frame.split('\n');
@@ -31,7 +31,7 @@ const mountWithConfig = async (
     [needView(0, 'First'), needView(1, 'Second')],
     size,
     [],
-    [],
+    noProjects(),
     overrides,
     loaded.bindings,
     loaded.messages,

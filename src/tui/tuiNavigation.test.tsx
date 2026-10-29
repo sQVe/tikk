@@ -1,7 +1,15 @@
 import { afterEach, expect, it } from 'bun:test';
 
-import type { NeedView, TreeGroup } from '../cli/cli.ts';
-import { createTuiFixture, needView, treeGroups } from './tuiHarness.tsx';
+import type { ProjectTree } from '../cli/cli.ts';
+import {
+  createTuiFixture,
+  needView,
+  noProjects,
+  projectName,
+  projectTree,
+  ticketDetail,
+  ticketId,
+} from './tuiHarness.tsx';
 import type { TuiFixture } from './tuiHarness.tsx';
 
 let fixture: TuiFixture | undefined;
@@ -72,7 +80,7 @@ it('shows the tree rows on s and the home items on a second s', async () => {
     [needView(0, 'First')],
     { width: 60, height: 8 },
     ['STATUS problem'],
-    treeGroups(),
+    projectTree(),
   );
 
   expect(setup.captureCharFrame()).toContain('First');
@@ -81,11 +89,15 @@ it('shows the tree rows on s and the home items on a second s', async () => {
 
   const tree = setup.captureCharFrame();
 
-  expect(tree).toContain('demo-3401  Plan title  open');
-  expect(tree).toContain('demo-3402  Slice title  active  #12');
-  expect(tree).toContain('demo-3403  Instruction title  open');
+  expect(tree).toContain('demo-3401  Plan title');
+  expect(tree).toContain('demo-3402  Slice title  #12');
+  expect(tree).toContain('Instructions (1)');
   expect(tree).not.toContain('First');
   expect(tree).not.toContain('STATUS problem');
+  expect(selectedLine()).toContain('demo');
+
+  await press('j');
+  await press('j');
   expect(selectedLine()).toContain('Plan title');
 
   await press('j');
@@ -101,21 +113,26 @@ it('shows the tree rows on s and the home items on a second s', async () => {
 
 it('keeps the selected tree row in the frame when the tree is taller than the terminal', async () => {
   const slices = Array.from({ length: 8 }, (_, index) => ({
-    id: `demo-${3410 + index}` as NeedView['id'],
+    id: ticketId(`demo-${3410 + index}`),
     title: `Slice ${index}`,
     state: 'planned' as const,
     pr: null,
+    tasks: [],
     instructions: [],
   }));
 
-  const groups: TreeGroup[] = [{ plan: null, slices }];
-  const { setup, press, selectedLine } = await mount([], { width: 50, height: 5 }, [], groups);
+  const tree: ProjectTree = {
+    current: projectName('demo'),
+    projects: [{ name: projectName('demo'), inbox: [], plans: [], slices }],
+  };
+
+  const { setup, press, selectedLine } = await mount([], { width: 50, height: 5 }, [], tree);
 
   await press('s');
   expect(selectedLine()?.slice(1).trim()).not.toBe('');
   expect(selectedLine()).not.toMatch(/demo-/);
 
-  for (let step = 0; step < 6; step += 1) {
+  for (let step = 0; step < 7; step += 1) {
     await press('j');
   }
 
@@ -128,7 +145,7 @@ it('opens the selected ticket with e in the home and the tree view', async () =>
     [needView(0, 'First'), needView(1, 'Second')],
     { width: 60, height: 8 },
     [],
-    treeGroups(),
+    projectTree(),
   );
 
   await press('j');
@@ -141,12 +158,114 @@ it('opens the selected ticket with e in the home and the tree view', async () =>
   expect(edited).toEqual(['demo-3401', 'demo-3401', 'demo-3402']);
 });
 
+it('opens the design of the selected plan with D and ignores D on a slice', async () => {
+  const { designEdited, press, selectedLine } = await mount(
+    [],
+    { width: 60, height: 8 },
+    [],
+    projectTree(),
+  );
+
+  await press('s');
+  await press('j');
+  await press('j');
+
+  expect(selectedLine()).toContain('demo-3401');
+
+  await press('D');
+  await press('j');
+
+  expect(selectedLine()).toContain('demo-3402');
+
+  await press('D');
+
+  expect(designEdited).toEqual(['demo-3401']);
+});
+
+it('does not run plan keys behind help while the full-screen detail of a plan is open', async () => {
+  const plan = ticketDetail(
+    'demo-3401',
+    { kind: 'plan', title: 'Plan title', state: 'open', parent: null },
+    { body: 'OVERVIEW-MARKER' },
+  );
+
+  const { designEdited, press, selectedLine, setup } = await mount(
+    [],
+    { width: 80, height: 44 },
+    [],
+    projectTree(),
+    { loadDetail: () => Promise.resolve({ ok: true, value: plan }) },
+  );
+
+  await press('s');
+  await press('j');
+  await press('j');
+
+  expect(selectedLine()).toContain('demo-3401');
+
+  await press('RETURN');
+
+  expect(setup.captureCharFrame()).toContain('OVERVIEW-MARKER');
+
+  await press('?');
+  await press('D');
+  await press(']');
+  await press('?');
+
+  expect(designEdited).toEqual([]);
+  expect(setup.captureCharFrame()).toContain('OVERVIEW-MARKER');
+});
+
+it('opens the design of a plan listed in the home view with D', async () => {
+  const { designEdited, press } = await mount(
+    [needView(1, 'Plan need')],
+    { width: 60, height: 8 },
+    [],
+    projectTree(),
+  );
+
+  await press('D');
+
+  expect(designEdited).toEqual(['demo-3401']);
+});
+
+it('gives D on a slice row a reason in help', async () => {
+  const { press, setup } = await mount([], { width: 80, height: 44 }, [], projectTree());
+
+  await press('s');
+  await press('j');
+  await press('j');
+  await press('j');
+  await press('?');
+
+  expect(setup.captureCharFrame()).toContain('The selected row is not a plan.');
+});
+
+it('keeps D disabled while the selected ticket is still loading', async () => {
+  const { designEdited, press, setup } = await mount(
+    [needView(1, 'Plan need')],
+    { width: 80, height: 44 },
+    [],
+    projectTree(),
+    { loadDetail: () => new Promise(() => {}) },
+  );
+
+  await press('?');
+
+  expect(setup.captureCharFrame()).toContain('The ticket is still loading.');
+
+  await press('q');
+  await press('D');
+
+  expect(designEdited).toEqual([]);
+});
+
 it('keeps the selected ticket when s switches to a view that has it', async () => {
   const { press, selectedLine } = await mount(
     [needView(0, 'First'), needView(2, 'Instruction need')],
     { width: 60, height: 8 },
     [],
-    treeGroups(),
+    projectTree(),
   );
 
   await press('j');
@@ -160,9 +279,13 @@ it('keeps the selected ticket when s switches to a view that has it', async () =
   expect(selectedLine()).toContain('Instruction need');
 });
 
-it('ignores e on the group of slices without a plan', async () => {
-  const groups: TreeGroup[] = [{ plan: null, slices: [] }];
-  const { edited, press, selectedLine } = await mount([], { width: 60, height: 8 }, [], groups);
+it('ignores e on a project row', async () => {
+  const { edited, press, selectedLine } = await mount(
+    [],
+    { width: 60, height: 8 },
+    [],
+    projectTree(),
+  );
 
   await press('s');
   await press('e');
@@ -192,7 +315,7 @@ it('handles a cancelled terminal loan without editing or replacing the current n
     [needView(1, 'Asked instruction')],
     { width: 60, height: 10 },
     [],
-    [],
+    noProjects(),
     {
       lend: () => {
         attempts += 1;
@@ -224,9 +347,15 @@ it('shows the error of an editor that throws, and clears it after an edit that w
     () => Promise.resolve({ ok: true as const, value: undefined }),
   ];
 
-  const { setup, press } = await mount([needView(0, 'First')], { width: 60, height: 8 }, [], [], {
-    edit: () => outcomes.shift()?.() ?? Promise.reject(new Error('No more edits.')),
-  });
+  const { setup, press } = await mount(
+    [needView(0, 'First')],
+    { width: 60, height: 8 },
+    [],
+    noProjects(),
+    {
+      edit: () => outcomes.shift()?.() ?? Promise.reject(new Error('No more edits.')),
+    },
+  );
 
   await press('e');
   expect(setup.captureCharFrame()).toContain('The editor crashed.');

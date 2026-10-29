@@ -6,7 +6,7 @@ import { act } from 'react';
 
 import { openNeedsSession } from '../src/cli/cli.ts';
 import { createEffects } from '../src/index.ts';
-import { createTuiFixture } from '../src/tui/tuiHarness.tsx';
+import { createTuiFixture, noProjects } from '../src/tui/tuiHarness.tsx';
 import type { TuiFixture } from '../src/tui/tuiHarness.tsx';
 import { createCliFixture, createParentSlice } from './cliFixture.ts';
 import type { CliFixture } from './cliFixture.ts';
@@ -61,7 +61,7 @@ it('shows the path and parse error of a ticket file that was broken on disk', as
   const needs = opened.value;
 
   try {
-    tui = await createTuiFixture([], { width: 160, height: 20 }, [], [], {
+    tui = await createTuiFixture([], { width: 160, height: 20 }, [], noProjects(), {
       load: needs.load,
       loadTree: needs.loadTree,
       loadErrors: needs.loadErrors,

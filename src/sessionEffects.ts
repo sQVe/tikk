@@ -123,6 +123,7 @@ const sessionFor = (
     listErrors: () => cache.listErrors(),
     listTicketFolderFiles: (project, id) =>
       listTicketFolderFiles(ticketFolderPath(store, project, id)),
+    designFilePath: (project, id) => join(ticketFolderPath(store, project, id), 'design.md'),
     listFacts: (ticketIds) =>
       listFactsRecovering(cache, files, (ids) => cache.listFacts(ids), ticketIds),
     listStateFacts: (ticketIds) =>
