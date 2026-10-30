@@ -1900,6 +1900,7 @@ it('a second pending clash leaves a fact that an earlier alias moved with the ea
   await rm(join(first.storePath, 'tickets', 'demo', 'demo-aaaa-first.md'));
   await first.runChecked(['sync']);
   await second.runChecked(['sync']);
+  await removeOrigin(second);
 
   await writeClashTicket(second, 'demo-aaaa', 'third', parent.id, false);
 
@@ -1912,6 +1913,8 @@ it('a second pending clash leaves a fact that an earlier alias moved with the ea
     'B second pending progress',
   ]);
 
+  await addOrigin(second, remotePath);
+  await touchFile(join(second.storePath, 'tickets', 'demo', 'demo-aaaa-third.md'));
   await second.runChecked(['sync']);
 
   await writeClashTicket(first, 'demo-aaaa', 'fourth', parent.id);
