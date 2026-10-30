@@ -1,0 +1,1057 @@
+diff --git a/src/cache/cache.ts b/src/cache/cache.ts
+index c15193b..fedb8f0 100644
+--- a/src/cache/cache.ts
++++ b/src/cache/cache.ts
+@@ -36,11 +36,6 @@ import type {
+ import { hasValidScanRows, refresh } from './ticketScan.ts';
+ import type { CacheFileReason, CacheFiles } from './ticketScan.ts';
+ 
+-interface CacheQueryFailure {
+-  kind: 'failed';
+-  message: string;
+-}
+-
+ export type {
+   CacheOpenReason,
+   FactDamage,
+@@ -75,30 +70,6 @@ const writeMarker = (database: Database): string => {
+ const isSqliteError = (error: unknown): error is Error =>
+   error instanceof Error && 'code' in error && String(error.code).startsWith('SQLITE');
+ 
+-const queryFailure = (error: unknown): CacheQueryFailure => {
+-  invariant(isSqliteError(error), 'A cache query failed for a reason other than SQLite.');
+-
+-  return { kind: 'failed', message: `The cache failed: ${error.message}` };
+-};
+-
+-const readValue = <Value>(read: () => Value): Result<Value, CacheQueryFailure> => {
+-  try {
+-    return { ok: true, value: read() };
+-  } catch (error) {
+-    return { ok: false, reason: queryFailure(error) };
+-  }
+-};
+-
+-const readResult = <Value, Reason>(
+-  read: () => Result<Value, Reason>,
+-): Result<Value, Reason | CacheQueryFailure> => {
+-  try {
+-    return read();
+-  } catch (error) {
+-    return { ok: false, reason: queryFailure(error) };
+-  }
+-};
+-
+ export class TicketCache implements Disposable {
+   readonly #database: Database;
+ 
+@@ -152,48 +123,45 @@ export class TicketCache implements Disposable {
+ 
+       return refreshed;
+     } catch (error) {
+-      return { ok: false, reason: queryFailure(error) };
++      invariant(isSqliteError(error), 'A refresh failed for a reason other than SQLite.');
++
++      return {
++        ok: false,
++        reason: { kind: 'failed', message: `The cache failed: ${error.message}` },
++      };
+     }
+   }
+ 
+-  getTicket(id: TicketId): Result<CachedTicket, TicketNotFound | CacheQueryFailure> {
+-    return readResult(() => getTicket(this.#database, id));
++  getTicket(id: TicketId): Result<CachedTicket, TicketNotFound> {
++    return getTicket(this.#database, id);
+   }
+ 
+-  findTicketPath(id: TicketId): Result<string, TicketNotFound | CacheQueryFailure> {
+-    return readResult(() => findTicketPath(this.#database, id));
++  findTicketPath(id: TicketId): Result<string, TicketNotFound> {
++    return findTicketPath(this.#database, id);
+   }
+ 
+-  isIdShared(id: TicketId): Result<boolean, CacheQueryFailure> {
+-    return readValue(() => isIdShared(this.#database, id));
++  listTickets(options: ListTicketsOptions): CachedTicket[] {
++    return listTickets(this.#database, options);
+   }
+ 
+-  listTickets(options: ListTicketsOptions): Result<CachedTicket[], CacheQueryFailure> {
+-    return readValue(() => listTickets(this.#database, options));
++  listTicketOutlines(): TicketOutline[] {
++    return listTicketOutlines(this.#database);
+   }
+ 
+-  listTicketOutlines(): Result<TicketOutline[], CacheQueryFailure> {
+-    return readValue(() => listTicketOutlines(this.#database));
++  mayHaveArchiveWork(now: Date): boolean {
++    return mayHaveArchiveWork(this.#database, now);
+   }
+ 
+-  mayHaveArchiveWork(now: Date): Result<boolean, CacheQueryFailure> {
+-    return readValue(() => mayHaveArchiveWork(this.#database, now));
++  listFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
++    return listFacts(this.#database, ticketIds);
+   }
+ 
+-  listFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage | CacheQueryFailure> {
+-    return readResult(() => listFacts(this.#database, ticketIds));
++  listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage> {
++    return listStateFacts(this.#database, ticketIds);
+   }
+ 
+-  listStateFacts(ticketIds?: TicketId[]): Result<Fact[], FactDamage | CacheQueryFailure> {
+-    return readResult(() => listStateFacts(this.#database, ticketIds));
+-  }
+-
+-  aliasDestinations(): Result<TicketId[], FactDamage | CacheQueryFailure> {
+-    return readResult(() => listAliasDestinations(this.#database));
+-  }
+-
+-  listArchiveFacts(): Result<Fact[], FactDamage | CacheQueryFailure> {
+-    return readResult(() => listArchiveFacts(this.#database));
++  listArchiveFacts(): Result<Fact[], FactDamage> {
++    return listArchiveFacts(this.#database);
+   }
+ 
+   // Replaces every fact row from the files in one transaction.
+@@ -201,12 +169,17 @@ export class TicketCache implements Disposable {
+     try {
+       return await rebuildFacts(this.#database, files);
+     } catch (error) {
+-      return { ok: false, reason: queryFailure(error) };
++      invariant(isSqliteError(error), 'A rebuild failed for a reason other than SQLite.');
++
++      return {
++        ok: false,
++        reason: { kind: 'failed', message: `The cache failed: ${error.message}` },
++      };
+     }
+   }
+ 
+-  listErrors(): Result<CachedError[], CacheQueryFailure> {
+-    return readValue(() => [...listErrors(this.#database), ...listFactErrors(this.#database)]);
++  listErrors(): CachedError[] {
++    return [...listErrors(this.#database), ...listFactErrors(this.#database)];
+   }
+ 
+   [Symbol.dispose](): void {
+diff --git a/src/cli/archiveSweep.ts b/src/cli/archiveSweep.ts
+index f3342a3..0783d7a 100644
+--- a/src/cli/archiveSweep.ts
++++ b/src/cli/archiveSweep.ts
+@@ -12,11 +12,11 @@ const findDue = async (
+   const tickets = session.listTicketOutlines();
+   const facts = await session.listArchiveFacts();
+ 
+-  if (!tickets.ok || !facts.ok) {
++  if (!facts.ok) {
+     return undefined;
+   }
+ 
+-  return findArchiveDue(tickets.value, facts.value, effects.now());
++  return findArchiveDue(tickets, facts.value, effects.now());
+ };
+ 
+ const appendStatusFacts = async (
+@@ -84,9 +84,7 @@ const sweepLocked = async (effects: CliEffects, session: CliSession): Promise<vo
+ // Archives finished work before a command runs. The sweep never fails the command: anything it
+ // cannot do now, a later command does.
+ export const sweepArchive = async (effects: CliEffects, session: CliSession): Promise<void> => {
+-  const mayHaveWork = session.mayHaveArchiveWork(effects.now());
+-
+-  if (!mayHaveWork.ok || !mayHaveWork.value) {
++  if (!session.mayHaveArchiveWork(effects.now())) {
+     return;
+   }
+ 
+diff --git a/src/cli/cliEffects.ts b/src/cli/cliEffects.ts
+index f8ad9dc..c21446d 100644
+--- a/src/cli/cliEffects.ts
++++ b/src/cli/cliEffects.ts
+@@ -11,7 +11,7 @@ export interface CliTicket {
+   body: string;
+ }
+ 
+-export interface CliTicketOutline {
++interface CliTicketOutline {
+   id: TicketId;
+   frontMatter: Pick<TicketFrontMatter, 'kind' | 'title' | 'status' | 'parent' | 'archived'>;
+ }
+@@ -58,21 +58,16 @@ interface FileWriteReason {
+   message: string;
+ }
+ 
+-interface CliLookupReason {
+-  kind: 'notFound' | 'failed';
+-  message: string;
+-}
+-
+ export interface CliSession extends Disposable {
+   refresh: () => Promise<Result<undefined, CliMessage>>;
+-  getTicket: (id: TicketId) => Result<CliTicket, CliLookupReason>;
+-  findTicketPath: (id: TicketId) => Result<string, CliLookupReason>;
+-  listTickets: (options: { includeArchived: boolean }) => Result<CliTicket[], CliMessage>;
++  getTicket: (id: TicketId) => Result<CliTicket, CliMessage>;
++  findTicketPath: (id: TicketId) => Result<string, CliMessage>;
++  listTickets: (options: { includeArchived: boolean }) => CliTicket[];
+   // Tickets whose files parse, with only the fields that place them in their tree.
+-  listTicketOutlines: () => Result<CliTicketOutline[], CliMessage>;
++  listTicketOutlines: () => CliTicketOutline[];
+   // False only when the archive sweep surely has nothing to do.
+-  mayHaveArchiveWork: (now: Date) => Result<boolean, CliMessage>;
+-  listErrors: () => Result<{ path: string; message: string }[], CliMessage>;
++  mayHaveArchiveWork: (now: Date) => boolean;
++  listErrors: () => { path: string; message: string }[];
+   listTicketFolderFiles: (
+     project: ProjectName,
+     id: TicketId,
+diff --git a/src/cli/coverageCommand.ts b/src/cli/coverageCommand.ts
+index 9ac8a33..baafcbc 100644
+--- a/src/cli/coverageCommand.ts
++++ b/src/cli/coverageCommand.ts
+@@ -35,13 +35,9 @@ const scopedGaps = (
+   session: CliSession,
+   rawId: string | undefined,
+ ): Result<CoverageGap[], CliFailure> => {
+-  const listed = session.listTickets({ includeArchived: false });
+-
+-  if (!listed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-  }
+-
+-  const tickets = listed.value.filter((ticket) => ticket.error === null);
++  const tickets = session
++    .listTickets({ includeArchived: false })
++    .filter((ticket) => ticket.error === null);
+ 
+   const gaps = findCoverageGaps(tickets);
+ 
+diff --git a/src/cli/needsCommand.ts b/src/cli/needsCommand.ts
+index 3dd3817..b6fc284 100644
+--- a/src/cli/needsCommand.ts
++++ b/src/cli/needsCommand.ts
+@@ -102,19 +102,14 @@ export const readNeeds = async (
+     return reconciled;
+   }
+ 
+-  const listed = session.listTickets({ includeArchived: true });
+-
+-  if (!listed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-  }
+-
++  const tickets = session.listTickets({ includeArchived: true });
+   const facts = await session.listFacts();
+ 
+   if (!facts.ok) {
+     return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+   }
+ 
+-  const items = selectNeeds(listed.value, facts.value, effects.now());
++  const items = selectNeeds(tickets, facts.value, effects.now());
+ 
+   return { ok: true, value: { items: items.map(itemView), reconcileProblems: reconciled.value } };
+ };
+diff --git a/src/cli/needsSession.ts b/src/cli/needsSession.ts
+index 78be01d..2b1e7de 100644
+--- a/src/cli/needsSession.ts
++++ b/src/cli/needsSession.ts
+@@ -12,17 +12,10 @@ import { ticketEditor } from './ticketEditor.ts';
+ import type { EditTarget } from './ticketEditor.ts';
+ import { parsedTickets } from './ticketView.ts';
+ 
+-interface FileErrorRow {
+-  path: string;
+-  message: string;
+-  id: TicketId | null;
+-}
+-
+ export interface NeedsSession {
+   load: () => Promise<Result<NeedsReading, CliFailure>>;
+-  loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
+-  loadErrors: () => Promise<Result<FileErrorRow[], CliFailure>>;
+-  loadDetail: (rawId: string) => Promise<Result<TicketDetail, CliFailure>>;
++  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
++  loadErrors: () => Promise<{ path: string; message: string; id: TicketId | null }[]>;
+   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+   editDesign: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+   close: () => Promise<Result<undefined, EditorCleanupFailure>>;
+@@ -75,27 +68,14 @@ export const openNeedsSession = async (
+       return refreshed;
+     }
+ 
+-    const listed = session.listTickets({ includeArchived: true });
+-
+-    if (!listed.ok) {
+-      return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-    }
+-
++    const tickets = session.listTickets({ includeArchived: true });
+     const facts = await session.listFacts();
+ 
+     if (!facts.ok) {
+       return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
+     }
+ 
+-    const project = await effects.resolveProject();
+-    const current = project.ok ? project.value : null;
+-
+-    const stateTickets = parsedTickets(listed.value);
+-
+-    return {
+-      ok: true,
+-      value: buildProjectTree(listed.value, facts.value, effects.now(), current, stateTickets),
+-    };
++    return { ok: true, value: buildPlanTree(tickets, facts.value, effects.now()) };
+   };
+ 
+   const edit = async (
+@@ -125,27 +105,14 @@ export const openNeedsSession = async (
+   const load = () => track(read);
+   const loadTree = () => track(readTree);
+ 
+-  const readErrors = (): Result<FileErrorRow[], CliFailure> => {
+-    const listed = session.listTickets({ includeArchived: true });
++  const readErrors = () => {
++    const tickets = session.listTickets({ includeArchived: true });
+ 
+-    if (!listed.ok) {
+-      return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-    }
++    return session.listErrors().map((error) => {
++      const owner = tickets.find((ticket) => ticket.path === error.path);
+ 
+-    const errors = session.listErrors();
+-
+-    if (!errors.ok) {
+-      return { ok: false, reason: { code: 'storeError', message: errors.reason.message } };
+-    }
+-
+-    return {
+-      ok: true,
+-      value: errors.value.map((error) => {
+-        const owner = listed.value.find((ticket) => ticket.path === error.path);
+-
+-        return { path: error.path, message: error.message, id: owner?.id ?? null };
+-      }),
+-    };
++      return { path: error.path, message: error.message, id: owner?.id ?? null };
++    });
+   };
+ 
+   const loadErrors = () => track(() => Promise.resolve(readErrors()));
+diff --git a/src/cli/prReconcile.ts b/src/cli/prReconcile.ts
+index 14f8e79..75e478d 100644
+--- a/src/cli/prReconcile.ts
++++ b/src/cli/prReconcile.ts
+@@ -9,7 +9,6 @@ import type {
+   CliEffects,
+   CliFailure,
+   CliSession,
+-  CliTicketOutline,
+   CommandInput,
+   CommandResult,
+ } from './cliEffects.ts';
+@@ -49,6 +48,8 @@ interface Change extends PullRequestRef {
+   seen: PullRequestObservation;
+ }
+ 
++type TicketOutline = ReturnType<CliSession['listTicketOutlines']>[number];
++
+ const reconcileUsage = 'Usage: tikk reconcile [--json]';
+ 
+ const globalProblem = (message: string): ReconcileProblem => ({
+@@ -61,7 +62,7 @@ const globalProblem = (message: string): ReconcileProblem => ({
+ export const problemLines = (problems: ReconcileProblem[]): string =>
+   problems.map((problem) => `problem: ${problem.message}\n`).join('');
+ 
+-const isOpenSlice = ({ frontMatter }: CliTicketOutline): boolean =>
++const isOpenSlice = ({ frontMatter }: TicketOutline): boolean =>
+   frontMatter.kind === 'slice' &&
+   frontMatter.status === 'open' &&
+   frontMatter.archived === undefined;
+@@ -84,17 +85,17 @@ const isStillSelected = (change: Change, index: SliceIndex): boolean => {
+ const readCurrentIndex = async (
+   session: CliSession,
+   sliceIds: TicketId[],
+-): Promise<Result<SliceIndex, CliFailure>> => {
++): Promise<Result<SliceIndex, { message: string }>> => {
+   const refreshed = await session.refresh();
+ 
+   if (!refreshed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: refreshed.reason.message } };
++    return refreshed;
+   }
+ 
+   const facts = await session.listStateFacts(sliceIds);
+ 
+   if (!facts.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
++    return facts;
+   }
+ 
+   return { ok: true, value: buildSliceIndex([], facts.value) };
+@@ -105,14 +106,16 @@ const appendSelected = async (
+   changes: Change[],
+   machine: string,
+   outcome: ReconcileOutcome,
+-): Promise<Result<undefined, CliFailure>> => {
++): Promise<void> => {
+   const index = await readCurrentIndex(
+     session,
+     changes.map((change) => change.ticket),
+   );
+ 
+   if (!index.ok) {
+-    return index;
++    outcome.problems.push(globalProblem(index.reason.message));
++
++    return;
+   }
+ 
+   const selected = changes.filter((change) => isStillSelected(change, index.value));
+@@ -137,22 +140,20 @@ const appendSelected = async (
+       outcome.problems.push(changeProblem(change, appended.reason.message));
+     }
+   }
+-
+-  return { ok: true, value: undefined };
+ };
+ 
+ const appendChanges = async (
+   input: ReconcileInput,
+   changes: Change[],
+   outcome: ReconcileOutcome,
+-): Promise<Result<undefined, CliFailure>> => {
++): Promise<void> => {
+   const { effects, session } = input;
+   const machine = await effects.resolveMachine();
+ 
+   if (!machine.ok) {
+     outcome.problems.push(globalProblem(machine.reason.message));
+ 
+-    return { ok: true, value: undefined };
++    return;
+   }
+ 
+   const lock = await session.lockStore();
+@@ -160,11 +161,11 @@ const appendChanges = async (
+   if (!lock.ok) {
+     outcome.problems.push(globalProblem(lock.reason.message));
+ 
+-    return { ok: true, value: undefined };
++    return;
+   }
+ 
+   try {
+-    return await appendSelected(input, changes, machine.value, outcome);
++    await appendSelected(input, changes, machine.value, outcome);
+   } finally {
+     await lock.value.release();
+   }
+@@ -223,56 +224,43 @@ const collectChanges = async (
+ };
+ 
+ // All gh calls run before the store lock, which is taken only to append.
+-export const reconcilePullRequests = async (
+-  input: ReconcileInput,
+-): Promise<Result<ReconcileOutcome, CliFailure>> => {
++export const reconcilePullRequests = async (input: ReconcileInput): Promise<ReconcileOutcome> => {
+   const outcome: ReconcileOutcome = { checked: [], updated: [], problems: [] };
+ 
+-  const outlines = input.session.listTicketOutlines();
+-
+-  if (!outlines.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: outlines.reason.message } };
+-  }
+-
+-  const slices = outlines.value.filter(isOpenSlice).map((outline) => outline.id);
++  const slices = input.session
++    .listTicketOutlines()
++    .filter(isOpenSlice)
++    .map((outline) => outline.id);
+ 
+   if (slices.length === 0) {
+-    return { ok: true, value: outcome };
++    return outcome;
+   }
+ 
+   const facts = await input.session.listStateFacts(slices);
+ 
+   if (!facts.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: facts.reason.message } };
++    outcome.problems.push(globalProblem(facts.reason.message));
++
++    return outcome;
+   }
+ 
+   const changes = await collectChanges(input, slices, facts.value, outcome);
+ 
+   if (changes.length > 0) {
+-    const appended = await appendChanges(input, changes, outcome);
+-
+-    if (!appended.ok) {
+-      return appended;
+-    }
++    await appendChanges(input, changes, outcome);
+   }
+ 
+   if (outcome.updated.length > 0) {
+     await input.effects.scheduleSync();
+   }
+ 
+-  return { ok: true, value: outcome };
++  return outcome;
+ };
+ 
+ export const reconcileBeforeRead = async (
+   input: ReconcileInput,
+ ): Promise<Result<ReconcileProblem[], CliFailure>> => {
+-  const reconciled = await reconcilePullRequests(input);
+-
+-  if (!reconciled.ok) {
+-    return { ok: false, reason: reconciled.reason };
+-  }
+-
+-  const outcome = reconciled.value;
++  const outcome = await reconcilePullRequests(input);
+ 
+   if (outcome.updated.length === 0) {
+     return { ok: true, value: outcome.problems };
+@@ -298,18 +286,7 @@ export const reconcileCommand = async (input: CommandInput): Promise<CommandResu
+     return invalidArguments(reconcileUsage);
+   }
+ 
+-  const reconciled = await reconcilePullRequests(input);
+-
+-  if (!reconciled.ok) {
+-    return { ok: false, reason: reconciled.reason };
+-  }
+-
+-  const outcome = reconciled.value;
+-
+-  if (outcome.sharedId !== undefined) {
+-    return { ok: false, reason: { code: 'idShared', message: outcome.sharedId } };
+-  }
+-
++  const outcome = await reconcilePullRequests(input);
+   const updatedLines = outcome.updated.map((slice) => `${slice.id}  ${slice.state}\n`).join('');
+ 
+   return {
+diff --git a/src/cli/readyCommand.ts b/src/cli/readyCommand.ts
+index 6df183e..f3de5c4 100644
+--- a/src/cli/readyCommand.ts
++++ b/src/cli/readyCommand.ts
+@@ -164,16 +164,9 @@ export const readyCommand = async ({
+   // Archived tickets stay in the list so a blocker that was archived is not reported as missing.
+   const listed = session.listTickets({ includeArchived: true });
+ 
+-  if (!listed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-  }
+-
+   // A ticket whose file does not parse cannot be claimed, so it is never a candidate.
+-  const unreadable = listed.value.filter((ticket) =>
+-    isUnreadable(ticket, kind.value, project, parent),
+-  );
+-
+-  const tickets = listed.value.filter((ticket) => ticket.error === null);
++  const unreadable = listed.filter((ticket) => isUnreadable(ticket, kind.value, project, parent));
++  const tickets = listed.filter((ticket) => ticket.error === null);
+ 
+   const facts = await session.listStateFacts();
+ 
+diff --git a/src/cli/ticketArchive.ts b/src/cli/ticketArchive.ts
+index a1ff1e4..7044b0a 100644
+--- a/src/cli/ticketArchive.ts
++++ b/src/cli/ticketArchive.ts
+@@ -15,21 +15,12 @@ const changedTickets = (
+   input: CommandInput,
+   root: CliTicket,
+   command: ArchiveCommand,
+-): Result<CliTicket[], CliFailure> => {
+-  const listed = input.session.listTickets({ includeArchived: true });
+-
+-  if (!listed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-  }
+-
+-  const children = groupTicketChildren(listed.value);
++): CliTicket[] => {
++  const children = groupTicketChildren(input.session.listTickets({ includeArchived: true }));
+   const tree = collectTicketTree(root, children);
+   const archiving = command === 'archive';
+ 
+-  return {
+-    ok: true,
+-    value: tree.filter((ticket) => (ticket.frontMatter.archived === undefined) === archiving),
+-  };
++  return tree.filter((ticket) => (ticket.frontMatter.archived === undefined) === archiving);
+ };
+ 
+ const writeArchived = async (
+@@ -144,13 +135,7 @@ const changeLocked = async (
+   root: CliTicket,
+   command: ArchiveCommand,
+ ): Promise<CommandResult> => {
+-  const changedTree = changedTickets(input, root, command);
+-
+-  if (!changedTree.ok) {
+-    return changedTree;
+-  }
+-
+-  const tickets = changedTree.value;
++  const tickets = changedTickets(input, root, command);
+   const broken = tickets.find((ticket) => ticket.error !== null);
+ 
+   if (broken !== undefined) {
+diff --git a/src/cli/ticketEditor.ts b/src/cli/ticketEditor.ts
+index f2b8b5a..f55a9b6 100644
+--- a/src/cli/ticketEditor.ts
++++ b/src/cli/ticketEditor.ts
+@@ -26,10 +26,6 @@ const ticketFileOf = (input: CommandInput, rawId: string): Result<EditableFile,
+ 
+   const path = input.session.findTicketPath(id.value);
+ 
+-  if (!path.ok && path.reason.kind === 'failed') {
+-    return { ok: false, reason: { code: 'storeError', message: path.reason.message } };
+-  }
+-
+   if (!path.ok) {
+     return { ok: false, reason: missingTicket(rawId) };
+   }
+diff --git a/src/cli/ticketList.ts b/src/cli/ticketList.ts
+index d06674f..e4bdd17 100644
+--- a/src/cli/ticketList.ts
++++ b/src/cli/ticketList.ts
+@@ -1,6 +1,6 @@
+ import { invalidArguments, parseCommandArguments, stringValue } from './cliArguments.ts';
+ import type { CommandInput, CommandResult } from './cliEffects.ts';
+-import { storeFailure, ticketView } from './ticketView.ts';
++import { ticketView } from './ticketView.ts';
+ 
+ export const ticketList = ({ args, session }: CommandInput): CommandResult => {
+   const parsed = parseCommandArguments(args, {
+@@ -20,32 +20,24 @@ export const ticketList = ({ args, session }: CommandInput): CommandResult => {
+   const includeArchived = parsed.value.values['archived'] === true;
+   const listed = session.listTickets({ includeArchived });
+ 
+-  if (!listed.ok) {
+-    return storeFailure(listed.reason.message);
+-  }
+-
+-  const tickets = listed.value.filter(
++  const tickets = listed.filter(
+     (ticket) => project === undefined || ticket.frontMatter.project === project,
+   );
+ 
+   const errors = session.listErrors();
+ 
+-  if (!errors.ok) {
+-    return storeFailure(errors.reason.message);
+-  }
+-
+   const lines = tickets.map((ticket) => {
+     const { kind, status, title } = ticket.frontMatter;
+ 
+     return `${ticket.id}  ${kind}  ${status}  ${title}\n`;
+   });
+ 
+-  const errorLines = errors.value.map((error) => `error: ${error.path}: ${error.message}\n`);
++  const errorLines = errors.map((error) => `error: ${error.path}: ${error.message}\n`);
+ 
+   return {
+     ok: true,
+     value: {
+-      json: { tickets: tickets.map((ticket) => ticketView(ticket, false)), errors: errors.value },
++      json: { tickets: tickets.map((ticket) => ticketView(ticket, false)), errors },
+       text: [...lines, ...errorLines].join(''),
+     },
+   };
+diff --git a/src/cli/ticketRank.ts b/src/cli/ticketRank.ts
+index 2310f82..71efcf2 100644
+--- a/src/cli/ticketRank.ts
++++ b/src/cli/ticketRank.ts
+@@ -108,15 +108,10 @@ const isSibling = (candidate: CliTicket, ticket: CliTicket): boolean =>
+   candidate.frontMatter.parent === ticket.frontMatter.parent &&
+   candidate.frontMatter.kind === ticket.frontMatter.kind;
+ 
+-const siblingsOf = (input: CommandInput, ticket: CliTicket): Result<CliTicket[], CliFailure> => {
+-  const listed = input.session.listTickets({ includeArchived: false });
+-
+-  if (!listed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-  }
+-
+-  return { ok: true, value: listed.value.filter((candidate) => isSibling(candidate, ticket)) };
+-};
++const siblingsOf = (input: CommandInput, ticket: CliTicket): CliTicket[] =>
++  input.session
++    .listTickets({ includeArchived: false })
++    .filter((candidate) => isSibling(candidate, ticket));
+ 
+ const orderSiblings = (
+   siblings: CliTicket[],
+@@ -213,13 +208,7 @@ const rankTicket = async (
+     return invalidArguments(`Ticket ${ticket.id} is archived, so it cannot be ranked.`);
+   }
+ 
+-  const siblings = siblingsOf(input, ticket);
+-
+-  if (!siblings.ok) {
+-    return siblings;
+-  }
+-
+-  const ordered = orderSiblings(siblings.value, ticket, placement);
++  const ordered = orderSiblings(siblingsOf(input, ticket), ticket, placement);
+ 
+   if (!ordered.ok) {
+     return ordered;
+diff --git a/src/cli/ticketStatus.ts b/src/cli/ticketStatus.ts
+index ddc5709..49517ef 100644
+--- a/src/cli/ticketStatus.ts
++++ b/src/cli/ticketStatus.ts
+@@ -42,16 +42,10 @@ export const checkSessionTree = (
+   session: CliSession,
+   frontMatter: TicketFrontMatter,
+ ): Result<undefined, CliFailure> => {
+-  let lookupFailure: string | undefined;
+-
+   const lookup: TicketLookup = (id) => {
+     const found = session.getTicket(id);
+ 
+     if (!found.ok) {
+-      if (found.reason.kind === 'failed') {
+-        lookupFailure = found.reason.message;
+-      }
+-
+       return undefined;
+     }
+ 
+@@ -60,10 +54,6 @@ export const checkSessionTree = (
+ 
+   const checked = checkTicketTree(frontMatter, lookup);
+ 
+-  if (lookupFailure !== undefined) {
+-    return { ok: false, reason: { code: 'storeError', message: lookupFailure } };
+-  }
+-
+   if (!checked.ok) {
+     return invalidArguments(checked.reason.message);
+   }
+@@ -76,13 +66,8 @@ export const checkWaitCycle = (
+   id: TicketId,
+   target: TicketId,
+ ): Result<undefined, CliFailure> => {
+-  const listed = session.listTickets({ includeArchived: true });
+-
+-  if (!listed.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: listed.reason.message } };
+-  }
+-
+-  const cycle = findWaitCycle(listed.value, id, target);
++  const tickets = session.listTickets({ includeArchived: true });
++  const cycle = findWaitCycle(tickets, id, target);
+ 
+   if (cycle !== undefined) {
+     return invalidArguments(
+@@ -111,10 +96,6 @@ export const checkCovers = (
+ 
+   const found = session.getTicket(parent);
+ 
+-  if (!found.ok && found.reason.kind === 'failed') {
+-    return { ok: false, reason: { code: 'storeError', message: found.reason.message } };
+-  }
+-
+   if (!found.ok) {
+     return invalidArguments(found.reason.message);
+   }
+diff --git a/src/cli/ticketView.ts b/src/cli/ticketView.ts
+index 416c068..c0fb5c3 100644
+--- a/src/cli/ticketView.ts
++++ b/src/cli/ticketView.ts
+@@ -159,14 +159,9 @@ const deriveSlice = async (
+   session: CliSession,
+   now: Date,
+   ticket: CliTicket,
+-): Promise<Result<ShownState, CliFailure>> => {
+-  const parsed = listParsedTickets(session);
+-
+-  if (!parsed.ok) {
+-    return parsed;
+-  }
+-
+-  const tickets = parsed.value;
++  files: string[],
++): Promise<CommandResult> => {
++  const outlines = session.listTicketOutlines();
+ 
+   const instructionIds = tickets
+     .filter((other) => other.frontMatter.parent === ticket.id)
+@@ -374,27 +369,13 @@ export const findTicket = (session: CliSession, rawId: string): Result<CliTicket
+     return ticket;
+   }
+ 
+-  if (ticket.reason.kind === 'failed') {
+-    return { ok: false, reason: { code: 'storeError', message: ticket.reason.message } };
+-  }
+-
+   const path = session.findTicketPath(id.value);
+ 
+-  if (!path.ok && path.reason.kind === 'failed') {
+-    return { ok: false, reason: { code: 'storeError', message: path.reason.message } };
+-  }
+-
+   if (!path.ok) {
+     return { ok: false, reason: notFound };
+   }
+ 
+-  const errors = session.listErrors();
+-
+-  if (!errors.ok) {
+-    return { ok: false, reason: { code: 'storeError', message: errors.reason.message } };
+-  }
+-
+-  const cached = errors.value.find((error) => error.path === path.value);
++  const cached = session.listErrors().find((error) => error.path === path.value);
+   const detail = cached?.message ?? 'The file did not parse.';
+ 
+   return {
+diff --git a/src/sessionEffects.ts b/src/sessionEffects.ts
+index 186dac5..f81d158 100644
+--- a/src/sessionEffects.ts
++++ b/src/sessionEffects.ts
+@@ -33,15 +33,15 @@ import type { TicketId } from './ticket/ticket.ts';
+ 
+ // A stored fact that does not decode means the cache is damaged. The fact tables are cleared and
+ // indexed again from the files once. A second failure is reported, not retried.
+-export const listFactsRecovering = async (
+-  cache: Pick<TicketCache, 'rebuildFacts'>,
++const listFactsRecovering = async (
++  cache: TicketCache,
+   files: CacheFiles,
+   read: (ticketIds?: TicketId[]) => ReturnType<TicketCache['listFacts']>,
+   ticketIds?: TicketId[],
+ ): ReturnType<CliSession['listFacts']> => {
+   const first = read(ticketIds);
+ 
+-  if (first.ok || first.reason.kind === 'failed') {
++  if (first.ok) {
+     return first;
+   }
+ 
+diff --git a/src/store/storeLock.ts b/src/store/storeLock.ts
+index b3a0fc8..25c64a4 100644
+--- a/src/store/storeLock.ts
++++ b/src/store/storeLock.ts
+@@ -1,5 +1,3 @@
+-import { basename, dirname } from 'node:path';
+-
+ import type { Result } from '../result.ts';
+ import { breakerFilePath, lockFilePath } from './storePaths.ts';
+ import type { Store } from './storePaths.ts';
+@@ -11,7 +9,6 @@ export interface StoreLockFunctions {
+   randomSuffix: () => string;
+   readFile: (path: string) => Promise<string>;
+   unlink: (path: string) => Promise<void>;
+-  readdir: (directory: string) => Promise<string[]>;
+   isProcessAlive: (pid: number) => boolean;
+   sleep: (milliseconds: number) => Promise<void>;
+   now: () => number;
+@@ -63,7 +60,7 @@ const failed = (message: string): Result<never, StoreLockReason> => ({
+ });
+ 
+ // The file appears under its name only through `link`, which fails with EEXIST when the name is
+-// taken. So a reader never sees the lock or a breaker generation without the PID of its holder.
++// taken. So a reader never sees the lock or the breaker without the PID of its holder.
+ const publishExclusive = async (functions: StoreLockFunctions, path: string): Promise<void> => {
+   const temporaryPath = `${path}.${functions.pid}.${functions.randomSuffix()}`;
+ 
+@@ -134,131 +131,46 @@ const removeStaleLock = async (
+ const isStale = (functions: StoreLockFunctions, holder: number | undefined): boolean =>
+   holder === undefined || !functions.isProcessAlive(holder);
+ 
+-const generationPath = (breaker: string, generation: number): string => `${breaker}.${generation}`;
+-
+-const releasePath = (generation: string): string => `${generation}.released`;
+-
+-// Temporary files share the prefix, so only an exact number, alone or with the release suffix,
+-// names a generation. A marker counts even without its generation file, so no number is reused.
+-const generationNumber = (name: string, prefix: string): number | undefined => {
+-  if (!name.startsWith(prefix)) {
+-    return undefined;
+-  }
+-
+-  const match = /^(0|[1-9][0-9]*)(\.released)?$/.exec(name.slice(prefix.length));
+-
+-  return match === null ? undefined : Number(match[1]);
+-};
+-
+-const latestGeneration = async (
++// An owner that died while clearing leaves its breaker behind. A breaker of a live owner stays,
++// however old it is, because that owner may still remove the lock it read as stale.
++const removeDeadBreaker = async (
+   functions: StoreLockFunctions,
+   breaker: string,
+-): Promise<Result<{ generation: number; released: boolean } | undefined, StoreLockReason>> => {
+-  const directory = dirname(breaker);
+-  let names: string[];
+-
+-  try {
+-    names = await functions.readdir(directory);
+-  } catch {
+-    return failed(`Cannot list ${directory}.`);
+-  }
+-
+-  const prefix = `${basename(breaker)}.`;
+-
+-  const generations = names
+-    .map((name) => generationNumber(name, prefix))
+-    .filter((generation) => generation !== undefined);
+-
+-  if (generations.length === 0) {
+-    return { ok: true, value: undefined };
+-  }
+-
+-  const generation = Math.max(...generations);
+-  const released = names.includes(basename(releasePath(generationPath(breaker, generation))));
+-
+-  return { ok: true, value: { generation, released } };
+-};
+-
+-// No process removes a generation, so only one process can link the one after it. A generation of a
+-// live owner stays held however old it is, because that owner may still remove the lock it read as
+-// stale.
+-const nextGeneration = async (
+-  functions: StoreLockFunctions,
+-  breaker: string,
+-): Promise<Result<number | 'busy', StoreLockReason>> => {
+-  const latest = await latestGeneration(functions, breaker);
+-
+-  if (!latest.ok) {
+-    return latest;
+-  }
+-
+-  if (latest.value === undefined) {
+-    return { ok: true, value: 0 };
+-  }
+-
+-  const { generation, released } = latest.value;
+-
+-  if (released) {
+-    return { ok: true, value: generation + 1 };
+-  }
+-
+-  const owner = await readHolder(functions, generationPath(breaker, generation));
++): Promise<Result<undefined, StoreLockReason>> => {
++  const owner = await readHolder(functions, breaker);
+ 
+   if (!owner.ok) {
+     return owner;
+   }
+ 
+   if (owner.value === 'gone' || !isStale(functions, owner.value)) {
+-    return { ok: true, value: 'busy' };
++    return { ok: true, value: undefined };
+   }
+ 
+-  return { ok: true, value: generation + 1 };
++  return removeStaleLock(functions, breaker, owner.value);
+ };
+ 
+-const releaseGeneration = async (
+-  functions: StoreLockFunctions,
+-  generation: string,
+-): Promise<Result<undefined, StoreLockReason>> => {
+-  try {
+-    await publishExclusive(functions, releasePath(generation));
+-  } catch {
+-    return failed(`Cannot release ${generation}.`);
+-  }
+-
+-  return { ok: true, value: undefined };
+-};
+-
+-// Only the owner of a breaker generation may remove a stale lock, and only while the lock still
+-// holds the stale PID. Without it, a second process could remove the lock a first process just took.
++// Only the owner of the breaker may remove a stale lock, and only while the lock still holds the
++// stale PID. Without it, a second process could remove the lock a first process just took.
+ const clearStaleLock = async (
+   functions: StoreLockFunctions,
+   { path, breaker }: { path: string; breaker: string },
+   stale: number | undefined,
+ ): Promise<Result<Clearing, StoreLockReason>> => {
+-  const next = await nextGeneration(functions, breaker);
+-
+-  if (!next.ok) {
+-    return next;
+-  }
+-
+-  if (next.value === 'busy') {
+-    return { ok: true, value: 'busy' };
+-  }
+-
+-  const generation = generationPath(breaker, next.value);
+-
+   try {
+-    await publishExclusive(functions, generation);
++    await publishExclusive(functions, breaker);
+   } catch (error) {
+     if (errorCode(error) !== 'EEXIST') {
+-      return failed(`Cannot create ${generation}.`);
++      return failed(`Cannot create ${breaker}.`);
+     }
+ 
+-    return { ok: true, value: 'busy' };
++    const abandoned = await removeDeadBreaker(functions, breaker);
++
++    return abandoned.ok ? { ok: true, value: 'busy' } : abandoned;
+   }
+ 
+   const removed = await removeStaleLock(functions, path, stale);
+-  const released = await releaseGeneration(functions, generation);
++  const released = await removeLock(functions, breaker);
+ 
+   if (!removed.ok) {
+     return removed;
+diff --git a/src/storeEffects.ts b/src/storeEffects.ts
+index 9305756..53542d7 100644
+--- a/src/storeEffects.ts
++++ b/src/storeEffects.ts
+@@ -76,7 +76,6 @@ export const storeLock: StoreLockFunctions = {
+   randomSuffix: () => crypto.randomUUID(),
+   readFile: (path) => readFile(path, 'utf8'),
+   unlink: ticketFiles.unlink,
+-  readdir: ticketFiles.readdir,
+   isProcessAlive: (pid) => {
+     try {
+       process.kill(pid, 0);
+diff --git a/src/tui/tuiSession.ts b/src/tui/tuiSession.ts
+index b28e928..479a2d0 100644
+--- a/src/tui/tuiSession.ts
++++ b/src/tui/tuiSession.ts
+@@ -22,9 +22,8 @@ import type { ListRow } from './rowList.tsx';
+ 
+ export interface TuiEffects {
+   load: () => Promise<Result<NeedsReading, CliFailure>>;
+-  loadTree: () => Promise<Result<ProjectTree, CliFailure>>;
+-  loadErrors: () => Promise<Result<TicketFileError[], CliFailure>>;
+-  loadDetail: LoadDetail;
++  loadTree: () => Promise<Result<TreeGroup[], CliFailure>>;
++  loadErrors: () => Promise<TicketFileError[]>;
+   edit: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+   editDesign: (rawId: string) => Promise<Result<undefined, CliFailure>>;
+   lend: <Value>(run: () => Promise<Value>) => Promise<Result<Value, 'cancelled'>>;
+@@ -270,9 +269,7 @@ const readView = async (effects: TuiEffects, name: ViewName): Promise<LoadOutcom
+ 
+ const readFileErrors = async (effects: TuiEffects): Promise<TicketFileError[] | undefined> => {
+   try {
+-    const loaded = await effects.loadErrors();
+-
+-    return loaded.ok ? loaded.value : undefined;
++    return await effects.loadErrors();
+   } catch {
+     return undefined;
+   }

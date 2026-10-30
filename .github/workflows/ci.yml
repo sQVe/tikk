@@ -56,9 +56,17 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Find the merge base
         id: base
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: echo "sha=$(git merge-base HEAD "origin/${BASE_REF}")" >> "${GITHUB_OUTPUT}"
+        # Throwaway ME-1017 timing run: the base is this tree with PR #32's src changes reversed.
+        # It exists only in this runner and is never pushed.
+        run: |
+          git apply .github/measure/pr32-base.patch
+          git add -- src
+          sha=$(git -c user.name=ci -c user.email=ci@example.invalid commit-tree "$(git write-tree)" -p HEAD -m 'ME-1017 timing base')
+          git reset -q --hard HEAD
+          count=$(git diff --name-only "${sha}" -- src | wc -l)
+          echo "changed src files: ${count}"
+          test "${count}" -eq 18
+          echo "sha=${sha}" >> "${GITHUB_OUTPUT}"
       # The command runner reports the whole suite as one test, so Stryker cannot see a changed test.
       # The key must change with every file that can change a mutant's result.
       - name: Restore the incremental report
