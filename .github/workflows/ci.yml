@@ -56,9 +56,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - name: Find the merge base
         id: base
-        env:
-          BASE_REF: ${{ github.base_ref }}
-        run: echo "sha=$(git merge-base HEAD "origin/${BASE_REF}")" >> "${GITHUB_OUTPUT}"
+        # Throwaway ME-1017 timing run: mutate only PR #32's src files on today's code.
+        run: echo "sha=a328fabc26af930db43aec89074b3ccd67d682b6" >> "${GITHUB_OUTPUT}"
       # The command runner reports the whole suite as one test, so Stryker cannot see a changed test.
       # The key must change with every file that can change a mutant's result.
       - name: Restore the incremental report
