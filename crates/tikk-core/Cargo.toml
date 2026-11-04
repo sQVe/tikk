@@ -1,0 +1,11 @@
+[package]
+name = "tikk-core"
+version = "0.0.0"
+description = "Domain and store logic for tikk, with no GPUI dependency."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

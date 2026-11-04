@@ -1,0 +1,22 @@
+[package]
+name = "tikk-desktop"
+version = "0.0.0"
+description = "A local ticket tracker for AI agents, as a desktop app."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "tikk-desktop"
+path = "src/main.rs"
+
+[dependencies]
+tikk-core.workspace = true
+tikk-ui.workspace = true
+
+[package.metadata.cargo-shear]
+ignored = ["tikk-core", "tikk-ui"]
+
+[lints]
+workspace = true
