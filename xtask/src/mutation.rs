@@ -185,7 +185,15 @@ fn count_mutants(root: &Path, scope: &Scope) -> Result<BTreeMap<String, usize>, 
         ));
     }
 
-    let mutants: Value = serde_json::from_slice(&listing.stdout)
+    parse_mutant_counts(&listing.stdout)
+}
+
+fn parse_mutant_counts(stdout: &[u8]) -> Result<BTreeMap<String, usize>, String> {
+    if stdout.iter().all(u8::is_ascii_whitespace) {
+        return Ok(BTreeMap::new());
+    }
+
+    let mutants: Value = serde_json::from_slice(stdout)
         .map_err(|error| format!("cargo mutants --list printed invalid JSON: {error}"))?;
 
     let mutants = mutants
@@ -483,6 +491,18 @@ mod tests {
             original: "<=".to_string(),
             replacement: ">".to_string(),
         }
+    }
+
+    #[test]
+    fn empty_listing_counts_no_mutants() {
+        assert_eq!(parse_mutant_counts(b""), Ok(BTreeMap::new()));
+        assert_eq!(parse_mutant_counts(b" \n\t"), Ok(BTreeMap::new()));
+    }
+
+    #[test]
+    fn non_empty_invalid_listing_is_an_error() {
+        assert!(parse_mutant_counts(b"not json").is_err());
+        assert!(parse_mutant_counts(b"{}").is_err());
     }
 
     #[test]
