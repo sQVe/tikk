@@ -1,0 +1,57 @@
+# ADR 0020: Edges are `blockedBy`, `discoveredFrom`, and `related`
+
+**Date**: 2026-10-18\
+**Status**: Accepted\
+**Related**: [ADR 0018 (Plans, slices, instructions, and tasks)](./0018-work-model-and-kinds.md),
+[ADR 0022 (Claims with leases and a ready queue)](./0022-claims-leases-and-ready-queue.md)
+
+## Context
+
+The `parent` field gives a tree: plan above slice above instruction. Work also depends on other
+work, and workers find new work while they do an instruction. Ready queues, `discovered-from` links,
+and typed links are common across agent trackers.
+
+## Decision
+
+Tickets link to each other with three edges in front matter, besides `parent`:
+
+- `blockedBy`: the ticket cannot start until the target is done. It affects readiness.
+- `discoveredFrom`: the ticket was found while working on the target. It does not affect readiness.
+- `related`: a plain link with no effect on readiness.
+
+Only `blockedBy` is read by the ready queue ([ADR 0022](./0022-claims-leases-and-ready-queue.md)).
+Any ticket, a task too, can be a `blockedBy` target. A done or canceled target no longer blocks.
+
+There is one exception. A slice's `blockedBy` edge to a slice whose PR is open counts as cleared for
+stacking. [ADR 0022](./0022-claims-leases-and-ready-queue.md) defines this rule. No other
+`blockedBy` edge is cleared by an open PR.
+
+A ticket waits on its `blockedBy` targets and on its parent, because blockers flow down from a plan
+and a slice to the work under them. A new `blockedBy` edge or a new parent that would let a ticket
+wait on itself, through `blockedBy` or `parent` links, is refused, and the error names the cycle. A
+ticket cannot block itself.
+
+## Consequences
+
+### Positive
+
+- Readiness has one cause, so `ready` can name what blocks each skipped item.
+- A discovered task keeps its link to the work that found it.
+
+### Negative
+
+- Agents and the user must pick the right edge. A `related` link used for a real dependency does not
+  block anything.
+- The stacking exception means an open PR can clear a dependency before its work merges.
+
+## Alternatives considered
+
+### The tree alone
+
+Express order only through `parent` and `rank`. Rejected because the tree alone copies the Linear
+model, which does not show what blocks what.
+
+### One edge type
+
+Use `blockedBy` for every link. Rejected because a discovered or related ticket would then block
+work it does not block.
