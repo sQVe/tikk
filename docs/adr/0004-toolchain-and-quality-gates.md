@@ -54,7 +54,11 @@ point for every check.
 
 - cargo-nextest runs the tests, and doctests run separately.
 - `cargo xtask check` runs rustfmt, typos, taplo, cargo-deny, cargo-shear, clippy, nextest,
-  doctests, and rustdoc. It reports every failed check at the end and changes no files.
+  doctests, rustdoc, and a crate-boundary check. It reports every failed check at the end and
+  changes no files.
+- The crate-boundary check fails when `tikk-cli` or `tikk-core` depends on GPUI, `tikk-ui`, or
+  `tikk-desktop`, directly or through another crate. It reads the dependency graph from
+  `cargo metadata`.
 - prek runs formatting and linting as Git hooks before a commit.
 
 ## Consequences

@@ -1,0 +1,11 @@
+exclude_globs = [
+  "crates/tikk-cli/src/main.rs",
+  "crates/tikk-desktop/**",
+  "xtask/**",
+  "**/tests/**",
+  "**/test_support.rs",
+  "**/test_support/**",
+]
+test_tool = "nextest"
+timeout_multiplier = 3.0
+additional_cargo_test_args = ["--no-tests=pass"]

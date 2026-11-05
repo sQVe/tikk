@@ -1,9 +1,11 @@
 # tikk
 
 A local ticket tracker for AI agents. tikk has a desktop app for the user and a command line for
-agents. Both use one shared core crate.
+agents. Both use one shared core crate. Read [the development guide](docs/development.md) for local
+setup and verification.
 
-- Run `cargo xtask check` before finishing changes.
+- Run `cargo xtask check` before finishing changes. `cargo xtask mutation changed <base>` runs
+  mutation testing on the lines changed since `<base>`.
 - Format with `cargo fmt`. rustfmt runs with its default settings.
 - Follow the decisions in [docs/adr](docs/adr/README.md), and record new decisions there. Read that
   guide before adding or changing an ADR. When details of a decision change, edit its ADR in place
