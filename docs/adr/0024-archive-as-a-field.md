@@ -11,12 +11,15 @@ breaks open editor buffers.
 ## Decision
 
 Archived is an `archived: <date>` field. tikk sets it automatically 14 days after a plan or
-stand-alone ticket is done or canceled. It then sets it on the plan's slices and instructions.
-Archived tickets leave `ready`, `needs`, `ls`, and the default desktop views. Files never move.
+stand-alone ticket is done or canceled. It then sets it on every ticket below that one, tasks
+included. Archived tickets leave `ready`, `needs`, `ls`, and the default desktop views. Files never
+move.
 
 The finish date is the newest `status` fact that names the ticket's current status, or the `accept`
-fact of a done instruction. A status set by a hand edit has no fact. tikk appends a `status` fact
-when it first sees that edit, and the 14 days start at that fact.
+fact of a done instruction. A plan or slice whose done is derived has no such fact. Its finish date
+is the newest fact that completed the done conditions: the merge, the audit, or the finish of the
+last child that counted. A status set by a hand edit has no fact. tikk appends a `status` fact when
+it first sees that edit, and the 14 days start at that fact.
 
 `tikk archive` sets the field by hand. `tikk unarchive` removes it and appends an `unarchive` fact
 for each ticket it clears. tikk does not archive that ticket again for a finish older than the fact.
