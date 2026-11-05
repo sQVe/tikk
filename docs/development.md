@@ -54,7 +54,7 @@ Fix problems with these commands:
 | TOML formatting | `taplo fmt` |
 | Spelling | `typos --write-changes` |
 | Unused dependencies | `cargo shear --fix` |
-| Some clippy warnings | `cargo clippy --workspace --all-targets --fix` |
+| Some clippy warnings | `cargo clippy --workspace --all-targets --locked --fix` |
 
 The pre-commit hook runs rustfmt, clippy, typos, and taplo, but only in check mode. Run the fix
 commands yourself.
