@@ -55,17 +55,7 @@ fn package_names(metadata: &Value) -> Result<BTreeMap<&str, &str>, String> {
         .collect()
 }
 
-fn resolve_name(names: &BTreeMap<&str, &str>, id: &Value) -> Result<String, String> {
-    let id = id.as_str().ok_or("A dependency has no id.")?;
-
-    names
-        .get(id)
-        .map(|name| name.to_string())
-        .ok_or_else(|| format!("cargo metadata has no package for {id}."))
-}
-
 fn read_graph(metadata: &Value) -> Result<Graph, String> {
-    let names = package_names(metadata)?;
     let nodes = metadata["resolve"]["nodes"]
         .as_array()
         .ok_or("cargo metadata has no resolve graph.")?;
@@ -73,15 +63,23 @@ fn read_graph(metadata: &Value) -> Result<Graph, String> {
     nodes
         .iter()
         .map(|node| {
-            let name = resolve_name(&names, &node["id"])?;
+            let id = node["id"]
+                .as_str()
+                .ok_or("A resolved package has no id.")?
+                .to_string();
             let dependencies = node["dependencies"]
                 .as_array()
                 .ok_or("A resolved package has no dependency list.")?
                 .iter()
-                .map(|dependency| resolve_name(&names, dependency))
+                .map(|dependency| {
+                    dependency
+                        .as_str()
+                        .map(str::to_string)
+                        .ok_or_else(|| "A dependency has no id.".to_string())
+                })
                 .collect::<Result<Vec<String>, String>>()?;
 
-            Ok((name, dependencies))
+            Ok((id, dependencies))
         })
         .collect()
 }
@@ -99,13 +97,18 @@ fn path_to(previous: &BTreeMap<&str, &str>, start: &str, target: &str) -> Vec<St
     path.into_iter().map(str::to_string).collect()
 }
 
-fn find_forbidden_path(graph: &Graph, start: &str) -> Option<Vec<String>> {
+fn find_forbidden_path(
+    graph: &Graph,
+    names: &BTreeMap<&str, &str>,
+    start: &str,
+) -> Option<Vec<String>> {
     let mut previous: BTreeMap<&str, &str> = BTreeMap::new();
     let mut visited: BTreeSet<&str> = BTreeSet::from([start]);
     let mut queue = VecDeque::from([start]);
 
     while let Some(package) = queue.pop_front() {
-        if is_forbidden(package) {
+        let name = names.get(package).copied();
+        if name.is_some_and(is_forbidden) {
             return Some(path_to(&previous, start, package));
         }
 
@@ -120,28 +123,53 @@ fn find_forbidden_path(graph: &Graph, start: &str) -> Option<Vec<String>> {
     None
 }
 
-fn violation_message(graph: &Graph, protected: &str) -> Option<String> {
-    let path = find_forbidden_path(graph, protected)?;
+fn violation_message(
+    graph: &Graph,
+    names: &BTreeMap<&str, &str>,
+    protected: &str,
+) -> Option<String> {
+    let path = find_forbidden_path(graph, names, protected)?;
     let forbidden = path.last()?;
+    let protected_name = names[protected];
+    let forbidden_name = names[forbidden.as_str()];
+    let names_path = path.iter().map(|id| names[id.as_str()]).collect::<Vec<_>>();
 
     Some(format!(
-        "{protected} must not depend on {forbidden}: {}",
-        path.join(" -> ")
+        "{protected_name} must not depend on {forbidden_name}: {}",
+        names_path.join(" -> ")
     ))
 }
 
-fn boundary_violations(metadata: &Value) -> Result<Vec<String>, String> {
-    let graph = read_graph(metadata)?;
+fn protected_package_ids<'a>(names: &BTreeMap<&'a str, &'a str>) -> Vec<&'a str> {
+    let mut ids = Vec::new();
 
-    Ok(PROTECTED_PACKAGES
+    for protected in PROTECTED_PACKAGES {
+        ids.extend(
+            names
+                .iter()
+                .filter(|(_, name)| *name == protected)
+                .map(|(id, _)| *id),
+        );
+    }
+
+    ids
+}
+
+fn boundary_violations(metadata: &Value) -> Result<Vec<String>, String> {
+    let names = package_names(metadata)?;
+    let graph = read_graph(metadata)?;
+    let protected = protected_package_ids(&names);
+
+    Ok(protected
         .iter()
-        .filter_map(|protected| violation_message(&graph, protected))
+        .copied()
+        .filter_map(|protected| violation_message(&graph, &names, protected))
         .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::collections::BTreeMap;
     use std::iter;
 
     use serde_json::{Value, json};
@@ -159,23 +187,48 @@ mod tests {
             .collect::<BTreeMap<_, _>>()
     }
 
-    fn metadata(edges: &[(&str, &[&str])]) -> Value {
-        let names: BTreeSet<&str> = edges
+    fn name_map<'a>(edges: &[(&'a str, &'a [&'a str])]) -> BTreeMap<&'a str, &'a str> {
+        edges
             .iter()
             .flat_map(|(package, dependencies)| {
                 iter::once(*package).chain(dependencies.iter().copied())
             })
-            .collect();
-        let packages: Vec<Value> = names
+            .map(|name| (name, name))
+            .collect()
+    }
+
+    fn metadata_with_ids(packages: &[(&str, &str, &[&str])]) -> Value {
+        let mut names: BTreeMap<&str, &str> = BTreeMap::new();
+
+        for &(id, name, _) in packages {
+            names.insert(id, name);
+        }
+
+        for &(_, _, dependencies) in packages {
+            for &dependency in dependencies {
+                names.entry(dependency).or_insert(dependency);
+            }
+        }
+
+        let package_entries: Vec<Value> = names
             .iter()
-            .map(|name| json!({ "id": name, "name": name }))
+            .map(|(id, name)| json!({ "id": id, "name": name }))
             .collect();
-        let nodes: Vec<Value> = edges
+        let nodes: Vec<Value> = packages
             .iter()
-            .map(|(package, dependencies)| json!({ "id": package, "dependencies": dependencies }))
+            .map(|(id, _, dependencies)| json!({ "id": id, "dependencies": dependencies }))
             .collect();
 
-        json!({ "packages": packages, "resolve": { "nodes": nodes } })
+        json!({ "packages": package_entries, "resolve": { "nodes": nodes } })
+    }
+
+    fn metadata(edges: &[(&str, &[&str])]) -> Value {
+        let packages: Vec<(&str, &str, &[&str])> = edges
+            .iter()
+            .map(|(package, dependencies)| (*package, *package, *dependencies))
+            .collect();
+
+        metadata_with_ids(&packages)
     }
 
     #[test]
@@ -191,31 +244,37 @@ mod tests {
 
     #[test]
     fn finds_a_transitive_path_to_a_forbidden_package() {
-        let graph = graph(&[
+        let edges: &[(&str, &[&str])] = &[
             ("tikk-cli", &["clap"]),
             ("clap", &["gpui-component"]),
             ("gpui-component", &[]),
-        ]);
+        ];
+        let graph = graph(edges);
 
         assert_eq!(
-            find_forbidden_path(&graph, "tikk-cli"),
+            find_forbidden_path(&graph, &name_map(edges), "tikk-cli"),
             Some(strings(&["tikk-cli", "clap", "gpui-component"]))
         );
     }
 
     #[test]
     fn finds_no_path_when_no_forbidden_package_is_reachable() {
-        let graph = graph(&[("tikk-cli", &["clap"]), ("clap", &["serde"])]);
+        let edges: &[(&str, &[&str])] = &[("tikk-cli", &["clap"]), ("clap", &["serde"])];
+        let graph = graph(edges);
 
-        assert_eq!(find_forbidden_path(&graph, "tikk-cli"), None);
+        assert_eq!(
+            find_forbidden_path(&graph, &name_map(edges), "tikk-cli"),
+            None
+        );
     }
 
     #[test]
     fn terminates_on_dependency_cycles() {
-        let graph = graph(&[("tikk-cli", &["a"]), ("a", &["tikk-cli", "gpui"])]);
+        let edges: &[(&str, &[&str])] = &[("tikk-cli", &["a"]), ("a", &["tikk-cli", "gpui"])];
+        let graph = graph(edges);
 
         assert_eq!(
-            find_forbidden_path(&graph, "tikk-cli"),
+            find_forbidden_path(&graph, &name_map(edges), "tikk-cli"),
             Some(strings(&["tikk-cli", "a", "gpui"]))
         );
     }
@@ -248,6 +307,35 @@ mod tests {
             boundary_violations(&metadata),
             Ok(strings(&[
                 "tikk-core must not depend on gpui_macros: tikk-core -> serde -> gpui_macros",
+            ]))
+        );
+    }
+
+    #[test]
+    fn distinct_versions_of_one_crate_keep_their_own_dependencies() {
+        let metadata = metadata_with_ids(&[
+            ("tikk-cli", "tikk-cli", &["foo 1.0.0"]),
+            ("foo 1.0.0", "foo", &["gpui"]),
+            ("foo 2.0.0", "foo", &[]),
+            ("gpui", "gpui", &[]),
+        ]);
+
+        assert_eq!(
+            boundary_violations(&metadata),
+            Ok(strings(&[
+                "tikk-cli must not depend on gpui: tikk-cli -> foo -> gpui",
+            ]))
+        );
+    }
+
+    #[test]
+    fn protected_package_is_found_by_name_with_a_distinct_id() {
+        let metadata = metadata_with_ids(&[("tikk-cli 1.2.3", "tikk-cli", &["gpui"])]);
+
+        assert_eq!(
+            boundary_violations(&metadata),
+            Ok(strings(&[
+                "tikk-cli must not depend on gpui: tikk-cli -> gpui",
             ]))
         );
     }
