@@ -1,5 +1,3 @@
-//! Crate boundary check: keeps tikk-cli and tikk-core free of GPUI and the UI crates.
-
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -10,7 +8,6 @@ type Graph = BTreeMap<String, Vec<String>>;
 
 const PROTECTED_PACKAGES: &[&str] = &["tikk-cli", "tikk-core"];
 
-/// Returns an error that lists every protected crate reaching a forbidden crate.
 pub(crate) fn check(root: &Path) -> Result<(), String> {
     let metadata = read_metadata(root)?;
     let violations = boundary_violations(&metadata)?;

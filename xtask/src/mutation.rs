@@ -121,8 +121,6 @@ impl Scope {
     }
 }
 
-/// cargo-mutants matches `--file` as a glob against workspace-relative paths, so `./a.rs` or an
-/// absolute path would match nothing and wrongly report `nothing`.
 fn workspace_relative_path(root: &Path, path: &str) -> Result<String, String> {
     let file = root
         .join(path)
