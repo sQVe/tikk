@@ -38,6 +38,7 @@ the commit in its row.
 - [0002: Native Rust app with GPUI, as two binaries over one core crate](./0002-native-rust-gpui-two-binaries.md)
 - [0003: Vendored gpui-component with a recorded patch boundary](./0003-vendored-gpui-component.md)
 - [0004: Toolchain, dependencies, and quality gates](./0004-toolchain-and-quality-gates.md)
+- [0029: tikk supports Linux and macOS, not Windows](./0029-linux-and-macos-only.md)
 
 ### Code structure
 
