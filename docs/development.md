@@ -84,8 +84,8 @@ error or an unmutated file. cargo-mutants writes its logs to `target/mutants/mut
 advisories fail cargo-deny without a code change.
 
 - `Check` runs `cargo xtask check tidy` on Linux.
-- `Test (Linux)`, `Test (macOS)`, and `Test (Windows)` run `cargo xtask check build`. CI installs
-  no display libraries.
+- `Test (Linux)` and `Test (macOS)` run `cargo xtask check build`. CI installs no display
+  libraries. tikk does not support Windows; see [ADR 0029](adr/0029-linux-and-macos-only.md).
 - `Mutation` runs `cargo xtask mutation changed` against the pull request's base branch, on pull
   requests only. It is advisory: survivors fail the job, but it is not a required check.
 

@@ -31,6 +31,8 @@ setup and verification.
   [ADR 0004](docs/adr/0004-toolchain-and-quality-gates.md).
 - The app is MIT. Never depend on a GPL crate. Keep the Apache-2.0 license and notices of vendored
   code. See [ADR 0004](docs/adr/0004-toolchain-and-quality-gates.md).
+- tikk supports Linux and macOS, not Windows. Add no `cfg(windows)` code to tikk's own crates. See
+  [ADR 0029](docs/adr/0029-linux-and-macos-only.md).
 - Ticket, fact, and storage rules are in [ADRs 0011 to 0026](docs/adr/README.md#domain-and-storage).
 - Every UI mock passes the two-family mock gate. See [ADR
   0028](docs/adr/0028-two-family-ui-mock-gate.md).
