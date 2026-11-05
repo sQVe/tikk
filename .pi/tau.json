@@ -1,4 +1,5 @@
 {
   "fullCheck": { "argv": ["cargo", "xtask", "check"] },
-  "mutation": { "argv": ["cargo", "xtask", "mutation"] }
+  "mutation": { "argv": ["cargo", "xtask", "mutation"] },
+  "tdd": { "runner": "nextest" }
 }
