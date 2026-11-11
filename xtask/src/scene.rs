@@ -204,6 +204,23 @@ mod tests {
     }
 
     #[test]
+    fn scene_name_errors_name_the_rejected_name_and_the_known_scenes() {
+        let names = known_names();
+
+        let unknown = validate_scene(" missing ", &names).expect_err("an unknown scene fails");
+        assert_eq!(
+            unknown.to_string(),
+            "No scene named \"missing\". Known scenes: alpha, beta."
+        );
+
+        let empty = validate_scene("  ", &names).expect_err("an empty scene fails");
+        assert_eq!(
+            empty.to_string(),
+            "Type a scene name. Known scenes: alpha, beta."
+        );
+    }
+
+    #[test]
     fn build_environment_drops_session_variables() {
         let caller = vec![
             ("DISPLAY".to_string(), ":0".to_string()),
