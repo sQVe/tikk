@@ -7,6 +7,7 @@ setup and verification.
 - Run `cargo xtask check` before finishing changes. `cargo xtask mutation changed <base>` runs
   mutation testing on the lines changed since `<base>`.
 - Format with `cargo fmt`. rustfmt runs with its default settings.
+- Follow the [Rust coding guide](docs/coding.md) with Tau's coding instructions.
 - Follow the decisions in [docs/adr](docs/adr/README.md), and record new decisions there. Read that
   guide before adding or changing an ADR. When details of a decision change, edit its ADR in place
   in the same change. Do not write documents that explain how a feature works; see [ADR

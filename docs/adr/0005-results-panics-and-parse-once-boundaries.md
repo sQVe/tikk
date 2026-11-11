@@ -3,7 +3,8 @@
 **Date**: 2026-11-04\
 **Status**: Accepted\
 **Related**: [ADR 0002 (Native Rust app with GPUI, as two binaries over one core crate)](./0002-native-rust-gpui-two-binaries.md),
-[ADR 0004 (Toolchain, dependencies, and quality gates)](./0004-toolchain-and-quality-gates.md)
+[ADR 0004 (Toolchain, dependencies, and quality gates)](./0004-toolchain-and-quality-gates.md),
+[ADR 0030 (A Rust coding guide adapts Tau's coding rules)](./0030-rust-coding-guide.md)
 
 ## Context
 
@@ -28,6 +29,9 @@ boundary, and passes trusted types inward. Checks for impossible states run in e
 - A function that can fail in an expected way returns `Result` with an error enum that names the
   reason. A ticket file that fails to parse, a missing ticket, a refused claim, a failed `gh` call,
   and a missing tool are expected failures.
+- `xtask` is the exception. Its tasks only report a failure to the developer, so they return
+  `anyhow::Result` with context. An `xtask` error that a caller or a test tells apart still gets an
+  error enum. [ADR 0030](./0030-rust-coding-guide.md) holds the reasons.
 - `assert!` and `unreachable!` check states that must be impossible. They run in release builds too.
   Never use them to check input.
 - Library code in the core crate does not panic on input. A CLI command reports an expected failure

@@ -39,6 +39,7 @@ the commit in its row.
 - [0003: Vendored gpui-component with a recorded patch boundary](./0003-vendored-gpui-component.md)
 - [0004: Toolchain, dependencies, and quality gates](./0004-toolchain-and-quality-gates.md)
 - [0029: tikk supports Linux and macOS, not Windows](./0029-linux-and-macos-only.md)
+- [0031: Dev builds keep line tables only, and dependencies keep no debug info](./0031-dev-builds-keep-line-tables-only.md)
 
 ### Code structure
 
@@ -47,6 +48,7 @@ the commit in its row.
 - [0007: Side effects as narrow records of functions](./0007-side-effect-function-records.md)
 - [0008: One owner for the desktop app's lifetime](./0008-app-lifetime-owner.md)
 - [0009: Owner files inside modules, thin coordinators, and owner-first file names](./0009-owner-files-and-file-names.md)
+- [0030: A Rust coding guide adapts Tau's coding rules](./0030-rust-coding-guide.md)
 
 ### Agent interface
 
