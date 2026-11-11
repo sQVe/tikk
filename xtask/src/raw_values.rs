@@ -1,0 +1,369 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use anyhow::Context as _;
+use ra_ap_rustc_lexer::{FrontmatterAllowed, LiteralKind, TokenKind, strip_shebang, tokenize};
+
+const UI_SOURCE: &str = "crates/tikk-ui/src";
+const THEME_FILE: &str = "theme.rs";
+
+const RAW_CALLS: &[&str] = &["px", "rems", "rems_from_px", "rgb", "rgba", "hsla", "hsl"];
+
+const NAMED_COLORS: &[&str] = &[
+    "white",
+    "black",
+    "red",
+    "green",
+    "blue",
+    "yellow",
+    "transparent_black",
+    "transparent_white",
+    "opaque_grey",
+];
+
+const CONSTRUCTORS: &[&str] = &["Pixels", "Rgba", "Hsla"];
+
+// The style helpers that encode a fixed scale. `full` and `auto` are left out: they are relative
+// layout values with no raw length, such as `size_full`.
+const BOX_PREFIXES: &[&str] = &[
+    "w", "h", "size", "min_size", "min_w", "min_h", "max_size", "max_w", "max_h", "gap", "gap_x",
+    "gap_y", "p", "pt", "pb", "px", "py", "pl", "pr", "m", "mt", "mb", "my", "mx", "ml", "mr",
+    "inset", "top", "bottom", "left", "right",
+];
+
+const BORDER_PREFIXES: &[&str] = &[
+    "border", "border_t", "border_b", "border_r", "border_l", "border_x", "border_y",
+];
+
+const CORNER_PREFIXES: &[&str] = &[
+    "rounded",
+    "rounded_t",
+    "rounded_b",
+    "rounded_r",
+    "rounded_l",
+    "rounded_tl",
+    "rounded_tr",
+    "rounded_bl",
+    "rounded_br",
+];
+
+const BOX_SUFFIXES: &[&str] = &[
+    "0", "0p5", "1", "1p5", "2", "2p5", "3", "3p5", "4", "5", "6", "7", "8", "9", "10", "11", "12",
+    "16", "20", "24", "32", "40", "48", "56", "64", "72", "80", "96", "112", "128", "px", "1_2",
+    "1_3", "2_3", "1_4", "2_4", "3_4", "1_5", "2_5", "3_5", "4_5", "1_6", "5_6", "1_12",
+];
+
+const BORDER_SUFFIXES: &[&str] = &[
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "16", "20", "24", "32",
+];
+
+const CORNER_SUFFIXES: &[&str] = &["none", "xs", "sm", "md", "lg", "xl", "2xl", "3xl", "full"];
+
+const TEXT_SUFFIXES: &[&str] = &["xs", "sm", "base", "lg", "xl", "2xl", "3xl"];
+
+pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
+    let directory = root.join(UI_SOURCE);
+    let failures = scan_directory(root, &directory)?;
+
+    if failures.is_empty() {
+        return Ok(());
+    }
+
+    anyhow::bail!("{}", failures.join("\n"))
+}
+
+fn scan_directory(root: &Path, directory: &Path) -> anyhow::Result<Vec<String>> {
+    let mut files = Vec::new();
+    collect_files(directory, &mut files)?;
+    files.sort();
+
+    let theme_file = directory.join(THEME_FILE);
+    let mut failures = Vec::new();
+
+    for file in files {
+        if file == theme_file {
+            continue;
+        }
+
+        let source = fs::read_to_string(&file)
+            .with_context(|| format!("Could not read {}", file.display()))?;
+        let path = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+
+        failures.extend(scan_source(&path, &source));
+    }
+
+    Ok(failures)
+}
+
+fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    let entries = fs::read_dir(directory)
+        .with_context(|| format!("Could not list {}", directory.display()))?;
+
+    for entry in entries {
+        let entry = entry.with_context(|| "Could not read an entry")?;
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_files(&path, files)?;
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn scan_source(path: &str, source: &str) -> Vec<String> {
+    let masked = mask_source(source);
+    let mut failures = Vec::new();
+    let mut reported_line = None;
+
+    for offset in raw_value_offsets(&masked) {
+        let line = line_number(&masked, offset);
+
+        if reported_line == Some(line) {
+            continue;
+        }
+
+        let text = source.lines().nth(line - 1).unwrap_or("");
+
+        failures.push(format!("{path}:{line}: {}", text.trim()));
+        reported_line = Some(line);
+    }
+
+    failures
+}
+
+fn line_number(masked: &str, offset: usize) -> usize {
+    masked[..offset]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
+}
+
+fn offsets_where<'a>(
+    text: &'a str,
+    pattern: &'a str,
+    accepts: impl Fn(usize) -> bool + 'a,
+) -> impl Iterator<Item = usize> + 'a {
+    text.match_indices(pattern)
+        .map(|(index, _)| index)
+        .filter(move |index| accepts(*index))
+}
+
+fn starts_with_tokens(mut text: &str, expected: &[&str]) -> bool {
+    for expected_token in expected {
+        text = text.trim_start();
+        let Some(token) = tokenize(text, FrontmatterAllowed::No).next() else {
+            return false;
+        };
+        let (actual, remaining) = text.split_at(token.len as usize);
+
+        if actual != *expected_token {
+            return false;
+        }
+
+        text = remaining;
+    }
+
+    true
+}
+
+fn raw_value_offsets(text: &str) -> Vec<usize> {
+    let mut offsets = Vec::new();
+
+    for name in RAW_CALLS.iter().chain(NAMED_COLORS) {
+        offsets.extend(offsets_where(text, name, |index| {
+            is_bare_call(text, index, name, &["("])
+        }));
+    }
+
+    for name in CONSTRUCTORS {
+        offsets.extend(offsets_where(text, name, |index| {
+            is_bare_call(text, index, name, &[":", ":", "from", "("])
+        }));
+        offsets.extend(offsets_where(text, name, |index| {
+            is_bare_call(text, index, name, &["("])
+        }));
+        offsets.extend(offsets_where(text, name, |index| {
+            is_bare_struct_literal(text, index, name)
+        }));
+    }
+
+    offsets.extend(offsets_where(text, "0x", |index| is_hex_color(text, index)));
+    offsets.extend(offsets_where(text, ".", |dot| {
+        is_preset_helper_call(text, dot)
+    }));
+    offsets.sort_unstable();
+
+    offsets
+}
+
+#[cfg(test)]
+fn line_has_raw_value(text: &str) -> bool {
+    !raw_value_offsets(text).is_empty()
+}
+
+fn is_bare_struct_literal(text: &str, index: usize, name: &str) -> bool {
+    let before = text[..index].chars().next_back();
+    let is_member = before == Some('.') || before.is_some_and(is_identifier_char);
+
+    if is_member || preceded_by_arrow(text, index) {
+        return false;
+    }
+
+    let rest = text[index + name.len()..].trim_start();
+
+    rest.strip_prefix('{')
+        .is_some_and(|fields| starts_with_struct_fields(fields.trim_start(), name))
+}
+
+fn preceded_by_arrow(text: &str, index: usize) -> bool {
+    text[..index].trim_end().ends_with("->")
+}
+
+fn starts_with_struct_fields(fields: &str, name: &str) -> bool {
+    if fields.starts_with("..") {
+        return true;
+    }
+
+    let field_names: &[&str] = match name {
+        "Rgba" => &["r", "g", "b", "a"],
+        "Hsla" => &["h", "s", "l", "a"],
+        _ => return false,
+    };
+
+    field_names
+        .iter()
+        .any(|field| starts_with_tokens(fields, &[field, ":"]))
+}
+
+fn is_bare_call(text: &str, index: usize, name: &str, suffix: &[&str]) -> bool {
+    let before = text[..index].chars().next_back();
+    let called_as_method = text[..index].trim_end().ends_with('.');
+    let inside_identifier = before.is_some_and(is_identifier_char);
+
+    if called_as_method || inside_identifier {
+        return false;
+    }
+
+    starts_with_tokens(&text[index + name.len()..], suffix)
+}
+
+fn is_hex_color(text: &str, index: usize) -> bool {
+    let digits: String = text[index + 2..]
+        .chars()
+        .take_while(|character| character.is_ascii_hexdigit())
+        .collect();
+    let after = text[index + 2 + digits.len()..].chars().next();
+    let is_color_length = digits.len() == 6 || digits.len() == 8;
+
+    is_color_length && !after.is_some_and(is_identifier_char)
+}
+
+fn is_preset_helper_call(text: &str, dot: usize) -> bool {
+    let after_dot = &text[dot + 1..];
+    let name_start = text.len() - after_dot.trim_start().len();
+    let name_end = identifier_end(text, name_start);
+    let name = &text[name_start..name_end];
+
+    text[name_end..].trim_start().starts_with('(') && is_preset_helper(name)
+}
+
+fn identifier_end(text: &str, start: usize) -> usize {
+    let mut end = start;
+
+    for (offset, character) in text[start..].char_indices() {
+        if character.is_ascii_alphanumeric() || character == '_' {
+            end = start + offset + character.len_utf8();
+        } else {
+            break;
+        }
+    }
+
+    end
+}
+
+fn is_preset_helper(name: &str) -> bool {
+    [
+        (BOX_PREFIXES, BOX_SUFFIXES),
+        (BORDER_PREFIXES, BORDER_SUFFIXES),
+        (CORNER_PREFIXES, CORNER_SUFFIXES),
+        (&["text"][..], TEXT_SUFFIXES),
+    ]
+    .into_iter()
+    .any(|(prefixes, suffixes)| has_prefix_and_suffix(name, prefixes, suffixes))
+}
+
+fn has_prefix_and_suffix(name: &str, prefixes: &[&str], suffixes: &[&str]) -> bool {
+    prefixes.iter().any(|prefix| {
+        let Some(rest) = name.strip_prefix(prefix) else {
+            return false;
+        };
+        let Some(suffix) = rest.strip_prefix('_') else {
+            return false;
+        };
+
+        suffixes.contains(&suffix)
+    })
+}
+
+fn is_identifier_char(character: char) -> bool {
+    character.is_ascii_alphanumeric() || character == '_'
+}
+
+fn push_blanks(masked: &mut String, text: &str) {
+    let blanks = text
+        .bytes()
+        .map(|byte| if byte == b'\n' { '\n' } else { ' ' });
+
+    masked.extend(blanks);
+}
+
+fn mask_source(source: &str) -> String {
+    let mut masked = String::with_capacity(source.len());
+    let shebang_end = strip_shebang(source).unwrap_or(0);
+    let mut start = shebang_end;
+
+    push_blanks(&mut masked, &source[..shebang_end]);
+
+    for token in tokenize(&source[shebang_end..], FrontmatterAllowed::Yes) {
+        let end = start + token.len as usize;
+        let text = &source[start..end];
+        let hides_text = matches!(
+            token.kind,
+            TokenKind::LineComment { .. }
+                | TokenKind::BlockComment { .. }
+                | TokenKind::Frontmatter { .. }
+                | TokenKind::Literal {
+                    kind: LiteralKind::Char { .. }
+                        | LiteralKind::Byte { .. }
+                        | LiteralKind::Str { .. }
+                        | LiteralKind::ByteStr { .. }
+                        | LiteralKind::CStr { .. }
+                        | LiteralKind::RawStr { .. }
+                        | LiteralKind::RawByteStr { .. }
+                        | LiteralKind::RawCStr { .. },
+                    ..
+                }
+        );
+
+        if hides_text {
+            push_blanks(&mut masked, text);
+        } else {
+            masked.push_str(text);
+        }
+
+        start = end;
+    }
+
+    masked
+}
+
+#[cfg(test)]
+mod tests;

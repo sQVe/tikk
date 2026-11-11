@@ -1,4 +1,10 @@
 exclude_globs = [
+  # The vendored kit is the published crate, and its tests do not run here.
+  "vendor/**",
+  # The scene binary opens a window, which unit tests cannot check.
+  "crates/tikk-ui/src/bin/**",
+  # Scenes are fake data on real parts, and only a capture shows them.
+  "crates/tikk-ui/src/scenes/**",
   # The CLI entry point delegates argument parsing and output to clap.
   "crates/tikk-cli/src/main.rs",
   # The desktop entry point is reserved for display-dependent startup.

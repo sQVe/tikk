@@ -3,7 +3,7 @@ use std::process::{Command, ExitCode};
 
 use thiserror::Error;
 
-use crate::boundaries;
+use crate::{boundaries, raw_values};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
@@ -163,6 +163,15 @@ fn check_steps(root: &Path, steps: &[Step], groups: &[Group]) -> ExitCode {
 
     if groups.contains(&Group::Tidy) && !run_boundary_check(root) {
         failed.push(BOUNDARY_CHECK_NAME);
+    }
+
+    if groups.contains(&Group::Tidy) {
+        eprintln!("==> raw-values");
+
+        if let Err(error) = raw_values::check(root) {
+            eprintln!("{error:#}");
+            failed.push("raw-values");
+        }
     }
 
     if failed.is_empty() {

@@ -33,7 +33,7 @@ without code.
 ### Mocks
 
 - A scene uses the kit's real parts, the tikk kit and theme values, and fake data. Scenes live in
-  one committed mocks module, separate from the app code.
+  the committed `tikk-ui::scenes` module, separate from the app code.
 - Each scene is captured natively, as a full shot and a crop, with `cargo xtask mock capture
   <scene>`.
 - The judges see the shot, the crop, and the `cargo xtask check` result.
@@ -73,8 +73,12 @@ A hard failure fails the mock on its own, whatever the findings. There are five 
 
 ### Smoke test
 
-Four smoke scenes (`smoke-1` to `smoke-4`) check the procedure. The skill lists the verdict each one
-must give. Changing a judge model or the judge instructions requires a smoke test run.
+Four smoke scenes (`smoke-1` to `smoke-4`) and their expected verdicts arrive with tikk's first
+real scenes. Until then, the single `placeholder` scene proves only that capture and the judge
+procedure run. It has no expected verdict and does not establish tikk's visual direction.
+
+Once the smoke scenes exist, the skill lists the verdict each one must give. Changing a judge
+model or the judge instructions then requires a smoke test run.
 
 ## Consequences
 

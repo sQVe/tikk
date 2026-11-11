@@ -21,15 +21,19 @@ treats the vendored copy as its own code.
 ### Vendored copy
 
 - The vendored copy keeps gpui-component's Apache-2.0 license and notices.
-- Each local patch is recorded next to the vendored code, with what it changes and why, so the patch
-  can be kept on an update.
+- `vendor/gpui-component/PATCHES.md` records the published source and each local patch, with its
+  reason. Each patch starts with a `// TIKK:` marker so it can be found and kept on an update.
+- Cargo uses the vendored copy through `[patch.crates-io]`. The vendor tree is not a workspace
+  member and is excluded from project formatting, spelling, and mutation checks.
 - tikk offers generic patches upstream, but does not wait for them.
 
 ### One boundary
 
-- One module of the desktop app imports gpui-component. It is the kit module.
+- `tikk-ui` owns the kit module. Only that module imports gpui-component, through
+  `gpui_kit::component`. Both mock scenes and future desktop views use this boundary.
 - Other code uses tikk's own types for widgets, themes, and events. The kit module translates
-  between the two.
+  between those types and component types. GPUI layout and rendering types may be used throughout
+  `tikk-ui` through `gpui-kit`.
 - A switch to a fork or a different kit then changes that module only.
 
 ## Consequences
