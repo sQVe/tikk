@@ -10,10 +10,23 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde_json = "1"
+tempfile = "3"
+thiserror = "2"
 tikk-core = { path = "crates/tikk-core" }
 tikk-ui = { path = "crates/tikk-ui" }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.debugging]
+inherits = "dev"
+debug = true
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -26,3 +39,8 @@ correctness = { level = "deny", priority = -1 }
 dbg_macro = "warn"
 todo = "warn"
 undocumented_unsafe_blocks = "warn"
+print_stdout = "warn"
+print_stderr = "warn"
+allow_attributes_without_reason = "warn"
+should_panic_without_expect = "warn"
+redundant_clone = "warn"

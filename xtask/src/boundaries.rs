@@ -2,13 +2,39 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use anyhow::Context as _;
 use serde_json::Value;
+use thiserror::Error;
 
 type Graph = BTreeMap<String, Vec<String>>;
 
 const PROTECTED_PACKAGES: &[&str] = &["tikk-cli", "tikk-core"];
 
-pub(crate) fn check(root: &Path) -> Result<(), String> {
+#[derive(Debug, Error, PartialEq, Eq)]
+enum MetadataError {
+    #[error("cargo metadata has no packages list.")]
+    MissingPackages,
+    #[error("A package has no id.")]
+    MissingPackageId,
+    #[error("A package has no name.")]
+    MissingPackageName,
+    #[error("cargo metadata has no resolve graph.")]
+    MissingGraph,
+    #[error("A resolved package has no id.")]
+    MissingNodeId,
+    #[error("A resolved package has no dependency list.")]
+    MissingDependencies,
+    #[error("A dependency has no id.")]
+    InvalidDependencyId,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("{}", paths.join("\n"))]
+struct BoundaryViolations {
+    paths: Vec<String>,
+}
+
+pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
     let metadata = read_metadata(root)?;
     let violations = boundary_violations(&metadata)?;
 
@@ -16,68 +42,71 @@ pub(crate) fn check(root: &Path) -> Result<(), String> {
         return Ok(());
     }
 
-    Err(violations.join("\n"))
+    Err(BoundaryViolations { paths: violations }.into())
 }
 
-fn read_metadata(root: &Path) -> Result<Value, String> {
+fn read_metadata(root: &Path) -> anyhow::Result<Value> {
     let output = Command::new("cargo")
         .args(["metadata", "--format-version", "1", "--locked"])
         .current_dir(root)
         .stderr(Stdio::inherit())
         .output()
-        .map_err(|error| format!("Could not start cargo metadata: {error}"))?;
+        .context("Could not start cargo metadata")?;
 
     if !output.status.success() {
-        return Err(format!("cargo metadata failed with {}.", output.status));
+        anyhow::bail!("cargo metadata failed with {}.", output.status);
     }
 
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("cargo metadata printed invalid JSON: {error}"))
+    serde_json::from_slice(&output.stdout).context("cargo metadata printed invalid JSON")
 }
 
 fn is_forbidden(package: &str) -> bool {
     package.starts_with("gpui") || package == "tikk-ui" || package == "tikk-desktop"
 }
 
-fn package_names(metadata: &Value) -> Result<BTreeMap<&str, &str>, String> {
+fn package_names(metadata: &Value) -> Result<BTreeMap<&str, &str>, MetadataError> {
     let packages = metadata["packages"]
         .as_array()
-        .ok_or("cargo metadata has no packages list.")?;
+        .ok_or(MetadataError::MissingPackages)?;
 
     packages
         .iter()
         .map(|package| {
-            let id = package["id"].as_str().ok_or("A package has no id.")?;
-            let name = package["name"].as_str().ok_or("A package has no name.")?;
+            let id = package["id"]
+                .as_str()
+                .ok_or(MetadataError::MissingPackageId)?;
+            let name = package["name"]
+                .as_str()
+                .ok_or(MetadataError::MissingPackageName)?;
 
             Ok((id, name))
         })
         .collect()
 }
 
-fn read_graph(metadata: &Value) -> Result<Graph, String> {
+fn read_graph(metadata: &Value) -> Result<Graph, MetadataError> {
     let nodes = metadata["resolve"]["nodes"]
         .as_array()
-        .ok_or("cargo metadata has no resolve graph.")?;
+        .ok_or(MetadataError::MissingGraph)?;
 
     nodes
         .iter()
         .map(|node| {
             let id = node["id"]
                 .as_str()
-                .ok_or("A resolved package has no id.")?
+                .ok_or(MetadataError::MissingNodeId)?
                 .to_string();
             let dependencies = node["dependencies"]
                 .as_array()
-                .ok_or("A resolved package has no dependency list.")?
+                .ok_or(MetadataError::MissingDependencies)?
                 .iter()
                 .map(|dependency| {
                     dependency
                         .as_str()
                         .map(str::to_string)
-                        .ok_or_else(|| "A dependency has no id.".to_string())
+                        .ok_or(MetadataError::InvalidDependencyId)
                 })
-                .collect::<Result<Vec<String>, String>>()?;
+                .collect::<Result<Vec<String>, MetadataError>>()?;
 
             Ok((id, dependencies))
         })
@@ -155,7 +184,7 @@ fn protected_package_ids<'a>(names: &BTreeMap<&'a str, &'a str>) -> Vec<&'a str>
     ids
 }
 
-fn boundary_violations(metadata: &Value) -> Result<Vec<String>, String> {
+fn boundary_violations(metadata: &Value) -> Result<Vec<String>, MetadataError> {
     let names = package_names(metadata)?;
     let graph = read_graph(metadata)?;
     let protected = protected_package_ids(&names);
@@ -229,6 +258,103 @@ mod tests {
             .collect();
 
         metadata_with_ids(&packages)
+    }
+
+    fn workspace_with_dependency(forbidden: bool) -> tempfile::TempDir {
+        let root = crate::test_support::temporary_directory();
+        let dependency = if forbidden {
+            "[dependencies]\ntikk-ui = { path = \"ui\" }\n"
+        } else {
+            ""
+        };
+
+        std::fs::create_dir_all(root.path().join("src")).expect("create source folder");
+        std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
+        std::fs::write(
+            root.path().join("Cargo.toml"),
+            format!("[workspace]\n[package]\nname = \"tikk-cli\"\nversion = \"0.0.0\"\nedition = \"2024\"\n{dependency}"),
+        ).expect("write manifest");
+
+        if forbidden {
+            std::fs::create_dir_all(root.path().join("ui/src")).expect("create UI source folder");
+            std::fs::write(root.path().join("ui/src/lib.rs"), "").expect("write UI library");
+            std::fs::write(
+                root.path().join("ui/Cargo.toml"),
+                "[package]\nname = \"tikk-ui\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+            )
+            .expect("write UI manifest");
+        }
+
+        let status = std::process::Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root.path())
+            .status()
+            .expect("start cargo to prepare fixture");
+
+        assert!(status.success());
+        root
+    }
+
+    #[test]
+    fn check_accepts_a_clean_workspace() {
+        let root = workspace_with_dependency(false);
+
+        super::check(root.path()).expect("clean workspace passes");
+    }
+
+    #[test]
+    fn check_reports_dependency_paths_as_typed_errors() {
+        let root = workspace_with_dependency(true);
+        let manifest = std::fs::read(root.path().join("Cargo.toml")).expect("read manifest");
+        let lock = std::fs::read(root.path().join("Cargo.lock")).expect("read lock");
+
+        let error = super::check(root.path()).expect_err("UI dependency fails");
+
+        assert_eq!(
+            error.downcast_ref::<super::BoundaryViolations>(),
+            Some(&super::BoundaryViolations {
+                paths: strings(&["tikk-cli must not depend on tikk-ui: tikk-cli -> tikk-ui"]),
+            })
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("Cargo.toml")).expect("read manifest"),
+            manifest
+        );
+        assert_eq!(
+            std::fs::read(root.path().join("Cargo.lock")).expect("read lock"),
+            lock
+        );
+    }
+
+    #[test]
+    fn malformed_metadata_reports_the_missing_field() {
+        use super::MetadataError;
+
+        let cases = [
+            (json!({}), MetadataError::MissingPackages),
+            (json!({"packages": [{}]}), MetadataError::MissingPackageId),
+            (
+                json!({"packages": [{"id": "a"}]}),
+                MetadataError::MissingPackageName,
+            ),
+            (json!({"packages": []}), MetadataError::MissingGraph),
+            (
+                json!({"packages": [], "resolve": {"nodes": [{}]}}),
+                MetadataError::MissingNodeId,
+            ),
+            (
+                json!({"packages": [], "resolve": {"nodes": [{"id": "a"}]}}),
+                MetadataError::MissingDependencies,
+            ),
+            (
+                json!({"packages": [], "resolve": {"nodes": [{"id": "a", "dependencies": [null]}]}}),
+                MetadataError::InvalidDependencyId,
+            ),
+        ];
+
+        for (metadata, expected) in cases {
+            assert_eq!(boundary_violations(&metadata), Err(expected), "{metadata}");
+        }
     }
 
     #[test]
