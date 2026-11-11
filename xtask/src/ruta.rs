@@ -7,7 +7,7 @@ use crate::scene;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error(
-    "ruta is not installed. Run: cargo install --git https://github.com/sQVe/ruta --tag v0.1.0 --locked ruta"
+    "ruta is not installed. Run: cargo install --git https://github.com/sQVe/ruta --tag v0.2.1 --locked ruta"
 )]
 struct RutaNotInstalled;
 
