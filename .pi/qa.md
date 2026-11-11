@@ -21,7 +21,14 @@ Cross-effects:
 
 ## Before a launch
 
-For the CLI section, run `cargo build --locked` in the worktree.
+The manager starts:
+
+- For the CLI section, the build: `cargo build --locked` in the worktree. It is done when the
+  `find` command under "Reach it" prints nothing. It ends by itself, so it has no stop command.
+
+Ask the user:
+
+- Nothing today.
 
 ## Rules for every section
 
