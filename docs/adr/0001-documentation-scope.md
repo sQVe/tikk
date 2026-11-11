@@ -25,6 +25,8 @@ and code states behavior.
   coding guide, and the ADRs.
 - The root README introduces the project and links to the rest. Topic details go in `docs/` and are
   linked from the [documentation index](../README.md).
+- The QA guide in `.pi/qa.md` tells an agent how to reach each interface, use it safely, and see
+  that it works. It names only the visible results such a check needs, and explains no feature.
 - A record of local changes to vendored code lives next to that code. It states what each change
   does and why, so the change can be kept on an update or offered upstream. It describes no feature.
 
