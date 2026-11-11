@@ -1,0 +1,48 @@
+name: Install GPUI system packages
+description: >-
+  Install the system packages GPUI builds against on an Ubuntu runner. The package files come from
+  the workflow cache, and from the package mirror only when the cache is empty.
+
+runs:
+  using: composite
+  steps:
+    - name: Read the runner image version
+      id: image
+      shell: bash
+      run: echo "version=${ImageOS}-${ImageVersion}" >> "$GITHUB_OUTPUT"
+    - name: Restore the package files
+      id: packages
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gpui-system-packages
+        # The download holds only what the runner image lacks, so the files fit one image version.
+        key: gpui-system-packages-${{ steps.image.outputs.version }}-${{ hashFiles('.github/actions/install-gpui-system-packages/action.yml') }}
+    - name: Download the package files
+      if: steps.packages.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PACKAGE_DIRECTORY: ${{ runner.temp }}/gpui-system-packages
+      run: |
+        sudo apt-get clean
+        sudo apt-get update
+        sudo apt-get install --download-only --no-install-recommends --yes \
+          libasound2-dev libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan-dev \
+          libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-render0-dev \
+          libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xkb-dev libxcb1-dev \
+          libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+        mkdir -p "$PACKAGE_DIRECTORY"
+        cp /var/cache/apt/archives/*.deb "$PACKAGE_DIRECTORY"
+    # Saved before the build, so a failing build still leaves the files for the next run.
+    - name: Save the package files
+      if: steps.packages.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/gpui-system-packages
+        key: ${{ steps.packages.outputs.cache-primary-key }}
+    - name: Install the package files
+      shell: bash
+      env:
+        PACKAGE_DIRECTORY: ${{ runner.temp }}/gpui-system-packages
+      # apt-get orders the files by their dependencies, which dpkg does not. Do not add
+      # --no-download: apt-get then fails on local files with "Pathname to install is not absolute".
+      run: sudo apt-get install --no-install-recommends --yes "$PACKAGE_DIRECTORY"/*.deb

@@ -62,13 +62,7 @@ jobs:
           tool: cargo-nextest
       - name: Install GPUI system packages (Linux)
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan-dev \
-            libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-render0-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xkb-dev libxcb1-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+        uses: ./.github/actions/install-gpui-system-packages
       - run: cargo xtask check build
 
   end-to-end:
@@ -129,13 +123,7 @@ jobs:
         with:
           tool: cargo-mutants@27.1.0,cargo-nextest
       - name: Install GPUI system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan-dev \
-            libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-render0-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xkb-dev libxcb1-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+        uses: ./.github/actions/install-gpui-system-packages
       - name: Mutate the pull request's diff
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -172,13 +160,7 @@ jobs:
         with:
           tool: cargo-mutants@27.1.0,cargo-nextest
       - name: Install GPUI system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends --yes \
-            libasound2-dev libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan-dev \
-            libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-render0-dev \
-            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xkb-dev libxcb1-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
+        uses: ./.github/actions/install-gpui-system-packages
       - name: Mutate the whole workspace
         run: |
           status=0
