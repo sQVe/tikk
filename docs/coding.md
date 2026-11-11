@@ -12,6 +12,7 @@ names, and test placement.
 
 These names are exceptions to Tau's full-word naming rule.
 
+- Name a GPUI context `cx` and a GPUI window `window`. Put `window` before `cx` in a parameter list.
 - Keep a name that a standard or trait method requires, such as `fmt`.
 - Use `T` for a generic type parameter and short names such as `'a` for lifetimes.
 
@@ -43,13 +44,16 @@ These names are exceptions to Tau's full-word naming rule.
 - Write these forms inline: `?`, `if let`, `let ... else`, an `if` or `match` that produces a value,
   and a short iterator chain such as `names.iter().any(...)`. This replaces Tau's rules on call
   chains and ternary expressions.
+- Write GPUI element builders as one fluent chain, with `.when(...)`, `.when_some(...)`, and
+  `.child(...)` for conditional and nested parts.
 - Name a chain with its own `let` when it is long, or when its result is a concept the reader should
   see by name, such as the rows a `for` loop walks.
-- Use an `Option<T>` field for an optional value. Tau's spread rules do not apply to Rust.
+- Use an `Option<T>` field for an optional value, and `.when_some(...)` for an optional GPUI child.
+  Tau's spread rules do not apply to Rust.
 
 ## Function size
 
-- Do not split an exhaustive `match` only to meet Tau's size review signals. Follow
+- Do not split an exhaustive `match` or a GPUI builder chain only to meet Tau's size review signals. Follow
   [ADR 0009](./adr/0009-owner-files-and-file-names.md) for size reviews and ownership.
 
 ## Ownership
@@ -60,13 +64,37 @@ These names are exceptions to Tau's full-word naming rule.
 - Clone on purpose. Before you write `.clone()`, check whether a move or a shorter borrow works.
 - Suppress a lint with `#[expect(lint, reason = "...")]` on the smallest item that needs it. Use
   `#[allow(lint, reason = "...")]` only where the lint fires in some builds and not in others.
-- Allow printing in `tikk-cli` and `xtask` only on the item that writes command output, with a
-  stated reason.
+- Allow printing in `tikk-cli`, `tikk-scene`, and `xtask` only on the item that writes command
+  output, with a stated reason.
 
 ## Doc comments
 
 - Write `///` doc comments only on items another crate uses.
 - In a doc comment, state only errors, panics, and invariants the name and types cannot show.
+
+## GPUI
+
+- Inside `entity.update(cx, |state, cx| ...)`, use the closure's `state` for the entity's data and
+  the closure's `cx` for GPUI calls.
+- Never read or update an entity through its handle while that entity is being updated. GPUI panics
+  with "cannot update T while it is already being updated", or "cannot read" for a read.
+- Await a `Task`, store it in its owner, or call `.detach()` on purpose. Dropping a `Task` cancels
+  its work. Detaching gives up both cancellation and the result.
+- Store a `Subscription` in its owner, or call `.detach()` on purpose. Dropping a `Subscription`
+  ends it.
+- Never write `let _ =` on a `Task` or `Subscription`. `_` drops it at once, and `let _task = ...`
+  keeps it only to the end of the scope.
+- Give a child that refers to its parent a `WeakEntity`, never an `Entity`. Treat a failed
+  `upgrade()` as normal: the parent is gone.
+- Keep `render` declarative: read state, derive values, and build elements. Do not start work,
+  subscribe, or change state in `render`.
+- Call `cx.notify()` once after a change to what the view shows. Never call it from `render`.
+- Build element IDs from stable domain data, such as a ticket ID. Never use a list index as an ID.
+- When background work finishes, check that the state it started from is still current, such as the
+  same selected ticket. Drop the result when it is not.
+- Keep GPUI types out of `tikk-core` and `tikk-cli`. They take and return plain tikk data.
+- Only `crates/tikk-ui/src/kit.rs` imports `gpui_kit::component`. Other UI code uses tikk's own
+  widget types, as [ADR 0003](./adr/0003-vendored-gpui-component.md) requires.
 
 ## Tests
 

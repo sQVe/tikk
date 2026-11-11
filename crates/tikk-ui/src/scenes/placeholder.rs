@@ -22,5 +22,5 @@ pub(super) fn render(theme: &Theme) -> Div {
         },
     ];
 
-    panel("Sample collection", &items, theme)
+    panel("Sample collection".to_string(), &items, theme)
 }

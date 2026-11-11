@@ -43,7 +43,7 @@ pub struct TextSizes {
     pub section: Pixels,
     pub row: Pixels,
     pub mark: Pixels,
-    /// The selected row's label weight, so selection is not color alone.
+    // The selected row's label weight, so selection is not color alone.
     pub selected_weight: FontWeight,
     pub counts: Pixels,
 }
@@ -57,8 +57,12 @@ pub struct Border {
 pub struct Sizing {
     pub row_height: Pixels,
     pub row_height_small: Pixels,
-    /// No size, so a flex child may shrink.
+    // No size, so a flex child may shrink.
     pub none: Pixels,
+}
+
+pub fn theme() -> Theme {
+    Theme::light()
 }
 
 impl Theme {
@@ -103,10 +107,6 @@ impl Theme {
     }
 }
 
-pub fn theme() -> Theme {
-    Theme::light()
-}
-
 /// Fixed scene geometry. The window is larger than the scene so a shot has context, and the scene
 /// sits at a fixed origin so the crop is exactly the panel.
 pub mod layout {
@@ -136,6 +136,99 @@ mod tests {
         surface: &'static str,
         ratio: f32,
         minimum: f32,
+    }
+
+    #[test]
+    fn contrast_check_computes_the_ratio_and_fails_below_the_minimum() {
+        let palette = [("foreground", rgb(0x888888)), ("surface", rgb(0xFFFFFF))];
+        let checked = check(&pair("foreground", "surface", 4.5), &palette);
+
+        assert!((checked.ratio - 3.54).abs() < 0.01);
+        assert!(!checked.passed(), "{checked:?} should fail");
+    }
+
+    #[test]
+    fn theme_fails_contrast_only_for_the_known_failures() {
+        assert_eq!(failures(&palette()), expected(known_failures(), &palette()));
+    }
+
+    #[test]
+    fn a_new_failing_pair_is_reported() {
+        let mut broken = palette();
+        broken[2] = ("foreground", rgb(0xDDDDDD));
+
+        let reported = failures(&broken);
+
+        assert!(
+            reported
+                .iter()
+                .any(|checked| checked.text == "foreground" && checked.surface == "background"),
+            "the new failing foreground on background pair is not reported"
+        );
+        assert_ne!(reported, expected(&[], &broken));
+    }
+
+    #[test]
+    fn a_listed_pair_that_starts_to_pass_is_reported() {
+        assert_ne!(
+            failures(&palette()),
+            expected(&[("foreground", "surface")], &palette())
+        );
+    }
+
+    #[test]
+    fn expected_selects_the_pair_named_by_a_known_failure() {
+        let checks = expected(&[("foreground", "surface")], &palette());
+
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].text, "foreground");
+        assert_eq!(checks[0].surface, "surface");
+        assert_eq!(checks[0].minimum, 4.5);
+    }
+
+    #[test]
+    fn every_pair_names_its_text_and_surface_once() {
+        let keys: Vec<(&str, &str)> = pairs()
+            .iter()
+            .map(|pair| (pair.text, pair.surface))
+            .collect();
+        let unique: HashSet<(&str, &str)> = keys.iter().copied().collect();
+
+        assert_eq!(unique.len(), keys.len());
+    }
+
+    #[test]
+    fn every_pair_uses_a_named_color() {
+        let names: HashSet<&str> = palette().into_iter().map(|(name, _)| name).collect();
+
+        for checked in pairs() {
+            assert!(
+                names.contains(checked.text),
+                "{} is not a color token",
+                checked.text
+            );
+            assert!(
+                names.contains(checked.surface),
+                "{} is not a color token",
+                checked.surface
+            );
+        }
+    }
+
+    #[test]
+    fn palette_has_no_duplicate_names() {
+        let names: Vec<&str> = palette().into_iter().map(|(name, _)| name).collect();
+        let unique: HashSet<&str> = names.iter().copied().collect();
+
+        assert_eq!(unique.len(), names.len());
+    }
+
+    #[test]
+    fn the_theme_is_light() {
+        assert!(
+            luminance(lookup(&palette(), "background"))
+                > luminance(lookup(&palette(), "foreground"))
+        );
     }
 
     impl ContrastCheck {
@@ -276,98 +369,5 @@ mod tests {
 
     fn known_failures() -> &'static [(&'static str, &'static str)] {
         &[]
-    }
-
-    #[test]
-    fn contrast_check_computes_the_ratio_and_fails_below_the_minimum() {
-        let palette = [("foreground", rgb(0x888888)), ("surface", rgb(0xFFFFFF))];
-        let checked = check(&pair("foreground", "surface", 4.5), &palette);
-
-        assert!((checked.ratio - 3.54).abs() < 0.01);
-        assert!(!checked.passed(), "{checked:?} should fail");
-    }
-
-    #[test]
-    fn theme_fails_contrast_only_for_the_known_failures() {
-        assert_eq!(failures(&palette()), expected(known_failures(), &palette()));
-    }
-
-    #[test]
-    fn a_new_failing_pair_is_reported() {
-        let mut broken = palette();
-        broken[2] = ("foreground", rgb(0xDDDDDD));
-
-        let reported = failures(&broken);
-
-        assert!(
-            reported
-                .iter()
-                .any(|checked| checked.text == "foreground" && checked.surface == "background"),
-            "the new failing foreground on background pair is not reported"
-        );
-        assert_ne!(reported, expected(&[], &broken));
-    }
-
-    #[test]
-    fn a_listed_pair_that_starts_to_pass_is_reported() {
-        assert_ne!(
-            failures(&palette()),
-            expected(&[("foreground", "surface")], &palette())
-        );
-    }
-
-    #[test]
-    fn expected_selects_the_pair_named_by_a_known_failure() {
-        let checks = expected(&[("foreground", "surface")], &palette());
-
-        assert_eq!(checks.len(), 1);
-        assert_eq!(checks[0].text, "foreground");
-        assert_eq!(checks[0].surface, "surface");
-        assert_eq!(checks[0].minimum, 4.5);
-    }
-
-    #[test]
-    fn every_pair_names_its_text_and_surface_once() {
-        let keys: Vec<(&str, &str)> = pairs()
-            .iter()
-            .map(|pair| (pair.text, pair.surface))
-            .collect();
-        let unique: HashSet<(&str, &str)> = keys.iter().copied().collect();
-
-        assert_eq!(unique.len(), keys.len());
-    }
-
-    #[test]
-    fn every_pair_uses_a_named_color() {
-        let names: HashSet<&str> = palette().into_iter().map(|(name, _)| name).collect();
-
-        for checked in pairs() {
-            assert!(
-                names.contains(checked.text),
-                "{} is not a color token",
-                checked.text
-            );
-            assert!(
-                names.contains(checked.surface),
-                "{} is not a color token",
-                checked.surface
-            );
-        }
-    }
-
-    #[test]
-    fn palette_has_no_duplicate_names() {
-        let names: Vec<&str> = palette().into_iter().map(|(name, _)| name).collect();
-        let unique: HashSet<&str> = names.iter().copied().collect();
-
-        assert_eq!(unique.len(), names.len());
-    }
-
-    #[test]
-    fn the_theme_is_light() {
-        assert!(
-            luminance(lookup(&palette(), "background"))
-                > luminance(lookup(&palette(), "foreground"))
-        );
     }
 }

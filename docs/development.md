@@ -111,14 +111,11 @@ judges and supports repeated improvement rounds through its hill-climb mode.
 
 ## Sandbox
 
-Install the pinned ruta release:
-
-```sh
-cargo install --git https://github.com/sQVe/ruta --tag v0.1.0 --locked ruta
-```
+Install ruta with the pinned command in [judge-mock](../.pi/skills/judge-mock/SKILL.md).
+The same release is pinned in the end-to-end CI job.
 
 Sandbox and capture run on Linux. Install Weston with its headless backend, Xwayland, xdotool,
-ImageMagick 7, fonts, and a Vulkan driver. Mesa's software Vulkan driver works without a GPU.
+ImageMagick with `magick` and `import`, fonts, and a Vulkan driver. Mesa's software Vulkan driver works without a GPU.
 CI uses an Arch Linux container for the end-to-end test and installs the packages in its job.
 
 Run scenes only on the private display, never against the real display:

@@ -121,6 +121,54 @@ fn build_commands_refuse_an_executable_outside_the_configured_target() {
     );
 }
 
+#[test]
+fn build_commands_stop_before_ruta_when_cargo_fails() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let folder = test_support::temporary_directory();
+    let marker = folder.path().join("ruta-started");
+    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace parent");
+    let artifact = serde_json::json!({
+        "reason": "compiler-artifact",
+        "target": { "name": "tikk-scene" },
+        "executable": workspace.join("target/debug/tikk-scene"),
+    });
+    let cargo_script = format!("#!/bin/sh\nprintf '%s\\n' '{artifact}'\nexit 23\n");
+    let ruta_script = format!("#!/bin/sh\nprintf started > '{}'\n", marker.display());
+
+    for (name, script) in [("cargo", cargo_script), ("ruta", ruta_script)] {
+        let path = folder.path().join(name);
+        fs::write(&path, script).expect("write fake tool");
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).expect("make tool executable");
+    }
+
+    for arguments in [
+        vec!["sandbox", "up", "placeholder"],
+        vec!["sandbox", "restart"],
+        vec!["mock", "capture", "placeholder"],
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_xtask"))
+            .args(&arguments)
+            .env("PATH", folder.path())
+            .output()
+            .expect("run the wrapper");
+
+        assert_eq!(output.status.code(), Some(1), "{arguments:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stderr),
+            "The scene binary did not build.\n",
+            "{arguments:?}"
+        );
+        assert!(
+            !marker.exists(),
+            "ruta must not start after {arguments:?} fails"
+        );
+    }
+}
+
 const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
 const SCENE_WINDOW_SIZE: (u32, u32) = (640, 480);
 

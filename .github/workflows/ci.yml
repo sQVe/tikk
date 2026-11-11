@@ -171,6 +171,14 @@ jobs:
       - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-mutants@27.1.0,cargo-nextest
+      - name: Install GPUI system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes \
+            libasound2-dev libfontconfig1-dev libfreetype6-dev libssl-dev libvulkan-dev \
+            libwayland-dev libx11-dev libx11-xcb-dev libxcb-randr0-dev libxcb-render0-dev \
+            libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xkb-dev libxcb1-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev pkg-config
       - name: Mutate the whole workspace
         run: |
           status=0

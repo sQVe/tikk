@@ -44,4 +44,4 @@ setup and verification.
   `cargo xtask sandbox up placeholder`, then `cargo xtask sandbox down` to stop it. Capture with
   `cargo xtask mock capture placeholder`; the shot, crop, and metadata go to
   `.tau/judge/placeholder/`. See [the development guide](docs/development.md#sandbox) and
-  [ADR 0030](docs/adr/0030-qa-in-the-ruta-sandbox.md).
+  [ADR 0032](docs/adr/0032-qa-in-the-ruta-sandbox.md).

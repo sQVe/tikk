@@ -1,5 +1,5 @@
 use gpui_kit::base::{h_flex, v_flex};
-use gpui_kit::{Div, ParentElement, Styled, div};
+use gpui_kit::{Div, ParentElement, Styled, div, prelude::FluentBuilder};
 
 use crate::{kit, theme::Theme};
 
@@ -9,42 +9,7 @@ pub struct Item {
     pub selected: bool,
 }
 
-impl Item {
-    fn render(&self, theme: &Theme) -> Div {
-        let mut row = h_flex()
-            .h(theme.sizing.row_height)
-            .w_full()
-            .gap(theme.spacing.small)
-            .px(theme.spacing.small)
-            .rounded(theme.radius.small);
-
-        if self.selected {
-            row = row
-                .bg(theme.colors.selected)
-                .font_weight(theme.text.selected_weight);
-        }
-
-        row.child(div().flex_1().child(kit::label(&self.label, theme)))
-            .child(
-                div()
-                    .text_size(theme.text.counts)
-                    .text_color(theme.colors.muted)
-                    .child(self.detail.clone()),
-            )
-    }
-}
-
-pub fn panel(title: &str, items: &[Item], theme: &Theme) -> Div {
-    let mut list = v_flex()
-        .flex_1()
-        .min_h(theme.sizing.none)
-        .p(theme.spacing.small)
-        .gap(theme.spacing.tiny);
-
-    for item in items {
-        list = list.child(item.render(theme));
-    }
-
+pub fn panel(title: String, items: &[Item], theme: &Theme) -> Div {
     v_flex()
         .size_full()
         .bg(theme.colors.surface)
@@ -58,7 +23,36 @@ pub fn panel(title: &str, items: &[Item], theme: &Theme) -> Div {
                 .py(theme.spacing.small)
                 .text_size(theme.text.section)
                 .text_color(theme.colors.foreground)
-                .child(title.to_string()),
+                .child(title),
         )
-        .child(list)
+        .child(
+            v_flex()
+                .flex_1()
+                .min_h(theme.sizing.none)
+                .p(theme.spacing.small)
+                .gap(theme.spacing.tiny)
+                .children(items.iter().map(|item| item.render(theme))),
+        )
+}
+
+impl Item {
+    fn render(&self, theme: &Theme) -> Div {
+        h_flex()
+            .h(theme.sizing.row_height)
+            .w_full()
+            .gap(theme.spacing.small)
+            .px(theme.spacing.small)
+            .rounded(theme.radius.small)
+            .when(self.selected, |row| {
+                row.bg(theme.colors.selected)
+                    .font_weight(theme.text.selected_weight)
+            })
+            .child(div().flex_1().child(kit::label(self.label.clone(), theme)))
+            .child(
+                div()
+                    .text_size(theme.text.counts)
+                    .text_color(theme.colors.muted)
+                    .child(self.detail.clone()),
+            )
+    }
 }

@@ -1,4 +1,4 @@
-# ADR 0030: QA in the ruta sandbox
+# ADR 0032: QA in the ruta sandbox
 
 **Date**: 2026-11-11\
 **Status**: Accepted\
@@ -21,7 +21,7 @@ pretending to isolate a native process from the host machine.
 
 ruta owns display isolation, input, capture, and process cleanup. tikk owns `ruta.toml`, the scene
 build, and scene-name validation for capture. Thin xtask wrappers keep these responsibilities
-separate. The installed ruta release is pinned in development and CI commands.
+separate. The installed ruta release is pinned in the judge skill and CI commands.
 
 The scene build keeps the caller's toolchain environment but drops display and session variables.
 Runtime processes use ruta's private display and environment. One-shot captures use a separate

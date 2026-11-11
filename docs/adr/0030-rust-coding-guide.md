@@ -37,9 +37,9 @@ function records take precedence over trait-based fakes.
 ### Names
 
 Names use full words, as Tau asks. The exceptions are names a standard or trait method requires,
-generic `T`, and short lifetimes such as `'a`. These names are common Rust vocabulary, so expanding
-them makes tikk harder to compare with its sources. Other short names gain nothing the full word
-lacks.
+generic `T`, short lifetimes such as `'a`, and GPUI's `cx` and `window`. These names are common
+Rust and GPUI vocabulary, so expanding them makes tikk harder to compare with its sources. Putting
+`window` before `cx` matches GPUI callbacks. Other short names gain nothing the full word lacks.
 
 ### Item order and modules
 
@@ -63,7 +63,7 @@ The automation crates of
 [uv](https://github.com/astral-sh/uv/blob/4470c33bd7115dfb75922a59280e445d05cc181e/crates/uv-dev/src/main.rs#L18-L77),
 and [Ruff](https://github.com/astral-sh/ruff/blob/8960d6db60e495867635b8aaedbe90e352b4b19f/crates/ruff_dev/src/main.rs#L93-L129)
 also report with `anyhow`. An `xtask` error that a test tells apart gets a typed error, as anywhere
-else. Importing anyhow's `Context` trait as `_` avoids reserving the type name `Context`.
+else. Importing anyhow's `Context` trait as `_` avoids reserving the name of GPUI's `Context` type.
 
 An `expect` message says why a call cannot fail, so a panic points at the broken assumption.
 Discarding a `Result` hides failures. The guide names the forms that do so, including `.ok()`.
@@ -76,12 +76,15 @@ One fixed form is easier to follow than a judgment of which errors are safe to d
 
 `?`, `if let`, `let ... else`, value-producing `if` and `match`, and short iterator chains are
 written inline. They are normal Rust forms, and splitting them adds names that carry no meaning.
-A long chain, or one whose result is a concept, still gets a name.
+A long chain, or one whose result is a concept, still gets a name. GPUI element builders stay in
+one fluent chain, including conditional children. This keeps the visual hierarchy together instead
+of spreading it across intermediate bindings.
 
 ### Function size
 
-Tau's size rules remain review signals. An exhaustive `match` can be long and still do one job.
-Splitting it only to meet a count scatters one decision. ADR 0009 keeps the ownership rules.
+Tau's size rules remain review signals. An exhaustive `match` or GPUI builder can be long and
+still do one job. Splitting it only to meet a count scatters one decision or layout. ADR 0009 keeps
+the ownership rules.
 
 ### Ownership
 
@@ -99,6 +102,26 @@ A lint that fires only in some builds uses `#[allow(lint, reason = "...")]` inst
 Doc comments go only on items another crate uses, and state only errors, panics, and invariants
 that names and types cannot show. tikk publishes no library, so full API documentation would mostly
 restate signatures.
+
+### GPUI
+
+GPUI entity updates hold a borrow of the entity's state. Reading or updating the same entity through
+its handle inside that update would borrow it again and panic. The closure's state and context
+are the safe way to work with it.
+
+GPUI tasks and subscriptions cancel when dropped. Their owner must keep them, or detach them on
+purpose, so work does not silently stop at the end of a scope. A child holds a weak parent handle
+to avoid a reference cycle that keeps both alive after the view closes.
+
+Rendering stays declarative because GPUI may render repeatedly. Starting work or notifying from
+render would repeat effects or trigger another render. State changes notify once, and background
+results check the state they started from, so an old result cannot replace a newer selection.
+Stable domain IDs keep element state attached to the right item when a list changes order.
+
+The core and CLI stay independent of GPUI. The kit boundary in `tikk-ui` keeps component types out
+of other UI code, so a kit change has one translation point. ADRs 0002 and 0003 own those boundaries.
+The scene binary's list and readiness output are command protocols, so they use the same narrow
+printing exception as the CLI and xtask.
 
 ### Tests
 

@@ -1,7 +1,15 @@
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
+use thiserror::Error;
+
 use crate::scene;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error(
+    "ruta is not installed. Run: cargo install --git https://github.com/sQVe/ruta --tag v0.1.0 --locked ruta"
+)]
+struct RutaNotInstalled;
 
 pub(crate) fn sandbox(root: &Path, arguments: &[String]) -> anyhow::Result<ExitCode> {
     if needs_build(arguments) {
@@ -44,9 +52,7 @@ fn run(root: &Path, arguments: &[String]) -> anyhow::Result<ExitCode> {
 
 fn start_error(error: std::io::Error) -> anyhow::Error {
     if error.kind() == std::io::ErrorKind::NotFound {
-        return anyhow::anyhow!(
-            "ruta is not installed. Run: cargo install --git https://github.com/sQVe/ruta --tag v0.1.0 --locked ruta"
-        );
+        return RutaNotInstalled.into();
     }
 
     anyhow::Error::new(error).context("Could not start ruta")
@@ -55,6 +61,32 @@ fn start_error(error: std::io::Error) -> anyhow::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn start_error_distinguishes_a_missing_ruta_from_other_io_errors() {
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let error = start_error(std::io::Error::from(kind));
+
+            if kind == std::io::ErrorKind::NotFound {
+                assert_eq!(
+                    error.downcast_ref::<RutaNotInstalled>(),
+                    Some(&RutaNotInstalled)
+                );
+            } else {
+                assert!(error.downcast_ref::<RutaNotInstalled>().is_none());
+                assert_eq!(
+                    error
+                        .downcast_ref::<std::io::Error>()
+                        .expect("IO error")
+                        .kind(),
+                    kind
+                );
+            }
+        }
+    }
 
     #[test]
     fn only_up_and_restart_build_the_scene() {

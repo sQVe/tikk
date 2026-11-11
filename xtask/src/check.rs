@@ -392,6 +392,8 @@ mod tests {
     fn tidy_passes_when_boundary_metadata_has_no_violations() {
         let root = crate::test_support::temporary_directory();
 
+        std::fs::create_dir_all(root.path().join("crates/tikk-ui/src"))
+            .expect("create UI source folder");
         std::fs::create_dir(root.path().join("src")).expect("create source folder");
         std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
         std::fs::write(root.path().join("Cargo.toml"),
@@ -407,6 +409,19 @@ mod tests {
         assert_eq!(
             check_steps(root.path(), &[], &[Group::Tidy]),
             ExitCode::SUCCESS
+        );
+
+        let scene = root.path().join("crates/tikk-ui/src/scene.rs");
+        let source = "div().w(px(3.0));";
+        std::fs::write(&scene, source).expect("write raw UI value");
+
+        assert_eq!(
+            check_steps(root.path(), &[], &[Group::Tidy]),
+            ExitCode::FAILURE
+        );
+        assert_eq!(
+            std::fs::read_to_string(scene).expect("read unchanged UI source"),
+            source
         );
     }
 

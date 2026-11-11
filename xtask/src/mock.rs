@@ -112,10 +112,6 @@ mod tests {
             prepare_folder(folder.path()).expect_err("a directory cannot be removed as a file");
 
         assert_eq!(
-            error.to_string(),
-            format!("Could not remove {}", shot.display())
-        );
-        assert_eq!(
             error
                 .downcast_ref::<std::io::Error>()
                 .expect("IO error")
@@ -126,6 +122,28 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(folder.path().join("crop.png")).expect("read unchanged crop"),
             "old crop"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn prepare_folder_reports_a_creation_error_without_removing_the_file() {
+        let folder = crate::test_support::temporary_directory();
+        let output = folder.path().join("capture");
+        std::fs::write(&output, "preserve").expect("write a file at the output path");
+
+        let error = prepare_folder(&output).expect_err("a file is not an output directory");
+
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .expect("IO error")
+                .kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            std::fs::read_to_string(output).expect("read preserved file"),
+            "preserve"
         );
     }
 

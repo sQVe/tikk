@@ -1,65 +1,22 @@
+mod source;
+mod value;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use ra_ap_rustc_lexer::{FrontmatterAllowed, LiteralKind, TokenKind, strip_shebang, tokenize};
+use thiserror::Error;
+
+use source::scan_source;
 
 const UI_SOURCE: &str = "crates/tikk-ui/src";
 const THEME_FILE: &str = "theme.rs";
 
-const RAW_CALLS: &[&str] = &["px", "rems", "rems_from_px", "rgb", "rgba", "hsla", "hsl"];
-
-const NAMED_COLORS: &[&str] = &[
-    "white",
-    "black",
-    "red",
-    "green",
-    "blue",
-    "yellow",
-    "transparent_black",
-    "transparent_white",
-    "opaque_grey",
-];
-
-const CONSTRUCTORS: &[&str] = &["Pixels", "Rgba", "Hsla"];
-
-// The style helpers that encode a fixed scale. `full` and `auto` are left out: they are relative
-// layout values with no raw length, such as `size_full`.
-const BOX_PREFIXES: &[&str] = &[
-    "w", "h", "size", "min_size", "min_w", "min_h", "max_size", "max_w", "max_h", "gap", "gap_x",
-    "gap_y", "p", "pt", "pb", "px", "py", "pl", "pr", "m", "mt", "mb", "my", "mx", "ml", "mr",
-    "inset", "top", "bottom", "left", "right",
-];
-
-const BORDER_PREFIXES: &[&str] = &[
-    "border", "border_t", "border_b", "border_r", "border_l", "border_x", "border_y",
-];
-
-const CORNER_PREFIXES: &[&str] = &[
-    "rounded",
-    "rounded_t",
-    "rounded_b",
-    "rounded_r",
-    "rounded_l",
-    "rounded_tl",
-    "rounded_tr",
-    "rounded_bl",
-    "rounded_br",
-];
-
-const BOX_SUFFIXES: &[&str] = &[
-    "0", "0p5", "1", "1p5", "2", "2p5", "3", "3p5", "4", "5", "6", "7", "8", "9", "10", "11", "12",
-    "16", "20", "24", "32", "40", "48", "56", "64", "72", "80", "96", "112", "128", "px", "1_2",
-    "1_3", "2_3", "1_4", "2_4", "3_4", "1_5", "2_5", "3_5", "4_5", "1_6", "5_6", "1_12",
-];
-
-const BORDER_SUFFIXES: &[&str] = &[
-    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "16", "20", "24", "32",
-];
-
-const CORNER_SUFFIXES: &[&str] = &["none", "xs", "sm", "md", "lg", "xl", "2xl", "3xl", "full"];
-
-const TEXT_SUFFIXES: &[&str] = &["xs", "sm", "base", "lg", "xl", "2xl", "3xl"];
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("{}", failures.join("\n"))]
+struct RawValues {
+    failures: Vec<String>,
+}
 
 pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
     let directory = root.join(UI_SOURCE);
@@ -69,7 +26,7 @@ pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    anyhow::bail!("{}", failures.join("\n"))
+    Err(RawValues { failures }.into())
 }
 
 fn scan_directory(root: &Path, directory: &Path) -> anyhow::Result<Vec<String>> {
@@ -117,253 +74,260 @@ fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<(
     Ok(())
 }
 
-fn scan_source(path: &str, source: &str) -> Vec<String> {
-    let masked = mask_source(source);
-    let mut failures = Vec::new();
-    let mut reported_line = None;
-
-    for offset in raw_value_offsets(&masked) {
-        let line = line_number(&masked, offset);
-
-        if reported_line == Some(line) {
-            continue;
-        }
-
-        let text = source.lines().nth(line - 1).unwrap_or("");
-
-        failures.push(format!("{path}:{line}: {}", text.trim()));
-        reported_line = Some(line);
-    }
-
-    failures
-}
-
-fn line_number(masked: &str, offset: usize) -> usize {
-    masked[..offset]
-        .bytes()
-        .filter(|byte| *byte == b'\n')
-        .count()
-        + 1
-}
-
-fn offsets_where<'a>(
-    text: &'a str,
-    pattern: &'a str,
-    accepts: impl Fn(usize) -> bool + 'a,
-) -> impl Iterator<Item = usize> + 'a {
-    text.match_indices(pattern)
-        .map(|(index, _)| index)
-        .filter(move |index| accepts(*index))
-}
-
-fn starts_with_tokens(mut text: &str, expected: &[&str]) -> bool {
-    for expected_token in expected {
-        text = text.trim_start();
-        let Some(token) = tokenize(text, FrontmatterAllowed::No).next() else {
-            return false;
-        };
-        let (actual, remaining) = text.split_at(token.len as usize);
-
-        if actual != *expected_token {
-            return false;
-        }
-
-        text = remaining;
-    }
-
-    true
-}
-
-fn raw_value_offsets(text: &str) -> Vec<usize> {
-    let mut offsets = Vec::new();
-
-    for name in RAW_CALLS.iter().chain(NAMED_COLORS) {
-        offsets.extend(offsets_where(text, name, |index| {
-            is_bare_call(text, index, name, &["("])
-        }));
-    }
-
-    for name in CONSTRUCTORS {
-        offsets.extend(offsets_where(text, name, |index| {
-            is_bare_call(text, index, name, &[":", ":", "from", "("])
-        }));
-        offsets.extend(offsets_where(text, name, |index| {
-            is_bare_call(text, index, name, &["("])
-        }));
-        offsets.extend(offsets_where(text, name, |index| {
-            is_bare_struct_literal(text, index, name)
-        }));
-    }
-
-    offsets.extend(offsets_where(text, "0x", |index| is_hex_color(text, index)));
-    offsets.extend(offsets_where(text, ".", |dot| {
-        is_preset_helper_call(text, dot)
-    }));
-    offsets.sort_unstable();
-
-    offsets
-}
-
 #[cfg(test)]
-fn line_has_raw_value(text: &str) -> bool {
-    !raw_value_offsets(text).is_empty()
-}
+mod tests {
+    use super::*;
 
-fn is_bare_struct_literal(text: &str, index: usize, name: &str) -> bool {
-    let before = text[..index].chars().next_back();
-    let is_member = before == Some('.') || before.is_some_and(is_identifier_char);
+    #[test]
+    fn check_rejects_raw_color_and_size_outside_the_theme() {
+        let root = crate::test_support::temporary_directory();
+        let source = root.path().join("crates/tikk-ui/src");
+        fs::create_dir_all(&source).expect("create UI source");
+        fs::write(
+            source.join("scene.rs"),
+            "let color = rgb(0x112233);\nlet size = px(3.0);\n",
+        )
+        .expect("write scene");
 
-    if is_member || preceded_by_arrow(text, index) {
-        return false;
-    }
+        let error = check(root.path()).expect_err("raw values must fail");
 
-    let rest = text[index + name.len()..].trim_start();
-
-    rest.strip_prefix('{')
-        .is_some_and(|fields| starts_with_struct_fields(fields.trim_start(), name))
-}
-
-fn preceded_by_arrow(text: &str, index: usize) -> bool {
-    text[..index].trim_end().ends_with("->")
-}
-
-fn starts_with_struct_fields(fields: &str, name: &str) -> bool {
-    if fields.starts_with("..") {
-        return true;
-    }
-
-    let field_names: &[&str] = match name {
-        "Rgba" => &["r", "g", "b", "a"],
-        "Hsla" => &["h", "s", "l", "a"],
-        _ => return false,
-    };
-
-    field_names
-        .iter()
-        .any(|field| starts_with_tokens(fields, &[field, ":"]))
-}
-
-fn is_bare_call(text: &str, index: usize, name: &str, suffix: &[&str]) -> bool {
-    let before = text[..index].chars().next_back();
-    let called_as_method = text[..index].trim_end().ends_with('.');
-    let inside_identifier = before.is_some_and(is_identifier_char);
-
-    if called_as_method || inside_identifier {
-        return false;
-    }
-
-    starts_with_tokens(&text[index + name.len()..], suffix)
-}
-
-fn is_hex_color(text: &str, index: usize) -> bool {
-    let digits: String = text[index + 2..]
-        .chars()
-        .take_while(|character| character.is_ascii_hexdigit())
-        .collect();
-    let after = text[index + 2 + digits.len()..].chars().next();
-    let is_color_length = digits.len() == 6 || digits.len() == 8;
-
-    is_color_length && !after.is_some_and(is_identifier_char)
-}
-
-fn is_preset_helper_call(text: &str, dot: usize) -> bool {
-    let after_dot = &text[dot + 1..];
-    let name_start = text.len() - after_dot.trim_start().len();
-    let name_end = identifier_end(text, name_start);
-    let name = &text[name_start..name_end];
-
-    text[name_end..].trim_start().starts_with('(') && is_preset_helper(name)
-}
-
-fn identifier_end(text: &str, start: usize) -> usize {
-    let mut end = start;
-
-    for (offset, character) in text[start..].char_indices() {
-        if character.is_ascii_alphanumeric() || character == '_' {
-            end = start + offset + character.len_utf8();
-        } else {
-            break;
-        }
-    }
-
-    end
-}
-
-fn is_preset_helper(name: &str) -> bool {
-    [
-        (BOX_PREFIXES, BOX_SUFFIXES),
-        (BORDER_PREFIXES, BORDER_SUFFIXES),
-        (CORNER_PREFIXES, CORNER_SUFFIXES),
-        (&["text"][..], TEXT_SUFFIXES),
-    ]
-    .into_iter()
-    .any(|(prefixes, suffixes)| has_prefix_and_suffix(name, prefixes, suffixes))
-}
-
-fn has_prefix_and_suffix(name: &str, prefixes: &[&str], suffixes: &[&str]) -> bool {
-    prefixes.iter().any(|prefix| {
-        let Some(rest) = name.strip_prefix(prefix) else {
-            return false;
-        };
-        let Some(suffix) = rest.strip_prefix('_') else {
-            return false;
-        };
-
-        suffixes.contains(&suffix)
-    })
-}
-
-fn is_identifier_char(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == '_'
-}
-
-fn push_blanks(masked: &mut String, text: &str) {
-    let blanks = text
-        .bytes()
-        .map(|byte| if byte == b'\n' { '\n' } else { ' ' });
-
-    masked.extend(blanks);
-}
-
-fn mask_source(source: &str) -> String {
-    let mut masked = String::with_capacity(source.len());
-    let shebang_end = strip_shebang(source).unwrap_or(0);
-    let mut start = shebang_end;
-
-    push_blanks(&mut masked, &source[..shebang_end]);
-
-    for token in tokenize(&source[shebang_end..], FrontmatterAllowed::Yes) {
-        let end = start + token.len as usize;
-        let text = &source[start..end];
-        let hides_text = matches!(
-            token.kind,
-            TokenKind::LineComment { .. }
-                | TokenKind::BlockComment { .. }
-                | TokenKind::Frontmatter { .. }
-                | TokenKind::Literal {
-                    kind: LiteralKind::Char { .. }
-                        | LiteralKind::Byte { .. }
-                        | LiteralKind::Str { .. }
-                        | LiteralKind::ByteStr { .. }
-                        | LiteralKind::CStr { .. }
-                        | LiteralKind::RawStr { .. }
-                        | LiteralKind::RawByteStr { .. }
-                        | LiteralKind::RawCStr { .. },
-                    ..
-                }
+        assert_eq!(
+            error
+                .downcast_ref::<RawValues>()
+                .expect("raw-value violations")
+                .failures,
+            [
+                "crates/tikk-ui/src/scene.rs:1: let color = rgb(0x112233);",
+                "crates/tikk-ui/src/scene.rs:2: let size = px(3.0);",
+            ]
         );
-
-        if hides_text {
-            push_blanks(&mut masked, text);
-        } else {
-            masked.push_str(text);
-        }
-
-        start = end;
     }
 
-    masked
-}
+    #[test]
+    fn check_rejects_shorthand_colors_and_named_size_fields() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
 
-#[cfg(test)]
-mod tests;
+        for source in [
+            "let (r,g,b,a) = (1.0,0.0,0.0,1.0); div().bg(Rgba { r, g, b, a });",
+            "let (h,s,l,a) = (1.0,0.0,0.0,1.0); div().bg(Hsla { h, s, l, a });",
+            "let width = 24.0; div().w(Pixels { 0: width });",
+            "div().bg(Rgba { a /* opacity */, r, g, b });",
+            "div().bg(Hsla { s\n, h, l, a });",
+        ] {
+            fs::write(&path, source).expect("write struct literal");
+
+            let error = check(root.path()).expect_err(source);
+            let violations = error
+                .downcast_ref::<RawValues>()
+                .expect("raw-value violations");
+
+            assert_eq!(violations.failures.len(), 1, "{source}");
+            assert!(
+                violations.failures[0].starts_with("crates/tikk-ui/src/scene.rs:1:"),
+                "{source}"
+            );
+            assert_eq!(
+                fs::read_to_string(&path).expect("read unchanged source"),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn check_keeps_rejecting_theme_struct_updates() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
+
+        for source in [
+            "Rgba { ..theme.colors.surface }",
+            "Hsla { ..theme.colors.surface }",
+            "Pixels { ..theme.sizing.none }",
+        ] {
+            fs::write(&path, source).expect("write struct update");
+
+            let error = check(root.path()).expect_err(source);
+
+            assert_eq!(
+                error
+                    .downcast_ref::<RawValues>()
+                    .expect("raw-value violations")
+                    .failures,
+                [format!("crates/tikk-ui/src/scene.rs:1: {source}")],
+                "{source}"
+            );
+            assert_eq!(
+                fs::read_to_string(&path).expect("read unchanged source"),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn check_displays_each_violation_with_its_file_line_and_source() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
+        let source = "fn scene() {\n    let color = rgb(0x112233);\n    let size = px(3.0);\n}\n";
+        fs::write(&path, source).expect("write raw values");
+
+        let error = check(root.path()).expect_err("raw values must fail");
+
+        assert_eq!(
+            format!("{error:#}"),
+            "crates/tikk-ui/src/scene.rs:2: let color = rgb(0x112233);\ncrates/tikk-ui/src/scene.rs:3: let size = px(3.0);"
+        );
+        assert_eq!(
+            fs::read_to_string(path).expect("read unchanged source"),
+            source
+        );
+    }
+
+    #[test]
+    fn check_rejects_raw_token_sequences_with_whitespace() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
+
+        for source in [
+            "div().w(Pixels :: from (24.0));",
+            "div().w(Pixels\n::\nfrom\n(24.0));",
+            "div().bg(Rgba { r : 1.0, g : 0.0, b : 0.0, a : 1.0 });",
+            "div().bg(Hsla { h\n: 1.0, s : 0.0, l : 0.0, a : 1.0 });",
+            "div().bg(Rgba /* color */ :: from (value));",
+            "div().bg(Hsla\n:: from (value));",
+            "div().w(px (24.0));",
+            "div().bg(rgb\n(1));",
+            "div().bg(hsla (0.0, 0.0, 0.0, 1.0));",
+            "div().\np_2 ();",
+            "div(). rounded_md ();",
+            "div().\ntext_sm ();",
+        ] {
+            fs::write(&path, source).expect("write raw values");
+
+            let error = check(root.path()).expect_err(source);
+
+            assert!(
+                error
+                    .downcast_ref::<RawValues>()
+                    .expect("raw-value violations")
+                    .failures[0]
+                    .starts_with("crates/tikk-ui/src/scene.rs:1:"),
+                "{source}: {error}"
+            );
+            assert_eq!(
+                fs::read_to_string(&path).expect("read unchanged source"),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn check_passes_with_only_theme_tokens_and_preserves_the_source() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
+        let source = "div().w(theme.sizing.row_height);";
+        fs::write(&path, source).expect("write theme tokens");
+
+        check(root.path()).expect("theme tokens pass");
+
+        assert_eq!(fs::read_to_string(path).expect("read source"), source);
+    }
+
+    #[test]
+    fn check_reports_a_missing_source_directory() {
+        let root = crate::test_support::temporary_directory();
+
+        let error = check(root.path()).expect_err("missing source cannot be scanned");
+
+        assert_eq!(
+            error
+                .downcast_ref::<std::io::Error>()
+                .expect("IO error")
+                .kind(),
+            std::io::ErrorKind::NotFound
+        );
+        assert_eq!(fs::read_dir(root.path()).expect("read fixture").count(), 0);
+    }
+
+    #[test]
+    fn scan_directory_reads_rust_files_in_path_order_and_ignores_other_files() {
+        let root = crate::test_support::temporary_directory();
+        for name in ["z.rs", "a.rs", "notes.txt"] {
+            fs::write(root.path().join(name), "px(1);").expect("write source");
+        }
+
+        let failures = scan_directory(root.path(), root.path()).expect("scan source");
+
+        assert_eq!(failures, ["a.rs:1: px(1);", "z.rs:1: px(1);"]);
+    }
+
+    #[test]
+    fn scan_directory_exempts_theme_file() {
+        let directory = crate::test_support::temporary_directory();
+        fs::write(directory.path().join("theme.rs"), "let x = px(3.0);\n").expect("write theme");
+        fs::write(directory.path().join("scene.rs"), "let y = 1.0;\n").expect("write scene");
+
+        let failures = scan_directory(directory.path(), directory.path()).expect("scan");
+
+        assert!(failures.is_empty());
+    }
+
+    #[test]
+    fn scan_directory_scans_a_nested_theme_file() {
+        let directory = crate::test_support::temporary_directory();
+        fs::create_dir_all(directory.path().join("scenes")).expect("create scenes");
+        fs::write(
+            directory.path().join("scenes/theme.rs"),
+            "let x = px(3.0);\n",
+        )
+        .expect("write nested theme");
+
+        let failures = scan_directory(directory.path(), directory.path()).expect("scan");
+
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].ends_with("theme.rs:1: let x = px(3.0);"));
+    }
+
+    #[test]
+    fn scan_directory_finds_literals_in_other_files() {
+        let directory = crate::test_support::temporary_directory();
+        fs::write(directory.path().join("theme.rs"), "let x = px(3.0);\n").expect("write theme");
+        fs::write(
+            directory.path().join("scene.rs"),
+            "fn f() {\n    let y = rgb(0x112233);\n}\n",
+        )
+        .expect("write scene");
+
+        let failures = scan_directory(directory.path(), directory.path()).expect("scan");
+
+        assert_eq!(failures.len(), 1);
+        assert!(failures[0].ends_with("scene.rs:2: let y = rgb(0x112233);"));
+    }
+
+    #[test]
+    fn check_fails_with_each_raw_value_in_the_ui_source() {
+        let root = crate::test_support::temporary_directory();
+        let source = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&source).expect("create the UI source");
+        fs::write(source.join("scene.rs"), "let x = px(3.0);\n").expect("write scene");
+
+        let error = check(root.path()).expect_err("a raw value fails the check");
+
+        assert_eq!(
+            error
+                .downcast_ref::<RawValues>()
+                .expect("raw-value violations")
+                .failures,
+            ["crates/tikk-ui/src/scene.rs:1: let x = px(3.0);"]
+        );
+    }
+}
