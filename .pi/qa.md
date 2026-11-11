@@ -14,7 +14,8 @@ Cross-effects:
 - `tikk-core` holds every rule. A change there needs the CLI section, even when no file in
   `tikk-cli` changed.
 
-- A change to `xtask`, CI, or docs needs no `qa` launch.
+- A change to `xtask`, CI, or docs needs no `qa` launch. A change to this guide needs the section
+  it changes.
 - A change to only `tikk-ui` or `tikk-desktop` falls under "Not testable".
 - When the impact on a section is unclear, include the section.
 
@@ -31,11 +32,9 @@ Never:
 
 ## CLI
 
-Checked: 2026-11-11 at 72c75d1.
-
 ### Reach it
 
-- Run `target/debug/tikk` from the worktree root.
+- The binary is `target/debug/tikk`. Run every command from the worktree root.
 - The binary is not older than its sources when this command prints nothing:
 
   ```sh
