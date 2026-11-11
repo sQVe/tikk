@@ -14,6 +14,9 @@ setup and verification.
   0001](docs/adr/0001-documentation-scope.md).
 - Comment only what the code cannot say, such as a constraint or a workaround. Do not describe the
   code's history.
+- Keep [the QA guide](.pi/qa.md) true. A change that adds an interface, a way to reach tikk, an
+  environment variable, or an external program tikk starts updates the guide in the same change,
+  with facts checked against the built binary.
 - Before finishing a document, check its local links and verify the commands it gives against the
   repository.
 
