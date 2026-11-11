@@ -1,3 +1,4 @@
 /target/
+/.tau/
 mutants.out/
 mutants.out.old/

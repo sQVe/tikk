@@ -1,0 +1,10 @@
+name = "tikk"
+
+[app]
+command = ["target/debug/tikk-scene"]
+title = "tikk-scene"
+width = 640
+height = 480
+
+[ready]
+line = "json"

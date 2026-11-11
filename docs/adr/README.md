@@ -80,6 +80,7 @@ the commit in its row.
 
 - [0027: Advisory mutation testing of changed lines with cargo-mutants](./0027-advisory-mutation-testing.md)
 - [0028: Two AI judges from different model families gate UI mocks](./0028-two-family-ui-mock-gate.md)
+- [0032: QA in the ruta sandbox](./0032-qa-in-the-ruta-sandbox.md)
 
 ## Earlier numbering
 

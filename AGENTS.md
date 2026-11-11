@@ -25,8 +25,8 @@ setup and verification.
 - The CLI never prompts. Every command has `--json`, and the CLI and the desktop app run the same
   core code for each action. See [ADR 0010](docs/adr/0010-cli-contract-for-agents.md).
 - The UI uses gpui-component from a vendored copy that tikk owns and patches. Record each local
-  patch, with its reason, next to the vendored code. Only one module of the desktop app imports
-  gpui-component. See [ADR 0003](docs/adr/0003-vendored-gpui-component.md).
+  patch in `vendor/gpui-component/PATCHES.md`, and mark its code with `// TIKK:`. Only
+  `crates/tikk-ui/src/kit.rs` imports gpui-component, through `gpui_kit::component`. See [ADR 0003](docs/adr/0003-vendored-gpui-component.md).
 - The toolchain is pinned in `rust-toolchain.toml`. Lint levels live in `[workspace.lints]`, and CI
   fails on warnings. Manifests use semver ranges, and every Cargo build runs with `--locked`. See
   [ADR 0004](docs/adr/0004-toolchain-and-quality-gates.md).
@@ -35,5 +35,13 @@ setup and verification.
 - tikk supports Linux and macOS, not Windows. Add no `cfg(windows)` code to tikk's own crates. See
   [ADR 0029](docs/adr/0029-linux-and-macos-only.md).
 - Ticket, fact, and storage rules are in [ADRs 0011 to 0026](docs/adr/README.md#domain-and-storage).
-- Every UI mock passes the two-family mock gate. See [ADR
-  0028](docs/adr/0028-two-family-ui-mock-gate.md).
+- Every UI mock passes the two-family mock gate in `.pi/skills/judge-mock/`. See [ADR
+  0028](docs/adr/0028-two-family-ui-mock-gate.md). The `placeholder` scene proves the procedure,
+  not a visual direction. `tikk-desktop` stays a stub.
+- Put shared UI parts in `tikk-ui::parts`, scenes in `tikk-ui::scenes`, and raw sizes and colors
+  only in `tikk-ui::theme`. The raw-value check and contrast tests enforce the theme rules.
+- Run scenes only in ruta's private sandbox, never against the real display. Use
+  `cargo xtask sandbox up placeholder`, then `cargo xtask sandbox down` to stop it. Capture with
+  `cargo xtask mock capture placeholder`; the shot, crop, and metadata go to
+  `.tau/judge/placeholder/`. See [the development guide](docs/development.md#sandbox) and
+  [ADR 0032](docs/adr/0032-qa-in-the-ruta-sandbox.md).

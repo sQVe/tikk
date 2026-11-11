@@ -1,0 +1,122 @@
+use std::path::Path;
+use std::process::{Command, ExitCode};
+
+use thiserror::Error;
+
+use crate::scene;
+
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error(
+    "ruta is not installed. Run: cargo install --git https://github.com/sQVe/ruta --tag v0.1.0 --locked ruta"
+)]
+struct RutaNotInstalled;
+
+pub(crate) fn sandbox(root: &Path, arguments: &[String]) -> anyhow::Result<ExitCode> {
+    if needs_build(arguments) {
+        scene::build(root)?;
+    }
+
+    run(root, arguments)
+}
+
+pub(crate) fn capture(root: &Path, scene: &str) -> anyhow::Result<ExitCode> {
+    run(root, &capture_arguments(scene))
+}
+
+fn needs_build(arguments: &[String]) -> bool {
+    matches!(
+        arguments.first().map(String::as_str),
+        Some("up" | "restart")
+    )
+}
+
+fn capture_arguments(scene: &str) -> Vec<String> {
+    vec![
+        "capture".to_string(),
+        "--out".to_string(),
+        format!(".tau/judge/{scene}"),
+        "--".to_string(),
+        scene.to_string(),
+    ]
+}
+
+fn run(root: &Path, arguments: &[String]) -> anyhow::Result<ExitCode> {
+    let status = Command::new("ruta")
+        .args(arguments)
+        .current_dir(root)
+        .status()
+        .map_err(start_error)?;
+
+    Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+}
+
+fn start_error(error: std::io::Error) -> anyhow::Error {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return RutaNotInstalled.into();
+    }
+
+    anyhow::Error::new(error).context("Could not start ruta")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_error_distinguishes_a_missing_ruta_from_other_io_errors() {
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::PermissionDenied,
+        ] {
+            let error = start_error(std::io::Error::from(kind));
+
+            if kind == std::io::ErrorKind::NotFound {
+                assert_eq!(
+                    error.downcast_ref::<RutaNotInstalled>(),
+                    Some(&RutaNotInstalled)
+                );
+            } else {
+                assert!(error.downcast_ref::<RutaNotInstalled>().is_none());
+                assert_eq!(
+                    error
+                        .downcast_ref::<std::io::Error>()
+                        .expect("IO error")
+                        .kind(),
+                    kind
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_up_and_restart_build_the_scene() {
+        for (command, expected) in [
+            ("up", true),
+            ("restart", true),
+            ("shot", false),
+            ("down", false),
+            ("unknown", false),
+        ] {
+            assert_eq!(
+                needs_build(&[command.to_string(), "--anything".to_string()]),
+                expected,
+                "{command}"
+            );
+        }
+        assert!(!needs_build(&[]));
+    }
+
+    #[test]
+    fn capture_passes_the_output_folder_and_scene_to_ruta() {
+        assert_eq!(
+            capture_arguments("placeholder"),
+            [
+                "capture",
+                "--out",
+                ".tau/judge/placeholder",
+                "--",
+                "placeholder"
+            ]
+        );
+    }
+}

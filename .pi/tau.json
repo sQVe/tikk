@@ -1,5 +1,8 @@
 {
   "fullCheck": { "argv": ["cargo", "xtask", "check"] },
   "mutation": { "argv": ["cargo", "xtask", "mutation"] },
-  "tdd": { "runner": "nextest" }
+  "tdd": {
+    "runner": "nextest",
+    "excludedGlobs": ["**/{target,.git}/**", "vendor/**"]
+  }
 }
