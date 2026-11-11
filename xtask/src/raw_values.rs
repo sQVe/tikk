@@ -104,6 +104,82 @@ mod tests {
     }
 
     #[test]
+    fn check_allows_direct_let_struct_patterns() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
+
+        for source in [
+            "let Rgba { r, g, b, a } = theme.colors.surface;",
+            "let Hsla { h, s, l, a } = theme.colors.surface;",
+            "let Pixels { 0: width } = theme.sizing.row_height;",
+            "if let Rgba { r, g, b, a } = color { use_channels(r, g, b, a); }",
+            "while let Hsla { h, s, l, a } = color { use_channels(h, s, l, a); }",
+            "if ready && let Rgba { r, .. } = color { use_channel(r); }",
+            "fn read() {let Rgba { r, g, b, a } = theme.colors.surface;}",
+            "let /* channels */ Hsla { h, s, l, a } = theme.colors.surface;",
+            "let\nRgba { r, g, b, a } = theme.colors.surface;",
+        ] {
+            fs::write(&path, source).expect("write struct pattern");
+
+            check(root.path()).expect(source);
+
+            assert_eq!(
+                fs::read_to_string(&path).expect("read unchanged source"),
+                source
+            );
+        }
+    }
+
+    #[test]
+    fn check_rejects_struct_expressions_after_patterns() {
+        let root = crate::test_support::temporary_directory();
+        let directory = root.path().join(UI_SOURCE);
+        fs::create_dir_all(&directory).expect("create UI source");
+        let path = directory.join("scene.rs");
+
+        for (source, line) in [
+            ("let color = Rgba { r, g, b, a };", 1),
+            ("div().bg(Hsla { h, s, l, a });", 1),
+            ("let Rgba { r, g, b, a } = Rgba { r, g, b, a };", 1),
+            ("let Hsla { h, s, l, a } = Hsla { h, s, l, a };", 1),
+            ("let Pixels { 0: width } = Pixels { 0: width };", 1),
+            (
+                "let Rgba { r, g, b, a } = theme.colors.surface; div().bg(Rgba { r, g, b, a });",
+                1,
+            ),
+            (
+                "if let Rgba { r, g, b, a } = color { div().bg(Rgba { r, g, b, a }); }",
+                1,
+            ),
+            ("let Rgba { r, g, b, a } =\n    Rgba { r, g, b, a };", 2),
+        ] {
+            fs::write(&path, source).expect("write struct expression");
+
+            let error = check(root.path()).expect_err(source);
+            let expression = source
+                .lines()
+                .nth(line - 1)
+                .expect("the case names its expression line")
+                .trim();
+            let expected = format!("crates/tikk-ui/src/scene.rs:{line}: {expression}");
+
+            assert_eq!(
+                error
+                    .downcast_ref::<RawValues>()
+                    .expect("raw-value violations")
+                    .failures,
+                [expected]
+            );
+            assert_eq!(
+                fs::read_to_string(&path).expect("read unchanged source"),
+                source
+            );
+        }
+    }
+
+    #[test]
     fn check_rejects_shorthand_colors_and_named_size_fields() {
         let root = crate::test_support::temporary_directory();
         let directory = root.path().join(UI_SOURCE);

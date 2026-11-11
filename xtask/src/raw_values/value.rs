@@ -98,7 +98,7 @@ fn is_bare_struct_literal(text: &str, index: usize, name: &str) -> bool {
     let before = text[..index].chars().next_back();
     let is_member = before == Some('.') || before.is_some_and(is_identifier_char);
 
-    if is_member || preceded_by_arrow(text, index) {
+    if is_member || preceded_by_arrow(text, index) || preceded_by_let(text, index) {
         return false;
     }
 
@@ -110,6 +110,15 @@ fn is_bare_struct_literal(text: &str, index: usize, name: &str) -> bool {
 
 fn preceded_by_arrow(text: &str, index: usize) -> bool {
     text[..index].trim_end().ends_with("->")
+}
+
+fn preceded_by_let(text: &str, index: usize) -> bool {
+    let before = text[..index].trim_end();
+    let Some(token) = tokenize(before, FrontmatterAllowed::No).last() else {
+        return false;
+    };
+
+    &before[before.len() - token.len as usize..] == "let"
 }
 
 fn starts_with_struct_fields(fields: &str, name: &str) -> bool {
@@ -240,6 +249,17 @@ mod tests {
 
         for case in cases {
             assert!(line_has_raw_value(case), "not reported: {case}");
+        }
+    }
+
+    #[test]
+    fn scan_reports_struct_expressions_after_keyword_lookalikes() {
+        for source in [
+            "paint!(outlet Rgba { r, g, b, a });",
+            "paint!(r#let Rgba { r, g, b, a });",
+            "paint!(violet Hsla { h, s, l, a });",
+        ] {
+            assert!(line_has_raw_value(source), "not reported: {source}");
         }
     }
 
