@@ -5,46 +5,52 @@ tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a
 
 ## Choose sections
 
-| Section     | Test it when the change touches                                                     |
-| ----------- | ----------------------------------------------------------------------------------- |
-| CLI         | A command, flag, output, exit code, environment variable, or any `tikk-core` module |
-| Desktop app | `tikk-ui`, `tikk-desktop`, or a `tikk-core` query the app shows                     |
+| Section | Test it when the change touches                                                     |
+| ------- | ----------------------------------------------------------------------------------- |
+| CLI     | A command, flag, output, exit code, environment variable, or any `tikk-core` module |
 
-- `tikk-core` holds every rule. A change there needs both sections.
-- A change to `xtask`, CI, or docs needs no section.
+Cross-effects:
+
+- `tikk-core` holds every rule. A change there needs the CLI section, even when no file in
+  `tikk-cli` changed.
+
+- A change to `xtask`, CI, or docs needs no `qa` launch.
+- A change to only `tikk-ui` or `tikk-desktop` falls under "Not testable".
 - When the impact on a section is unclear, include the section.
+
+## Before a launch
+
+For the CLI section, run `cargo build --locked` in the worktree.
+
+## Rules for every section
+
+Never:
+
+- Run `tikk` from `PATH`. It can be another program.
+- Read or change `~/.local/share/tikk`. It is the user's store.
 
 ## CLI
 
+Checked: 2026-11-11 at 72c75d1.
+
 ### Reach it
 
-- Run `target/debug/tikk` from the worktree root. `tikk` on `PATH` can be another program.
+- Run `target/debug/tikk` from the worktree root.
 - The binary is not older than its sources when this command prints nothing:
 
   ```sh
   find crates Cargo.toml Cargo.lock .cargo/config.toml rust-toolchain.toml -newer target/debug/tikk -type f
   ```
 
-- If the binary is missing or the command prints a file, ask the parent to run
+- If the binary is missing or the command prints a file, stop and ask the parent to run
   `cargo build --locked` in the worktree.
-
-### Use it safely
-
-Never:
-
-- Run `tikk` from `PATH`.
-- Read or change `~/.local/share/tikk`. It is the user's store.
 
 ### What to check
 
 `target/debug/tikk --help` exits with 0 and prints "A local ticket tracker for AI agents" and the
 usage.
 
-### Recipes
+## Not testable
 
-None yet.
-
-## Desktop app
-
-`target/debug/tikk-desktop` exits with 0 and opens no window. Report the desktop app as not
-testable.
+- The desktop app, and what it shows of a `tikk-core` query. `target/debug/tikk-desktop` exits
+  with 0 and opens no window.
