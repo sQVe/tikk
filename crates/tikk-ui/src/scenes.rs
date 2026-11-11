@@ -78,6 +78,14 @@ mod tests {
     }
 
     #[test]
+    fn from_argument_reads_the_documented_placeholder_name() {
+        assert_eq!(
+            SceneName::from_argument(Some("placeholder")),
+            Ok(SceneName::Placeholder)
+        );
+    }
+
+    #[test]
     fn from_argument_reports_a_missing_name() {
         assert_eq!(SceneName::from_argument(None), Err(SceneError::Missing));
         assert_eq!(
