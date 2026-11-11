@@ -2,6 +2,9 @@ mod boundaries;
 mod check;
 mod mutation;
 
+#[cfg(test)]
+mod test_support;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -20,6 +23,7 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+#[expect(clippy::print_stderr, reason = "usage is the command's error output")]
 fn main() -> ExitCode {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     let root = workspace_root();

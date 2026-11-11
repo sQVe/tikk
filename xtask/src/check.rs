@@ -1,11 +1,13 @@
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
+use thiserror::Error;
+
 use crate::boundaries;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
-    /// Checks whose result does not depend on the operating system.
+    // Checks whose result does not depend on the operating system.
     Tidy,
     Build,
 }
@@ -87,18 +89,27 @@ const STEPS: &[Step] = &[
     },
 ];
 
-fn parse_groups(arguments: &[String]) -> Result<Vec<Group>, String> {
+#[derive(Debug, Error, PartialEq, Eq)]
+#[error("Unknown check arguments: {}. Use tidy, build, or none.", arguments.join(" "))]
+struct UnknownArguments {
+    arguments: Vec<String>,
+}
+
+fn parse_groups(arguments: &[String]) -> Result<Vec<Group>, UnknownArguments> {
     match arguments {
         [] => Ok(vec![Group::Tidy, Group::Build]),
         [group] if group == "tidy" => Ok(vec![Group::Tidy]),
         [group] if group == "build" => Ok(vec![Group::Build]),
-        _ => Err(format!(
-            "Unknown check arguments: {}. Use tidy, build, or none.",
-            arguments.join(" ")
-        )),
+        _ => Err(UnknownArguments {
+            arguments: arguments.to_vec(),
+        }),
     }
 }
 
+#[expect(
+    clippy::print_stderr,
+    reason = "check progress and failures are the command's output"
+)]
 fn run_step(root: &Path, step: &Step) -> bool {
     eprintln!("==> {}", step.name);
 
@@ -117,34 +128,38 @@ fn run_step(root: &Path, step: &Step) -> bool {
     }
 }
 
+#[expect(
+    clippy::print_stderr,
+    reason = "boundary progress and failures are the command's output"
+)]
 fn run_boundary_check(root: &Path) -> bool {
     eprintln!("==> {BOUNDARY_CHECK_NAME}");
 
     match boundaries::check(root) {
         Ok(()) => true,
-        Err(message) => {
-            eprintln!("{message}");
+        Err(error) => {
+            eprintln!("{error:#}");
             false
         }
     }
 }
 
-/// Runs every selected step, even after a failure, so one run shows every problem.
-pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
-    let groups = match parse_groups(arguments) {
-        Ok(groups) => groups,
-        Err(message) => {
-            eprintln!("{message}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let mut failed: Vec<&str> = STEPS
+// Runs every selected step, even after a failure, so one run shows every problem.
+fn failed_steps<'a>(root: &Path, steps: &'a [Step], groups: &[Group]) -> Vec<&'a str> {
+    steps
         .iter()
         .filter(|step| groups.contains(&step.group))
         .filter(|step| !run_step(root, step))
         .map(|step| step.name)
-        .collect();
+        .collect()
+}
+
+#[expect(
+    clippy::print_stderr,
+    reason = "check progress and failures are the command's output"
+)]
+fn check_steps(root: &Path, steps: &[Step], groups: &[Group]) -> ExitCode {
+    let mut failed = failed_steps(root, steps, groups);
 
     if groups.contains(&Group::Tidy) && !run_boundary_check(root) {
         failed.push(BOUNDARY_CHECK_NAME);
@@ -157,4 +172,261 @@ pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
 
     eprintln!("Failed checks: {}", failed.join(", "));
     ExitCode::FAILURE
+}
+
+#[expect(
+    clippy::print_stderr,
+    reason = "invalid check arguments are the command's error output"
+)]
+pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
+    let groups = match parse_groups(arguments) {
+        Ok(groups) => groups,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    check_steps(root, STEPS, &groups)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shell_step(arguments: &'static [&'static str]) -> Step {
+        Step {
+            name: "shell",
+            group: Group::Tidy,
+            program: "/bin/sh",
+            arguments,
+            environment: &[],
+        }
+    }
+
+    #[test]
+    fn check_steps_fails_when_a_step_fails_and_runs_later_steps() {
+        let root = crate::test_support::temporary_directory();
+        let steps = [
+            Step {
+                name: "fails",
+                group: Group::Build,
+                ..shell_step(&["-c", "exit 7"])
+            },
+            Step {
+                name: "later",
+                group: Group::Build,
+                ..shell_step(&["-c", "touch later"])
+            },
+        ];
+
+        assert_eq!(
+            check_steps(root.path(), &steps, &[Group::Build]),
+            ExitCode::FAILURE
+        );
+        assert!(root.path().join("later").exists());
+    }
+
+    #[test]
+    fn check_steps_fails_when_a_program_is_missing() {
+        let root = crate::test_support::temporary_directory();
+        let steps = [Step {
+            group: Group::Build,
+            program: "/nonexistent/tikk-missing-program",
+            ..shell_step(&[])
+        }];
+
+        assert_eq!(
+            check_steps(root.path(), &steps, &[Group::Build]),
+            ExitCode::FAILURE
+        );
+    }
+
+    #[test]
+    fn check_steps_passes_when_all_selected_steps_pass() {
+        let root = crate::test_support::temporary_directory();
+        let steps = [Step {
+            group: Group::Build,
+            ..shell_step(&["-c", "exit 0"])
+        }];
+
+        assert_eq!(
+            check_steps(root.path(), &steps, &[Group::Build]),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn failed_steps_runs_every_selected_step_after_a_failure() {
+        let root = crate::test_support::temporary_directory();
+        let steps = [
+            Step {
+                name: "fails",
+                ..shell_step(&["-c", "exit 1"])
+            },
+            Step {
+                name: "later",
+                ..shell_step(&["-c", "touch later"])
+            },
+            Step {
+                name: "build",
+                group: Group::Build,
+                ..shell_step(&["-c", "touch build"])
+            },
+        ];
+
+        assert_eq!(failed_steps(root.path(), &steps, &[Group::Tidy]), ["fails"]);
+        assert!(root.path().join("later").exists());
+        assert!(!root.path().join("build").exists());
+    }
+
+    #[test]
+    fn run_step_runs_in_the_root_with_its_environment() {
+        let root = crate::test_support::temporary_directory();
+        let step = Step {
+            environment: &[("TIKK_CHECK_VALUE", "expected")],
+            ..shell_step(&[
+                "-c",
+                r#"test -f marker && test "$TIKK_CHECK_VALUE" = expected"#,
+            ])
+        };
+
+        std::fs::write(root.path().join("marker"), "").expect("write marker");
+
+        assert!(run_step(root.path(), &step));
+    }
+
+    #[test]
+    fn parse_groups_selects_groups() {
+        let cases = [
+            (vec![], vec![Group::Tidy, Group::Build]),
+            (vec!["tidy".to_string()], vec![Group::Tidy]),
+            (vec!["build".to_string()], vec![Group::Build]),
+        ];
+
+        for (arguments, expected) in cases {
+            assert_eq!(parse_groups(&arguments), Ok(expected), "{arguments:?}");
+        }
+    }
+
+    #[test]
+    fn parse_groups_rejects_unknown_arguments() {
+        for arguments in [
+            vec!["lint".to_string()],
+            vec!["tidy".to_string(), "build".to_string()],
+        ] {
+            let error = parse_groups(&arguments).expect_err("unknown arguments fail");
+
+            assert_eq!(error.arguments, arguments);
+        }
+    }
+
+    #[test]
+    fn run_fails_on_unknown_arguments() {
+        let root = crate::test_support::temporary_directory();
+
+        assert_eq!(run(root.path(), &["lint".to_string()]), ExitCode::FAILURE);
+        assert_eq!(
+            std::fs::read_dir(root.path())
+                .expect("read fixture")
+                .count(),
+            0
+        );
+    }
+
+    #[test]
+    fn steps_group_every_command_check() {
+        let names = |group| {
+            STEPS
+                .iter()
+                .filter(|step| step.group == group)
+                .map(|step| step.name)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            names(Group::Tidy),
+            ["rustfmt", "typos", "taplo", "cargo-deny", "cargo-shear"]
+        );
+        assert_eq!(
+            names(Group::Build),
+            ["clippy", "nextest", "doctests", "rustdoc"]
+        );
+    }
+
+    #[test]
+    fn steps_lock_cargo_and_deny_build_warnings() {
+        for step in STEPS {
+            if step.program == "cargo" && step.name != "rustfmt" {
+                assert!(
+                    step.arguments.contains(&"--locked"),
+                    "{} is locked",
+                    step.name
+                );
+            }
+
+            if step.group == Group::Build {
+                assert!(
+                    step.environment.contains(&DENY_WARNINGS),
+                    "{} denies warnings",
+                    step.name
+                );
+            }
+
+            if step.name == "rustdoc" {
+                assert!(step.environment.contains(&("RUSTDOCFLAGS", "-D warnings")));
+            }
+        }
+    }
+
+    #[test]
+    fn tidy_passes_when_boundary_metadata_has_no_violations() {
+        let root = crate::test_support::temporary_directory();
+
+        std::fs::create_dir(root.path().join("src")).expect("create source folder");
+        std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
+        std::fs::write(root.path().join("Cargo.toml"),
+            "[workspace]\n[package]\nname = \"tikk-core\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"
+        ).expect("write manifest");
+        let status = Command::new("cargo")
+            .args(["generate-lockfile", "--offline"])
+            .current_dir(root.path())
+            .status()
+            .expect("start cargo to prepare fixture");
+
+        assert!(status.success());
+        assert_eq!(
+            check_steps(root.path(), &[], &[Group::Tidy]),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn tidy_fails_when_boundary_metadata_cannot_be_read() {
+        let root = crate::test_support::temporary_directory();
+
+        assert_eq!(
+            check_steps(root.path(), &[], &[Group::Tidy]),
+            ExitCode::FAILURE
+        );
+    }
+
+    #[test]
+    fn run_step_fails_when_its_program_exits_non_zero() {
+        let root = crate::test_support::temporary_directory();
+
+        assert!(run_step(root.path(), &shell_step(&["-c", "exit 0"])));
+        assert!(!run_step(root.path(), &shell_step(&["-c", "exit 7"])));
+    }
+
+    #[test]
+    fn run_step_fails_when_its_program_does_not_exist() {
+        let root = crate::test_support::temporary_directory();
+        let step = Step {
+            program: "/nonexistent/tikk-missing-program",
+            ..shell_step(&[])
+        };
+
+        assert!(!run_step(root.path(), &step));
+    }
 }

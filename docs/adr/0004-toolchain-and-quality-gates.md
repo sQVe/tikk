@@ -34,6 +34,11 @@ point for every check.
 - Clippy lint levels live in `[workspace.lints]`, and every crate uses them.
 - The `all` group warns and `correctness` denies. Single lints, such as `dbg_macro` and `todo`, are
   added when they are needed. The whole pedantic, nursery, and restriction groups stay off.
+- `print_stdout` and `print_stderr` warn on printing outside deliberate command output.
+  `allow_attributes_without_reason`, `should_panic_without_expect`, and `redundant_clone` check
+  lint reasons, panic expectations, and needless clones.
+- A suppression is `#[expect(lint, reason = "...")]` on the smallest item that needs it. Use
+  `#[allow(lint, reason = "...")]` only when the lint fires in some builds but not others.
 - Unsafe code is denied.
 - CI fails on any warning.
 
@@ -43,6 +48,10 @@ point for every check.
 - `Cargo.lock` is committed. Every Cargo build runs with `--locked`, so a stale lock file fails the
   build. The lock file fixes the versions that ship.
 - Prefer the standard library to a crate. A new crate needs a stated reason.
+- `xtask` uses `anyhow` to keep error causes, `thiserror` for errors callers distinguish, and
+  `tempfile` to clean up test fixtures even after a failed assertion.
+- CI pins cargo-mutants because its exit codes and report format are part of the automation
+  contract. This tool pin is separate from library dependency ranges.
 
 ### Licenses
 
@@ -60,6 +69,15 @@ point for every check.
   `tikk-desktop`, directly or through another crate. It reads the dependency graph from
   `cargo metadata`.
 - prek runs formatting and linting as Git hooks before a commit.
+
+### Mutation testing
+
+- cargo-mutants includes `xtask`, so the checks themselves must have tests that catch false passes.
+  `.cargo/mutants.toml` excludes entry points, tests, and test helpers, with a reason per exclusion.
+- Pull requests mutate changed lines. Scheduled and manual runs on `main` audit the whole
+  workspace and save the cargo-mutants report.
+- Survivors are advice and do not fail CI. Errors, unmutated files, and failing baselines do.
+  [ADR 0027](./0027-advisory-mutation-testing.md) records the mutation policy.
 
 ## Consequences
 

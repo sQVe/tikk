@@ -28,15 +28,24 @@ it is advisory.
   error or an unmutated file.
 - Every test runs for each mutant, not only the tests near the mutated file. tikk's cross-module
   tests in `tests/` are part of what kills mutants.
+- `xtask` stays under mutation testing. A check that reports success after a tool fails is a
+  failure of the check itself, so its tests must catch that case. Test code and helpers are
+  excluded because mutating them only weakens the tests.
 - A surviving mutant is a survivor. The author decides whether to add a test that fails when that
   line changes, or to accept the survivor as equivalent.
 
-### CI job
+### CI jobs
 
-- The `Mutation` job runs `cargo xtask mutation changed <base>` on each pull request. `<base>` is
-  the pull request's base branch, so the job mutates only the lines the pull request changes.
-- It is not a required check. Survivors show as a failed job, and the author decides what to do.
-- A job timeout bounds the run time, because the mutant count has no cap by default.
+- CI pins cargo-mutants so changes to its exit codes or report format are deliberate.
+- `Mutation (changed)` runs `cargo xtask mutation changed <base>` on every pull request, regardless
+  of base branch. `<base>` is the pull request's base commit, so moving branch tips do not change
+  the scope during the run. The step summary lists survivors.
+- `Mutation audit` audits the whole workspace on scheduled and manual runs on `main`. It saves
+  the cargo-mutants report as an artifact, so tests outside the current diff also get reviewed.
+- Survivors do not fail either job. Errors, unmutated files, and failing baselines do.
+- Job timeouts bound run time, because the mutant count has no cap by default.
+- The concurrency group includes the event name, so a push to `main` cannot cancel the scheduled
+  audit.
 
 ## Consequences
 
@@ -48,7 +57,7 @@ it is advisory.
 
 ### Negative
 
-- The job does not block a merge, so a survivor can land when nobody reads the job result.
+- Survivors do not block a merge, so they can land when nobody reads the summary or audit report.
 - Every test runs for each mutant, so runs get slower as the suite grows.
 - Some survivors are equivalent mutants that no test can kill, so each one needs a judgment.
 
