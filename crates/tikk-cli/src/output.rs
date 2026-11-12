@@ -193,9 +193,17 @@ mod tests {
 
         let response = Response::failure(true, &failure);
 
+        let printed: serde_json::Value =
+            serde_json::from_str(&response.stderr).expect("the error is one JSON value");
         assert_eq!(
-            response.stderr,
-            "{\"error\":{\"code\":\"invalidTicket\",\"field\":\"parent\",\"message\":\"`parent` is wrong.\"}}\n"
+            printed,
+            json!({
+                "error": {
+                    "code": "invalidTicket",
+                    "message": "`parent` is wrong.",
+                    "field": "parent",
+                }
+            })
         );
     }
 }
