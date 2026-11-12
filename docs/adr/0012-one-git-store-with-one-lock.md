@@ -16,14 +16,15 @@ machines that add facts offline must not produce a Git conflict.
 
 ## Decision
 
-tikk keeps one store per user at `~/.local/share/tikk`. The store is a Git repository synced to a
+tikk keeps one store per user at `~/.local/share/tikk`, or at `$TIKK_HOME` when it is set. The store is a Git repository synced to a
 private GitHub repository.
 
 ### Locking and sync
 
 - One store lock covers every write and every local Git step of sync. A claim is atomic, and no
   write races a Git operation. tikk clears a stale lock by checking its PID.
-- Writes never commit. One sync step fetches, then commits and merges under the lock, then pushes.
+- Writes never commit. `tikk init` is the one exception: it makes the store's first commit, so the
+  store has a `main` branch from the start. One sync step fetches, then commits and merges under the lock, then pushes.
   The network steps run outside the lock, because writers wait for the lock at most five seconds.
   Each network step has a timeout, and a failed one leaves the sync to the next run.
 - The sync step is one function of the core crate, and `tikk sync` runs it. A write on a store with

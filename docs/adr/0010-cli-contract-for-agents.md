@@ -22,9 +22,22 @@ both.
 ### Commands
 
 - Every value a prompt would ask for is an argument. A command never waits for input.
-- `--json` output has a form a program can parse. An expected failure exits with a nonzero code and
-  an error message.
+- `--json` is a global flag. Without it, a command prints short text.
 - Agent skills and tools call `tikk ... --json` and never read or write the store files.
+
+### Output and exit codes
+
+- With `--json`, success prints the bare result object on standard output, such as
+  `{"store":"/path","created":true}`. Nothing else goes to standard output.
+- With `--json`, a failure prints nothing on standard output and one error object on standard error:
+  `{"error":{"code":"notInitialized","message":"..."}}`. The `code` is a stable camelCase name
+  that a program branches on. The `message` is for people and may change. An error may add fields
+  beside `code` and `message`.
+- Exit codes: 0 for success, 1 when tikk refuses the action, and 2 for wrong usage.
+- Wrong usage, such as an unknown flag or a bad argument value, has the code `invalidArguments`.
+  A missing store has the code `notInitialized`.
+- `tikk --help` and `tikk --version` exit with 0. `tikk --version --json` prints
+  `{"version":"<version>"}`.
 
 ### Desktop and CLI parity
 
