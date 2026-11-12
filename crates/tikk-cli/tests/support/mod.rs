@@ -18,7 +18,6 @@ pub(crate) struct Run {
     pub(crate) stderr: String,
 }
 
-/// An empty `TIKK_HOME` and a missing `HOME` for one test. The folders live while this value lives.
 pub(crate) struct Home {
     directory: TempDir,
 }

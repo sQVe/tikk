@@ -12,7 +12,6 @@ use crate::store_error;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// What a run reads from outside its arguments.
 pub(crate) struct Environment {
     pub(crate) tikk_home: Option<OsString>,
     pub(crate) home: Option<OsString>,
@@ -65,7 +64,6 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
     }
 }
 
-/// clap failed, so `--json` is read from the raw arguments, up to a `--`.
 fn asks_for_json(arguments: &[OsString]) -> bool {
     arguments
         .iter()

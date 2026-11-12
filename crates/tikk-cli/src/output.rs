@@ -2,13 +2,11 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 
-/// What a command prints when it succeeds: `json` with `--json`, else `text`.
 pub(crate) struct Output {
     pub(crate) json: Value,
     pub(crate) text: String,
 }
 
-/// The exit codes of the CLI contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Exit {
     Success,
@@ -32,7 +30,6 @@ pub(crate) struct Failure {
     pub(crate) exit: Exit,
 }
 
-/// Everything one run prints, and its exit code.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Response {
     pub(crate) stdout: String,

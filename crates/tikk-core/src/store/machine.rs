@@ -2,7 +2,6 @@ use std::fmt;
 
 use crate::store::StoreError;
 
-/// A machine name: lowercase ASCII letters, digits, and hyphens, not starting with a hyphen.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineName(String);
 
@@ -28,7 +27,6 @@ impl MachineName {
         Ok(Self(name.to_owned()))
     }
 
-    /// Takes the first dot-separated label of the host name, lowercased.
     pub(crate) fn from_host_name(host_name: &str) -> Result<Self, StoreError> {
         let host_name = host_name.trim();
         let label = host_name.split('.').next().unwrap_or_default();

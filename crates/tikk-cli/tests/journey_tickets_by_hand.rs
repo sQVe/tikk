@@ -1,6 +1,3 @@
-//! Journey tickets-by-hand: the user at a shell, with no agent, sets up a store and keeps a plan's
-//! to-dos in order. Steps match `.pi/qa/journeys/tickets-by-hand.md`.
-
 mod support;
 
 use support::Home;
@@ -9,7 +6,6 @@ use support::Home;
 fn tickets_by_hand() {
     let home = Home::new();
 
-    // Step 1: `tikk init` creates the store, and a second `tikk init` reports that it exists.
     let first = home.tikk(&["init"]);
     assert_eq!(first.exit_code, 0, "step 1, first init: {}", first.stderr);
     assert!(

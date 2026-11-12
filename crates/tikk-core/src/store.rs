@@ -38,12 +38,9 @@ pub enum StoreError {
     },
 }
 
-/// The effects the store runs. `system` builds the real ones.
 #[derive(Clone, Copy)]
 pub struct StoreEffects {
-    /// Runs Git in a folder with an argument list.
     pub run_git: fn(&Path, &[&str]) -> Result<(), StoreError>,
-    /// Returns the host name as the system prints it, with any domain and line end.
     pub read_host_name: fn() -> Result<String, StoreError>,
 }
 
@@ -67,7 +64,6 @@ impl Store {
     }
 }
 
-/// Returns `$TIKK_HOME`, or `~/.local/share/tikk` when it is unset or empty.
 pub fn store_path(
     tikk_home: Option<OsString>,
     home: Option<OsString>,
@@ -83,7 +79,6 @@ pub fn store_path(
     Ok(PathBuf::from(home).join(STORE_UNDER_HOME))
 }
 
-/// Opens an existing store. Every command that reads or writes the store starts here.
 pub fn open(root: &Path) -> Result<Store, StoreError> {
     if !has_config(root)? {
         return Err(StoreError::NotInitialized {

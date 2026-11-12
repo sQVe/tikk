@@ -28,8 +28,6 @@ pub struct InitOutcome {
     pub created: bool,
 }
 
-/// Creates the store with its first commit, or leaves an existing store as it is. Saves `machine`,
-/// or the host name when no machine is saved yet.
 pub fn init(
     root: &Path,
     machine: Option<MachineName>,
@@ -270,7 +268,6 @@ mod tests {
         let directory = temporary_directory();
         let root = directory.path().join("store");
         fs::create_dir(&root).expect("create the store folder");
-        // Search but no read permission: tikk.json can be checked, the folder cannot be listed.
         fs::set_permissions(&root, fs::Permissions::from_mode(0o300))
             .expect("remove read permission");
 
