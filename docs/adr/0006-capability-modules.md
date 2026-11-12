@@ -36,6 +36,8 @@ which. The check refuses any use that crosses the table.
 - The CLI and the desktop app use only the public API of the core crate. The store and sync modules
   are private to the core crate.
 - Only the desktop app uses GPUI and gpui-component.
+- A module names another module by its `crate::<module>` path. It uses no item of the crate root
+  and no `crate::*` glob, so the check sees every use between modules.
 
 A change that keeps these directions updates the table. A change that reverses a direction needs a
 new ADR.

@@ -68,8 +68,9 @@ The crate-boundary check fails when `tikk-cli` or `tikk-core` depends on GPUI, `
 
 The module table check reads every top-level module of `crates/tikk-core/src/`, except `lib.rs`.
 It reads paths that start with `crate::` in `use` items and in code, and skips comments and
-strings. It fails when a module uses a module that its table entry does not allow, or when the
-table does not list a module. It prints one line per problem, with the module and the file path,
+strings. It fails when a module uses a module that its table entry does not allow, when a path
+names something at the crate root that is no module, such as `crate::Error` or `crate::*`, or when
+the table does not list a module. It prints one line per problem, with the module and the file path,
 and the line for a forbidden use. A new module or a new use between modules needs a change to the
 table in `xtask/src/module_table.rs`.
 

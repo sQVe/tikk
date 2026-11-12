@@ -58,15 +58,20 @@ const MODULE_TABLE: &[Entry] = &[
     },
 ];
 
+#[derive(Debug, PartialEq, Eq)]
+struct Use {
+    module: String,
+    used: String,
+    path: String,
+    line: usize,
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 enum Violation {
-    #[error("{module} must not use {used}: {path}:{line}")]
-    ForbiddenUse {
-        module: String,
-        used: String,
-        path: String,
-        line: usize,
-    },
+    #[error("{} must not use {}: {}:{}", .0.module, .0.used, .0.path, .0.line)]
+    ForbiddenUse(Use),
+    #[error("{} must use only module paths, not crate::{}: {}:{}", .0.module, .0.used, .0.path, .0.line)]
+    NotAModule(Use),
     #[error("{module} is not in the module table: {path}")]
     NotInTable { module: String, path: String },
 }
@@ -199,13 +204,20 @@ fn forbidden_uses(
 
     Ok(crate_paths(&source)
         .into_iter()
-        .filter(|used| used.name != entry.name && known_names.contains(used.name))
-        .filter(|used| !entry.uses.contains(&used.name))
-        .map(|used| Violation::ForbiddenUse {
-            module: entry.name.to_string(),
-            used: used.name.to_string(),
-            path: path.clone(),
-            line: used.line,
+        .filter(|used| used.name != entry.name && !entry.uses.contains(&used.name))
+        .map(|used| {
+            let found = Use {
+                module: entry.name.to_string(),
+                used: used.name.to_string(),
+                path: path.clone(),
+                line: used.line,
+            };
+
+            if known_names.contains(used.name) {
+                Violation::ForbiddenUse(found)
+            } else {
+                Violation::NotAModule(found)
+            }
         })
         .collect())
 }
@@ -232,12 +244,12 @@ mod tests {
     }
 
     fn forbidden_use(module: &str, used: &str, path: &str, line: usize) -> Violation {
-        Violation::ForbiddenUse {
+        Violation::ForbiddenUse(Use {
             module: module.to_string(),
             used: used.to_string(),
             path: format!("{CORE_SOURCE}/{path}"),
             line,
-        }
+        })
     }
 
     #[test]
@@ -248,12 +260,7 @@ mod tests {
 
         assert_eq!(
             violations(check(root.path())),
-            [Violation::ForbiddenUse {
-                module: "ticket".to_string(),
-                used: "store".to_string(),
-                path: "crates/tikk-core/src/ticket.rs".to_string(),
-                line: 2,
-            }]
+            [forbidden_use("ticket", "store", "ticket.rs", 2)]
         );
     }
 
@@ -301,10 +308,29 @@ mod tests {
         write_source(
             root.path(),
             "store.rs",
-            "use crate::{fact, ticket::{Ticket, sync}};\nuse crate::Error;\n",
+            "use crate::{fact, ticket::{Ticket, sync}};\n",
         );
 
         check(root.path()).expect("allowed uses pass");
+    }
+
+    #[test]
+    fn crate_root_path_that_names_no_module_is_a_violation() {
+        let root = crate::test_support::temporary_directory();
+        write_source(
+            root.path(),
+            "ticket.rs",
+            "use crate::Error;\nuse crate::*;\nuse crate::fact::Fact;\n",
+        );
+
+        let error = check(root.path()).expect_err("root paths fail");
+
+        assert_eq!(
+            error.to_string(),
+            "ticket must use only module paths, not crate::Error: crates/tikk-core/src/ticket.rs:1\n\
+             ticket must use only module paths, not crate::*: crates/tikk-core/src/ticket.rs:2\n\
+             ticket must not use fact: crates/tikk-core/src/ticket.rs:3"
+        );
     }
 
     #[test]

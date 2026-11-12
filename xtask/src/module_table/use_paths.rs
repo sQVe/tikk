@@ -63,7 +63,7 @@ pub(super) fn crate_paths(source: &str) -> Vec<CratePath<'_>> {
 
         if next.kind == TokenKind::OpenBrace {
             paths.extend(group_items(&tokens[index + 4..]));
-        } else if let Some(name) = identifier_name(next) {
+        } else if let Some(name) = item_name(next) {
             paths.push(CratePath {
                 name,
                 line: next.line,
@@ -94,7 +94,7 @@ fn group_items<'a>(tokens: &[Token<'a>]) -> Vec<CratePath<'a>> {
             continue;
         }
 
-        if expects_item && let Some(name) = identifier_name(token) {
+        if expects_item && let Some(name) = item_name(token) {
             items.push(CratePath {
                 name,
                 line: token.line,
@@ -107,10 +107,11 @@ fn group_items<'a>(tokens: &[Token<'a>]) -> Vec<CratePath<'a>> {
     items
 }
 
-fn identifier_name<'a>(token: &Token<'a>) -> Option<&'a str> {
+fn item_name<'a>(token: &Token<'a>) -> Option<&'a str> {
     match token.kind {
         TokenKind::Ident => Some(token.text),
         TokenKind::RawIdent => token.text.strip_prefix("r#"),
+        TokenKind::Star => Some(token.text),
         _ => None,
     }
 }
@@ -150,10 +151,10 @@ mod tests {
     }
 
     #[test]
-    fn glob_use_is_not_read_as_a_group() {
+    fn glob_use_yields_the_glob_and_nothing_after_it() {
         assert_eq!(
-            names("use crate::*;\ntype Pair = (u8, store::Id);\n"),
-            Vec::<&str>::new()
+            names("use crate::*;\ntype Pair = (u8, store::Id);\nuse crate::{*, ticket};\n"),
+            ["*", "*", "ticket"]
         );
     }
 
