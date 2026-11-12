@@ -1,4 +1,3 @@
-use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,23 +34,19 @@ pub fn init(
     machine: Option<MachineName>,
     effects: &StoreEffects,
 ) -> Result<InitOutcome, StoreError> {
-    // A tikk.json without the store's own repository is not a store, so Git never runs there.
-    let has_config = has_config(root)? && has_repository(root, effects)?;
+    let created = !has_config(root)?;
 
-    if !has_config {
-        ensure_empty_or_unfinished(root, effects)?;
+    if created {
+        ensure_empty(root)?;
+    } else {
+        // A tikk.json without the store's own repository is not a store, so Git never runs there.
+        ensure_own_repository(root, effects)?;
     }
 
     let machine = choose_machine(root, machine, effects)?;
 
-    if !has_config {
-        create_store_files(root, effects)?;
-    }
-
-    let created = !has_config || !has_first_commit(root, effects);
-
     if created {
-        commit_store_files(root, effects)?;
+        create_store(root, effects)?;
     }
 
     if let Some(machine) = machine {
@@ -64,22 +59,54 @@ pub fn init(
     })
 }
 
-/// A `.git` folder counts only when Git resolves the store's repository to it.
-fn has_repository(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError> {
-    let path = root.join(".git");
-    let exists = path.try_exists().map_err(|source| StoreError::Io {
-        action: "check",
-        path: path.clone(),
-        source,
-    })?;
+fn ensure_empty(root: &Path) -> Result<(), StoreError> {
+    let mut entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(StoreError::Io {
+                action: "read",
+                path: root.to_path_buf(),
+                source,
+            });
+        }
+    };
 
-    if !exists {
-        return Ok(false);
+    if entries.next().is_some() {
+        return Err(StoreError::FolderNotEmpty {
+            store: root.to_path_buf(),
+        });
     }
 
+    Ok(())
+}
+
+/// The store's `.git` must be a real folder that Git resolves to, and `main` must have the first
+/// commit, which every store gets before it is renamed into place.
+fn ensure_own_repository(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
+    let path = root.join(".git");
     let foreign = || StoreError::ForeignRepository {
         store: root.to_path_buf(),
     };
+    let not_a_store = || StoreError::FolderNotEmpty {
+        store: root.to_path_buf(),
+    };
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(not_a_store()),
+        Err(source) => {
+            return Err(StoreError::Io {
+                action: "check",
+                path,
+                source,
+            });
+        }
+    };
+
+    if !metadata.is_dir() {
+        return Err(foreign());
+    }
+
     let git_directory =
         (effects.run_git)(root, &["rev-parse", "--absolute-git-dir"]).map_err(|_| foreign())?;
     let resolved = fs::canonicalize(git_directory.trim()).map_err(|_| foreign())?;
@@ -89,54 +116,13 @@ fn has_repository(root: &Path, effects: &StoreEffects) -> Result<bool, StoreErro
         return Err(foreign());
     }
 
-    Ok(true)
-}
-
-/// A folder that an interrupted `init` left, with only the store's own repository with no commit
-/// and maybe `.gitattributes`, counts as empty, so `init` can finish it.
-fn ensure_empty_or_unfinished(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
-    let names = entry_names(root)?;
-    let not_empty = || StoreError::FolderNotEmpty {
-        store: root.to_path_buf(),
-    };
-    let has_leftover = names
-        .iter()
-        .any(|name| name != ".git" && name != ATTRIBUTES_FILE);
-
-    if has_leftover {
-        return Err(not_empty());
-    }
-
-    if names.is_empty() {
-        return Ok(());
-    }
-
-    if !has_repository(root, effects)? {
-        return Err(not_empty());
-    }
-
-    if has_first_commit(root, effects) {
-        return Err(not_empty());
-    }
+    (effects.run_git)(
+        root,
+        &["rev-parse", "--verify", "--quiet", "refs/heads/main"],
+    )
+    .map_err(|_| not_a_store())?;
 
     Ok(())
-}
-
-fn entry_names(root: &Path) -> Result<Vec<OsString>, StoreError> {
-    let read_error = |source| StoreError::Io {
-        action: "read",
-        path: root.to_path_buf(),
-        source,
-    };
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(source) => return Err(read_error(source)),
-    };
-
-    entries
-        .map(|entry| entry.map(|entry| entry.file_name()).map_err(read_error))
-        .collect()
 }
 
 fn choose_machine(
@@ -164,33 +150,55 @@ fn choose_machine(
     MachineName::from_host_name(&host_name).map(Some)
 }
 
-/// A failed first commit leaves `tikk.json` with no commit, and the next `init` finishes the store.
-/// Any rev-parse failure counts as no commit; the `git add` that follows reports a Git that cannot run.
-fn has_first_commit(root: &Path, effects: &StoreEffects) -> bool {
-    (effects.run_git)(
-        root,
-        &["rev-parse", "--verify", "--quiet", "refs/heads/main"],
-    )
-    .is_ok()
-}
+/// Builds the store with its first commit in a staging folder beside `root`, then renames it onto
+/// `root`, which is absent or empty. A failure or a crash never leaves a partial store at `root`.
+fn create_store(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
+    let parent = root.parent().ok_or_else(|| StoreError::FolderNotEmpty {
+        store: root.to_path_buf(),
+    })?;
+    let name = root.file_name().unwrap_or_default().to_string_lossy();
 
-fn create_store_files(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
-    fs::create_dir_all(root).map_err(|source| StoreError::Io {
+    fs::create_dir_all(parent).map_err(|source| StoreError::Io {
         action: "create",
-        path: root.to_path_buf(),
+        path: parent.to_path_buf(),
         source,
     })?;
-    (effects.run_git)(root, &["init", "--quiet", "--initial-branch=main"])?;
-    write_file(&root.join(ATTRIBUTES_FILE), ATTRIBUTES)?;
-    // tikk.json marks a store, so it is written after the other files.
-    write_file(&root.join(CONFIG_FILE), CONFIG)
-}
 
-fn commit_store_files(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
-    (effects.run_git)(root, &["add", "--", CONFIG_FILE, ATTRIBUTES_FILE])?;
-    (effects.run_git)(root, FIRST_COMMIT)?;
+    let staging = tempfile::Builder::new()
+        .prefix(&format!(".{name}.tikk-init-"))
+        .tempdir_in(parent)
+        .map_err(|source| StoreError::Io {
+            action: "create",
+            path: parent.to_path_buf(),
+            source,
+        })?;
 
-    Ok(())
+    (effects.run_git)(
+        staging.path(),
+        &["init", "--quiet", "--initial-branch=main"],
+    )?;
+    write_file(&staging.path().join(ATTRIBUTES_FILE), ATTRIBUTES)?;
+    write_file(&staging.path().join(CONFIG_FILE), CONFIG)?;
+    (effects.run_git)(staging.path(), &["add", "--", CONFIG_FILE, ATTRIBUTES_FILE])?;
+    (effects.run_git)(staging.path(), FIRST_COMMIT)?;
+
+    let staging = staging.keep();
+
+    fs::rename(&staging, root).map_err(|source| {
+        if let Err(error) = fs::remove_dir_all(&staging) {
+            return StoreError::Io {
+                action: "remove",
+                path: staging.clone(),
+                source: error,
+            };
+        }
+
+        StoreError::Io {
+            action: "rename",
+            path: root.to_path_buf(),
+            source,
+        }
+    })
 }
 
 fn write_file(path: &Path, contents: &str) -> Result<(), StoreError> {
@@ -274,35 +282,6 @@ mod tests {
         }
 
         (StoreEffects::system().run_git)(directory, arguments)
-    }
-
-    #[test]
-    fn init_after_a_failed_first_commit_finishes_the_store() {
-        let directory = temporary_directory();
-        let root = directory.path().join("store");
-        let failing = StoreEffects {
-            run_git: git_without_commit,
-            read_host_name: laptop_host,
-        };
-        let error = init(&root, None, &failing).expect_err("the commit fails");
-        assert!(matches!(error, StoreError::Git { .. }), "{error:?}");
-
-        let outcome =
-            init(&root, None, &effects_with_host(laptop_host)).expect("the retry succeeds");
-
-        assert_eq!(
-            outcome,
-            InitOutcome {
-                store: root.clone(),
-                created: true
-            }
-        );
-        assert_eq!(commit_count(&root), "1");
-        assert_eq!(
-            git_output(&root, &["ls-tree", "--name-only", "main"]),
-            ".gitattributes\ntikk.json"
-        );
-        assert_eq!(machine_file(&root), "laptop\n");
     }
 
     #[test]
@@ -422,50 +401,6 @@ mod tests {
     }
 
     #[test]
-    fn init_finishes_a_store_left_after_git_init() {
-        for with_attributes in [false, true] {
-            let directory = temporary_directory();
-            let root = directory.path().join("store");
-            fs::create_dir(&root).expect("create the store folder");
-            git_in(&root, &["init", "--quiet", "--initial-branch=main"]);
-            if with_attributes {
-                fs::write(root.join(".gitattributes"), "facts/** merge=union\n")
-                    .expect("write .gitattributes");
-            }
-
-            let outcome = init(&root, None, &effects_with_host(laptop_host))
-                .expect("init finishes the store");
-
-            assert!(outcome.created, "case {with_attributes}");
-            assert_eq!(commit_count(&root), "1", "case {with_attributes}");
-            assert_eq!(
-                git_output(&root, &["ls-tree", "--name-only", "main"]),
-                ".gitattributes\ntikk.json",
-                "case {with_attributes}"
-            );
-        }
-    }
-
-    #[test]
-    fn init_refuses_a_git_init_result_with_another_leftover() {
-        let directory = temporary_directory();
-        let root = directory.path().join("store");
-        fs::create_dir(&root).expect("create the store folder");
-        git_in(&root, &["init", "--quiet", "--initial-branch=main"]);
-        fs::write(root.join("notes.txt"), "mine").expect("write a file");
-
-        let error = init(&root, None, &effects_with_host(laptop_host))
-            .expect_err("another file is not an unfinished init");
-
-        assert!(
-            matches!(&error, StoreError::FolderNotEmpty { store } if *store == root),
-            "{error:?}"
-        );
-        assert!(!root.join("tikk.json").exists());
-        assert!(!root.join(".gitattributes").exists());
-    }
-
-    #[test]
     fn init_refuses_a_repository_with_commits_but_no_tikk_json() {
         let directory = temporary_directory();
         let root = directory.path().join("store");
@@ -497,20 +432,152 @@ mod tests {
         assert!(!root.join("tikk.json").exists());
     }
 
+    fn sorted_names(directory: &Path) -> Vec<OsString> {
+        let mut names: Vec<_> = fs::read_dir(directory)
+            .expect("read the folder")
+            .map(|entry| entry.expect("read an entry").file_name())
+            .collect();
+
+        names.sort();
+
+        names
+    }
+
     #[test]
-    fn init_refuses_an_empty_git_folder_without_tikk_json() {
+    fn init_ignores_a_staging_folder_left_by_a_crash() {
         let directory = temporary_directory();
         let root = directory.path().join("store");
-        fs::create_dir_all(root.join(".git")).expect("create an empty .git folder");
+        let leftover = directory.path().join(".store.tikk-init-crashed");
+        fs::create_dir_all(leftover.join(".git")).expect("create a leftover staging folder");
+        fs::write(leftover.join("tikk.json"), "{\"version\":1}\n").expect("write tikk.json");
 
-        let error = init(&root, None, &effects_with_host(laptop_host))
-            .expect_err("an empty .git folder is not the store's repository");
+        let outcome = init(&root, None, &effects_with_host(laptop_host))
+            .expect("a leftover staging folder does not block init");
+
+        assert!(outcome.created);
+        assert_eq!(commit_count(&root), "1");
+    }
+
+    #[test]
+    fn a_failed_first_commit_leaves_no_store_and_no_staging_folder() {
+        let failing = StoreEffects {
+            run_git: git_without_commit,
+            read_host_name: laptop_host,
+        };
+
+        for store_exists in [false, true] {
+            let directory = temporary_directory();
+            let root = directory.path().join("store");
+            if store_exists {
+                fs::create_dir(&root).expect("create an empty store folder");
+            }
+
+            let error = init(&root, None, &failing).expect_err("the commit fails");
+
+            assert!(
+                matches!(error, StoreError::Git { .. }),
+                "case {store_exists}: {error:?}"
+            );
+            let expected: Vec<OsString> = if store_exists {
+                vec![OsString::from("store")]
+            } else {
+                Vec::new()
+            };
+            assert_eq!(
+                sorted_names(directory.path()),
+                expected,
+                "case {store_exists}"
+            );
+            if store_exists {
+                assert_eq!(sorted_names(&root), Vec::<OsString>::new());
+            }
+        }
+    }
+
+    #[test]
+    fn init_refuses_a_git_symlink_to_another_repository() {
+        let directory = temporary_directory();
+        let other = directory.path().join("other");
+        fs::create_dir(&other).expect("create the other repository");
+        git_in(&other, &["init", "--quiet"]);
+        fs::write(other.join("work.txt"), "other work").expect("write a file");
+        git_in(&other, &["add", "work.txt"]);
+        let root = directory.path().join("store");
+        fs::create_dir(&root).expect("create the store folder");
+        fs::write(root.join("tikk.json"), "{\"version\":1}\n").expect("write tikk.json");
+        std::os::unix::fs::symlink(other.join(".git"), root.join(".git"))
+            .expect("link .git to the other repository");
+
+        let error = init(
+            &root,
+            Some(MachineName::parse("laptop").expect("a valid name")),
+            &effects_with_host(laptop_host),
+        )
+        .expect_err("a linked .git is not the store's repository");
 
         assert!(
             matches!(&error, StoreError::ForeignRepository { store } if *store == root),
             "{error:?}"
         );
-        assert!(!root.join("tikk.json").exists());
+        assert_eq!(git_output(&other, &["rev-list", "--all", "--count"]), "0");
+        assert_eq!(
+            git_output(&other, &["diff", "--cached", "--name-only"]),
+            "work.txt"
+        );
+        assert!(!other.join(".git/tikk-machine").exists());
+    }
+
+    #[test]
+    fn init_refuses_a_lone_gitattributes_or_git_init_result() {
+        let directory = temporary_directory();
+        let attributes_only = directory.path().join("attributes");
+        fs::create_dir(&attributes_only).expect("create the folder");
+        fs::write(attributes_only.join(".gitattributes"), "* text\n")
+            .expect("write .gitattributes");
+        let git_only = directory.path().join("git");
+        fs::create_dir(&git_only).expect("create the folder");
+        git_in(&git_only, &["init", "--quiet", "--initial-branch=main"]);
+
+        for root in [&attributes_only, &git_only] {
+            let before = sorted_names(root);
+
+            let error = init(root, None, &effects_with_host(laptop_host))
+                .expect_err("leftovers are not a store");
+
+            assert!(
+                matches!(&error, StoreError::FolderNotEmpty { store } if store == root),
+                "case {}: {error:?}",
+                root.display()
+            );
+            assert_eq!(sorted_names(root), before, "case {}", root.display());
+        }
+        assert_eq!(
+            fs::read_to_string(attributes_only.join(".gitattributes"))
+                .expect("read .gitattributes"),
+            "* text\n"
+        );
+        assert_eq!(
+            git_output(&git_only, &["rev-list", "--all", "--count"]),
+            "0"
+        );
+    }
+
+    #[test]
+    fn init_refuses_a_store_without_its_first_commit() {
+        let directory = temporary_directory();
+        let root = directory.path().join("store");
+        fs::create_dir(&root).expect("create the store folder");
+        git_in(&root, &["init", "--quiet", "--initial-branch=main"]);
+        fs::write(root.join("tikk.json"), "{\"version\":1}\n").expect("write tikk.json");
+
+        let error = init(&root, None, &effects_with_host(laptop_host))
+            .expect_err("a store without its first commit is refused");
+
+        assert!(
+            matches!(&error, StoreError::FolderNotEmpty { store } if *store == root),
+            "{error:?}"
+        );
+        assert_eq!(git_output(&root, &["rev-list", "--all", "--count"]), "0");
     }
 
     #[test]
