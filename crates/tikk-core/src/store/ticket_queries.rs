@@ -171,8 +171,8 @@ fn collect_files(folder: &Path, prefix: &str, files: &mut Vec<String>) -> Result
     Ok(())
 }
 
-/// A symlink counts as a file, so a link to an ancestor or an outside folder is never walked.
 fn is_real_folder(path: &Path) -> Result<bool, StoreError> {
+    // A symlink counts as a file, so a link to an ancestor or an outside folder is never walked.
     fs::symlink_metadata(path)
         .map(|metadata| metadata.is_dir())
         .map_err(|source| io_error("check", path, source))

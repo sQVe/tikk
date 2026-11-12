@@ -66,7 +66,6 @@ impl Home {
         self.tikk_with_environment(directory, &[], arguments)
     }
 
-    /// Runs `tikk` in `directory` with extra environment variables for the tikk process only.
     pub(crate) fn tikk_with_environment(
         &self,
         directory: &Path,
