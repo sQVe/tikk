@@ -57,15 +57,17 @@ pub(super) fn crate_paths(source: &str) -> Vec<CratePath<'_>> {
             continue;
         }
 
-        match tokens.get(index + 3) {
-            Some(next) if next.kind == TokenKind::Ident => paths.push(CratePath {
-                name: next.text,
+        let Some(next) = tokens.get(index + 3) else {
+            continue;
+        };
+
+        if next.kind == TokenKind::OpenBrace {
+            paths.extend(group_items(&tokens[index + 4..]));
+        } else if let Some(name) = identifier_name(next) {
+            paths.push(CratePath {
+                name,
                 line: next.line,
-            }),
-            Some(next) if next.kind == TokenKind::OpenBrace => {
-                paths.extend(group_items(&tokens[index + 4..]));
-            }
-            _ => {}
+            });
         }
     }
 
@@ -92,9 +94,9 @@ fn group_items<'a>(tokens: &[Token<'a>]) -> Vec<CratePath<'a>> {
             continue;
         }
 
-        if expects_item && token.kind == TokenKind::Ident {
+        if expects_item && let Some(name) = identifier_name(token) {
             items.push(CratePath {
-                name: token.text,
+                name,
                 line: token.line,
             });
         }
@@ -103,6 +105,14 @@ fn group_items<'a>(tokens: &[Token<'a>]) -> Vec<CratePath<'a>> {
     }
 
     items
+}
+
+fn identifier_name<'a>(token: &Token<'a>) -> Option<&'a str> {
+    match token.kind {
+        TokenKind::Ident => Some(token.text),
+        TokenKind::RawIdent => token.text.strip_prefix("r#"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -129,6 +139,14 @@ mod tests {
     #[test]
     fn later_path_segment_in_a_group_is_not_yielded() {
         assert_eq!(names("use crate::{ticket::store};"), ["ticket"]);
+    }
+
+    #[test]
+    fn raw_identifier_yields_its_name_without_the_prefix() {
+        assert_eq!(
+            names("use crate::r#store::read;\nuse crate::{r#sync, ticket};\n"),
+            ["store", "sync", "ticket"]
+        );
     }
 
     #[test]
