@@ -81,7 +81,7 @@ pub enum StoreError {
         kind: Kind,
         allowed: &'static str,
     },
-    #[error("EDITOR is not set. Set it to the editor to start, such as `EDITOR=vi`.")]
+    #[error("EDITOR names no program. Set it to the editor to start, such as `EDITOR=vi`.")]
     NoEditor,
     #[error("The editor failed: {message}")]
     EditorFailed { message: String },

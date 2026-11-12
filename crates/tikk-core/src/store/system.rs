@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
 
@@ -95,16 +95,17 @@ fn git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     command
 }
 
-pub(crate) fn start_editor(editor: &OsStr, path: &Path) -> Result<(), StoreError> {
-    let status = Command::new("sh")
-        .arg("-c")
-        .arg("$EDITOR \"$1\"")
-        .arg("sh")
+pub(crate) fn start_editor(
+    program: &OsStr,
+    arguments: &[OsString],
+    path: &Path,
+) -> Result<(), StoreError> {
+    let status = Command::new(program)
+        .args(arguments)
         .arg(path)
-        .env("EDITOR", editor)
         .status()
         .map_err(|error| StoreError::EditorFailed {
-            message: format!("could not start sh: {error}"),
+            message: format!("could not start {}: {error}", program.to_string_lossy()),
         })?;
 
     if !status.success() {
@@ -274,13 +275,18 @@ mod tests {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         let path = directory.path().join("ticket.md");
 
-        let passed = start_editor(std::ffi::OsStr::new("true"), &path);
-        let failed = start_editor(std::ffi::OsStr::new("false"), &path);
+        let passed = start_editor(std::ffi::OsStr::new("true"), &[], &path);
+        let failed = start_editor(std::ffi::OsStr::new("false"), &[], &path);
+        let missing = start_editor(std::ffi::OsStr::new("tikk-test-no-such-editor"), &[], &path);
 
         assert!(passed.is_ok(), "{passed:?}");
         assert!(
             matches!(&failed, Err(StoreError::EditorFailed { message }) if message.contains("exit status: 1")),
             "{failed:?}"
+        );
+        assert!(
+            matches!(&missing, Err(StoreError::EditorFailed { message }) if message.starts_with("could not start tikk-test-no-such-editor")),
+            "{missing:?}"
         );
     }
 }

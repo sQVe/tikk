@@ -101,9 +101,10 @@ Never:
 
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
 `--parent` and `--project` starts `git config --get remote.origin.url` in the working directory. All
-run from `PATH` with an argument list. `tikk edit` runs `sh -c '$EDITOR "$1"' sh <ticket file>`, so
-the shell splits `EDITOR` into a program and its arguments. Without `EDITOR`, or with an empty one,
-it exits with 1 and `noEditor`.
+run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
+and its arguments. It runs the program with no shell, with those arguments and then the ticket file
+path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
+`noEditor`.
 
 ### What to check
 
