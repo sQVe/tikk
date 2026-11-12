@@ -107,7 +107,6 @@ fn check_with_table(root: &Path, table: &[Entry]) -> anyhow::Result<()> {
         }
     }
 
-    violations.sort_by(|left, right| sort_key(left).cmp(&sort_key(right)));
     violations.dedup();
 
     if violations.is_empty() {
@@ -115,13 +114,6 @@ fn check_with_table(root: &Path, table: &[Entry]) -> anyhow::Result<()> {
     }
 
     Err(ModuleTableViolations { violations }.into())
-}
-
-fn sort_key(violation: &Violation) -> (&str, usize) {
-    match violation {
-        Violation::ForbiddenUse { path, line, .. } => (path, *line),
-        Violation::NotInTable { path, .. } => (path, 0),
-    }
 }
 
 fn read_modules(root: &Path) -> anyhow::Result<BTreeMap<String, Module>> {
@@ -443,14 +435,20 @@ mod tests {
     }
 
     #[test]
-    fn violations_sort_by_path_and_line_and_print_one_per_line() {
+    fn violations_follow_module_file_and_line_order_one_per_line() {
         let root = crate::test_support::temporary_directory();
-        write_source(root.path(), "cache.rs", "");
+        write_source(
+            root.path(),
+            "ticket/b_parse.rs",
+            "use crate::github::Client;\n",
+        );
+        write_source(root.path(), "ticket/a_parse.rs", "use crate::sync::push;\n");
         write_source(
             root.path(),
             "ticket.rs",
             "fn a() {\n    crate::sync::a(crate::sync::b);\n}\nuse crate::store::read;\n",
         );
+        write_source(root.path(), "cache.rs", "");
 
         let error = check(root.path()).expect_err("violations fail");
 
@@ -458,7 +456,9 @@ mod tests {
             error.to_string(),
             "cache is not in the module table: crates/tikk-core/src/cache.rs\n\
              ticket must not use sync: crates/tikk-core/src/ticket.rs:2\n\
-             ticket must not use store: crates/tikk-core/src/ticket.rs:4"
+             ticket must not use store: crates/tikk-core/src/ticket.rs:4\n\
+             ticket must not use sync: crates/tikk-core/src/ticket/a_parse.rs:1\n\
+             ticket must not use github: crates/tikk-core/src/ticket/b_parse.rs:1"
         );
     }
 

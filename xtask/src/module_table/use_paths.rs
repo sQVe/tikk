@@ -13,7 +13,7 @@ pub(super) struct CratePath<'a> {
 
 fn code_tokens(source: &str) -> Vec<Token<'_>> {
     let shebang_end = strip_shebang(source).unwrap_or(0);
-    let mut line = 1 + source[..shebang_end].matches('\n').count();
+    let mut line = 1;
     let mut start = shebang_end;
     let mut tokens = Vec::new();
 
@@ -105,4 +105,49 @@ fn group_items<'a>(tokens: &[Token<'a>]) -> Vec<CratePath<'a>> {
     }
 
     items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(source: &str) -> Vec<&str> {
+        crate_paths(source).iter().map(|path| path.name).collect()
+    }
+
+    #[test]
+    fn nested_group_yields_only_first_level_items() {
+        assert_eq!(
+            names("use crate::{ticket::{Ticket, store}, github};"),
+            ["ticket", "github"]
+        );
+    }
+
+    #[test]
+    fn identifier_after_a_group_closes_is_not_yielded() {
+        assert_eq!(names("use crate::{ticket}; fn store() {}"), ["ticket"]);
+    }
+
+    #[test]
+    fn later_path_segment_in_a_group_is_not_yielded() {
+        assert_eq!(names("use crate::{ticket::store};"), ["ticket"]);
+    }
+
+    #[test]
+    fn glob_use_is_not_read_as_a_group() {
+        assert_eq!(
+            names("use crate::*;\ntype Pair = (u8, store::Id);\n"),
+            Vec::<&str>::new()
+        );
+    }
+
+    #[test]
+    fn line_after_a_shebang_counts_the_shebang_line() {
+        let lines: Vec<usize> = crate_paths("#!/usr/bin/env tikk\n\nuse crate::store::read;\n")
+            .iter()
+            .map(|path| path.line)
+            .collect();
+
+        assert_eq!(lines, [3]);
+    }
 }
