@@ -46,6 +46,11 @@ both.
 - A gesture that only chooses or points needs no CLI equal. The action it leads to does.
 - Editing a ticket is `tikk edit <id>` in the CLI, and the desktop app's edit action. Both start
   `$EDITOR` on the ticket file. Neither edits ticket text itself.
+- An agent changes a ticket with `tikk write <id> --file <path> --hash <hash>`. It takes the
+  `document` and `hash` of `tikk show --json`, changes that text, and writes it back. tikk refuses
+  the write with `changedOnDisk` when the file no longer has that hash, so an agent never
+  overwrites an edit it did not read. An agent never builds the front matter from other JSON
+  fields.
 - `tikk open` starts the desktop app.
 
 ## Consequences

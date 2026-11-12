@@ -14,7 +14,7 @@ effort fighting the validator. A hand edit can break front matter at any time.
 
 tikk validates strictly at `claim`, `submit`, and `done`. Prose gets warnings, not errors. Ticket
 validation gates never block a `log` line, so a worker can always report progress, questions, and
-discoveries. `--force --reason` overrides a validation gate.
+discoveries. No flag overrides a validation gate.
 
 ### Levels
 
@@ -27,24 +27,17 @@ discoveries. `--force --reason` overrides a validation gate.
 "Never blocked" covers the validation gates only. It does not cover malformed writes or the
 shared-ID refusal in [ADR 0019](./0019-ids-and-file-names.md).
 
-### Force
-
-- `--force` needs `--reason`. It overrides a validation gate only.
-- `--force` never bypasses safe parsing or the shared-ID refusal in [ADR
-  0019](./0019-ids-and-file-names.md).
-- The coverage report stays a warning until the `--force` rate shows agents can meet it.
-
 ## Consequences
 
 ### Positive
 
 - Machine-checkable tickets without agents stuck on style rules.
-- A forced action carries a reason, and it cannot write data that tikk cannot read.
+- No action writes data that tikk cannot read.
 
 ### Negative
 
 - A warning can be ignored, so weak prose can reach a done task.
-- `--force` can hide a real problem if agents use it too often.
+- An agent stuck on a gate must fix the ticket first. It cannot skip the gate.
 
 ## Alternatives considered
 
