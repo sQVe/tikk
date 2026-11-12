@@ -1,6 +1,8 @@
 use std::fs;
 use std::io::{self, Write as _};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+use tempfile::NamedTempFile;
 
 use crate::store::StoreError;
 use crate::store::ticket_files::io_error;
@@ -9,8 +11,6 @@ pub(crate) fn write_bytes(file: &mut fs::File, bytes: &[u8]) -> io::Result<()> {
     file.write_all(bytes)
 }
 
-/// Writes the text to a temporary file in the same folder, then links it to `path`. A failed
-/// write leaves neither file, and the link never replaces an existing file.
 pub(crate) fn write_new_file(
     folder: &Path,
     path: &Path,
@@ -19,29 +19,17 @@ pub(crate) fn write_new_file(
 ) -> Result<(), StoreError> {
     fs::create_dir_all(folder).map_err(|source| io_error("create", folder, source))?;
 
-    let temporary = temporary_path(path);
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&temporary)
-        .map_err(|source| io_error("create", &temporary, source))?;
-    let written = write(&mut file, text.as_bytes())
-        .map_err(|source| io_error("write", path, source))
-        .and_then(|()| {
-            fs::hard_link(&temporary, path).map_err(|source| io_error("create", path, source))
-        });
+    // The temporary file is removed when dropped, so a failed write leaves no file behind.
+    let mut temporary =
+        NamedTempFile::new_in(folder).map_err(|source| io_error("create", folder, source))?;
 
-    drop(file);
-    fs::remove_file(&temporary).map_err(|source| io_error("remove", &temporary, source))?;
+    write(temporary.as_file_mut(), text.as_bytes())
+        .map_err(|source| io_error("write", path, source))?;
+    temporary
+        .persist_noclobber(path)
+        .map_err(|error| io_error("create", path, error.error))?;
 
-    written
-}
-
-/// A dot name with a `.tmp` end, so no read takes it for a ticket file.
-fn temporary_path(path: &Path) -> PathBuf {
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-
-    path.with_file_name(format!(".{name}.tmp"))
+    Ok(())
 }
 
 #[cfg(test)]
