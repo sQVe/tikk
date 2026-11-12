@@ -62,9 +62,6 @@ pub fn init(
     join_another_init(root, machine, effects, error)
 }
 
-// Another `init` may build the store at any point after the first check. This `init` then reports
-// that store as existing, and saves only a machine name the user gave, since the other `init`
-// saves its own.
 fn join_another_init(
     root: &Path,
     machine: Option<MachineName>,
@@ -187,9 +184,6 @@ fn choose_machine(
     MachineName::from_host_name(&host_name).map(Some)
 }
 
-/// Builds the store with its first commit in a staging folder beside `root`, then renames it onto
-/// `root`, which is absent or empty. A failure or a crash never leaves a partial store at `root`.
-/// Returns false when `root` is no longer empty at the rename.
 fn create_store(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError> {
     let parent = root.parent().ok_or_else(|| StoreError::FolderNotEmpty {
         store: root.to_path_buf(),

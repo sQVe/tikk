@@ -3,8 +3,6 @@ use tikk_core::StoredTicket;
 
 use crate::output::Output;
 
-// `write`, `done`, and `cancel` print the row with the new `path` and `hash`, so an agent can
-// write again without a `show`.
 pub(crate) fn written_output(ticket: &StoredTicket) -> Output {
     let mut json = row_json(ticket);
 

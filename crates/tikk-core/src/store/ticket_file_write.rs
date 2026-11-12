@@ -5,7 +5,6 @@ use std::path::Path;
 use crate::store::StoreError;
 use crate::store::ticket_files::{io_error, sha256_hex};
 
-// The hash check runs right before the rename, so a hand edit since the read is kept.
 pub(crate) fn replace_ticket_file(
     path: &Path,
     text: &str,

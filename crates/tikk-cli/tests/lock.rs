@@ -99,8 +99,6 @@ fn a_killed_lock_holder_leaves_the_lock_free_for_the_next_write() {
     let id = home.new_ticket(&["task", "Renew the domain"]);
     let locked = home.lock_file();
     locked.lock().expect("take the exclusive lock");
-    // The child inherits the locked file as its standard input, and this process closes its copy,
-    // so only the child holds the lock.
     let mut holder = Command::new("sleep")
         .arg("60")
         .stdin(Stdio::from(locked))

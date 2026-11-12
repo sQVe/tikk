@@ -99,7 +99,6 @@ pub fn show_ticket(
     })
 }
 
-// Refuses an ID that several files share, and a file that does not parse.
 pub(crate) fn find_ticket<'a>(
     scan: &'a TicketScan,
     id: &TicketId,
@@ -123,7 +122,6 @@ pub(crate) fn find_ticket<'a>(
         .ok_or_else(|| StoreError::NotFound { id: id.to_string() })
 }
 
-// Accepts a file that does not parse, and refuses an ID that several files share.
 pub(crate) fn ticket_path<'a>(scan: &'a TicketScan, id: &TicketId) -> Result<&'a Path, StoreError> {
     let parsed = scan
         .tickets

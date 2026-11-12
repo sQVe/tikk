@@ -14,7 +14,6 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
-// Returns Git's standard output as bytes, since a path it prints need not be UTF-8.
 pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     run_git_with("git", directory, arguments)
 }
@@ -96,8 +95,6 @@ fn git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     command
 }
 
-/// The shell splits `EDITOR` into words, so an editor with arguments, such as `code --wait`,
-/// works.
 pub(crate) fn start_editor(editor: &OsStr, path: &Path) -> Result<(), StoreError> {
     let status = Command::new("sh")
         .arg("-c")

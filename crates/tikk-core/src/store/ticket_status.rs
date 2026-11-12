@@ -5,7 +5,6 @@ use crate::store::ticket_write::{WriteEffects, replace_ticket};
 use crate::store::{Store, StoreError};
 use crate::ticket::{Status, TicketDocument, TicketFields, TicketId};
 
-/// Marks a task or an instruction done, and clears its reason.
 pub fn mark_done(
     store: &Store,
     id: &TicketId,

@@ -466,7 +466,6 @@ fn raced_root() -> PathBuf {
     RACED_ROOT.with(|root| root.borrow().clone().expect("the test sets the raced root"))
 }
 
-// Another init builds the store at the raced root just before this one makes its first commit.
 fn git_losing_the_race(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     if arguments.contains(&"commit") {
         let winner = Some(MachineName::parse("winner").expect("a valid name"));
@@ -477,7 +476,6 @@ fn git_losing_the_race(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, 
     (StoreEffects::system().run_git)(directory, arguments)
 }
 
-// Another program writes a file at the raced root just before the first commit.
 fn git_after_a_stray_file(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     if arguments.contains(&"commit") {
         let root = raced_root();

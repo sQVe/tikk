@@ -23,8 +23,6 @@ impl EditEffects {
     }
 }
 
-/// Starts the editor on the ticket file and returns its path. It opens a file that does not
-/// parse, so the user can repair it, and holds no lock while the editor runs.
 pub fn edit_ticket(
     store: &Store,
     id: &TicketId,
@@ -65,7 +63,6 @@ mod tests {
         static EDITED: RefCell<Option<(PathBuf, bool)>> = const { RefCell::new(None) };
     }
 
-    // Records the path, and whether a writer could take the lock while the editor ran.
     fn recording_editor(_: &OsStr, path: &Path) -> Result<(), StoreError> {
         let root = path
             .ancestors()

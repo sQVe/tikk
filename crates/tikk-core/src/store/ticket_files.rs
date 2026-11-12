@@ -15,7 +15,6 @@ pub struct StoredTicket {
     pub path: PathBuf,
     /// The SHA-256 of the file's bytes, as lowercase hex.
     pub hash: String,
-    /// The file's text, which `document` parses.
     pub text: String,
     pub document: TicketDocument,
 }

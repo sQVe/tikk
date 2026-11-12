@@ -16,8 +16,6 @@ pub enum LockAccess {
     Exclusive,
 }
 
-/// Holds the store lock until it drops. Closing the file releases the lock, and so does the end of
-/// the process.
 #[derive(Debug)]
 pub struct StoreLock {
     #[expect(dead_code, reason = "the open file holds the lock until it closes")]

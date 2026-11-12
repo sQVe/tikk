@@ -12,7 +12,6 @@ use crate::ticket::{TicketDocument, TicketError, TicketFields, TicketId, write_d
 #[derive(Clone, Copy)]
 pub struct WriteEffects {
     pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
-    /// Replaces the file at the path with the text, unless the file no longer has the hash.
     pub replace_file: fn(&Path, &str, &str) -> Result<(), StoreError>,
 }
 
@@ -28,9 +27,7 @@ impl WriteEffects {
 #[derive(Debug, Clone)]
 pub struct TicketWrite {
     pub id: TicketId,
-    /// A ticket document, in the form of a ticket file.
     pub file: PathBuf,
-    /// The hash the caller read. The write is refused when the file has another.
     pub hash: String,
 }
 
