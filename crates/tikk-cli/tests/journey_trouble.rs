@@ -12,11 +12,8 @@ fn trouble() {
     let path = home
         .store()
         .join(format!("tickets/personal/{broken}-lock-the-store.md"));
-    std::fs::write(
-        &path,
-        "---\nkind: task\ntitle: Lock the store\nstatus: [open\n---\n",
-    )
-    .expect("break the ticket file by hand");
+    let broken_text = "---\nkind: task\ntitle: Lock the store\nstatus: [open\n---\n";
+    std::fs::write(&path, broken_text).expect("break the ticket file by hand");
 
     let listing = home.tikk(&["ls", "--json"]);
 
@@ -40,5 +37,10 @@ fn trouble() {
         parse_json(&show.stderr)["error"]["code"],
         json!("parseError"),
         "step 1, show"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read the broken file"),
+        broken_text,
+        "end state, the broken file stays as the user left it"
     );
 }
