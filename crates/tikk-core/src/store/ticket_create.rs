@@ -350,6 +350,52 @@ mod tests {
     }
 
     #[test]
+    fn create_ticket_refuses_a_link_to_an_id_that_two_files_hold() {
+        DRAWS.set(0);
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let plan = create_ticket(
+            &store(directory.path()),
+            fields(Kind::Plan, "Plan", None),
+            &effects(no_origin),
+        )
+        .expect("the plan is created");
+        let unique = create_ticket(
+            &store(directory.path()),
+            fields(Kind::Plan, "Other", None),
+            &effects(no_origin),
+        )
+        .expect("a second plan is created");
+        fs::write(
+            directory
+                .path()
+                .join(format!("tickets/personal/{}-copy.md", plan.id)),
+            "---\nkind: plan\ntitle: Copy\n---\n",
+        )
+        .expect("write a second file with the plan's ID");
+        let before = ticket_files(directory.path());
+
+        let refused = create_ticket(
+            &store(directory.path()),
+            fields(Kind::Slice, "Slice", Some(&plan.id)),
+            &effects(no_origin),
+        )
+        .expect_err("the parent ID names two files");
+        let created = create_ticket(
+            &store(directory.path()),
+            fields(Kind::Slice, "Slice", Some(&unique.id)),
+            &effects(no_origin),
+        )
+        .expect("a parent that one file holds is fine");
+
+        assert!(
+            matches!(&refused, StoreError::IdShared { id, paths } if *id == plan.id.to_string() && paths.len() == 2),
+            "{refused:?}"
+        );
+        assert_eq!(ticket_files(directory.path()).len(), before.len() + 1);
+        assert_eq!(created.document.fields.parent(), Some(&unique.id));
+    }
+
+    #[test]
     fn create_ticket_refuses_a_task_under_a_slice_and_writes_nothing() {
         DRAWS.set(0);
         let directory = tempfile::tempdir().expect("create a temporary directory");

@@ -133,6 +133,30 @@ mod tests {
     }
 
     #[test]
+    fn linked_ids_names_the_parent_and_every_edge_target() {
+        let document = TicketDocument::parse(
+            "---\nkind: task\ntitle: T\nparent: personal-pppp\nblockedBy: [personal-3333]\ndiscoveredFrom: personal-4444\nrelated: [personal-6666]\n---\n",
+        )
+        .expect("the document parses");
+
+        let linked: Vec<String> = document
+            .fields
+            .linked_ids()
+            .map(ToString::to_string)
+            .collect();
+
+        assert_eq!(
+            linked,
+            [
+                "personal-pppp",
+                "personal-3333",
+                "personal-4444",
+                "personal-6666"
+            ]
+        );
+    }
+
+    #[test]
     fn valid_parents_and_edges_pass() {
         let cases = [
             "---\nkind: slice\ntitle: S\nparent: personal-pppp\nblockedBy: [personal-kkkk]\n---\n",
