@@ -62,16 +62,26 @@ fn init_with_machine_saves_the_name_in_the_git_folder() {
 }
 
 #[test]
-fn init_without_machine_saves_the_lowercase_host_name() {
+fn init_without_machine_saves_the_first_label_of_the_host_name() {
     let home = Home::new();
+    let uname = std::process::Command::new("uname")
+        .arg("-n")
+        .output()
+        .expect("start uname");
+    let host_name = String::from_utf8(uname.stdout).expect("uname prints UTF-8");
+    let expected = host_name
+        .trim()
+        .split('.')
+        .next()
+        .expect("split yields a first label")
+        .to_lowercase();
 
     let run = home.tikk(&["init", "--json"]);
 
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     let machine = std::fs::read_to_string(home.store().join(".git/tikk-machine"))
         .expect("read the machine file");
-    assert!(!machine.trim_end().is_empty());
-    assert_eq!(machine, machine.to_lowercase());
+    assert_eq!(machine, format!("{expected}\n"));
 }
 
 #[test]

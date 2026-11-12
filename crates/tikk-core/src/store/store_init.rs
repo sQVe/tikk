@@ -264,6 +264,33 @@ mod tests {
     }
 
     #[test]
+    fn init_reports_a_folder_it_cannot_read() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let directory = temporary_directory();
+        let root = directory.path().join("store");
+        fs::create_dir(&root).expect("create the store folder");
+        // Search but no read permission: tikk.json can be checked, the folder cannot be listed.
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o300))
+            .expect("remove read permission");
+
+        let result = init(&root, None, &effects_with_host(laptop_host));
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700))
+            .expect("restore read permission");
+        let error = result.expect_err("an unreadable folder is refused");
+        assert!(
+            matches!(
+                &error,
+                StoreError::Io { action: "read", path, source }
+                    if *path == root && source.kind() == std::io::ErrorKind::PermissionDenied
+            ),
+            "{error:?}"
+        );
+        assert!(!root.join(".git").exists());
+    }
+
+    #[test]
     fn init_with_an_invalid_host_name_creates_nothing() {
         let directory = temporary_directory();
         let root = directory.path().join("store");

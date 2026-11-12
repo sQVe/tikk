@@ -57,3 +57,24 @@ pub(crate) fn read_host_name() -> Result<String, StoreError> {
         message: "uname printed a name that is not UTF-8".to_owned(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::process::Command;
+
+    use super::read_host_name;
+
+    #[test]
+    fn read_host_name_returns_what_uname_prints() {
+        let uname = Command::new("uname")
+            .arg("-n")
+            .output()
+            .expect("start uname");
+        let expected = String::from_utf8(uname.stdout).expect("uname prints UTF-8");
+
+        let host_name = read_host_name().expect("the host name is readable");
+
+        assert!(!expected.trim().is_empty(), "uname printed no host name");
+        assert_eq!(host_name, expected);
+    }
+}
