@@ -1,21 +1,23 @@
 use std::ffi::OsString;
+use std::path::PathBuf;
 
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
-use tikk_core::{StoreEffects, StoreError};
+use tikk_core::{StoreEffects, StoreError, TicketEffects};
 
 use crate::command::{Cli, Command};
-use crate::init;
 use crate::output::{Exit, Failure, Output, Response};
-use crate::store_error;
+use crate::{init, ls, new, show, store_error};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub(crate) struct Environment {
     pub(crate) tikk_home: Option<OsString>,
     pub(crate) home: Option<OsString>,
+    pub(crate) working_directory: PathBuf,
     pub(crate) effects: StoreEffects,
+    pub(crate) ticket_effects: TicketEffects,
 }
 
 impl Environment {
@@ -23,7 +25,10 @@ impl Environment {
         Self {
             tikk_home: std::env::var_os("TIKK_HOME"),
             home: std::env::var_os("HOME"),
+            // Git then reports the folder it cannot enter when it reads `origin`.
+            working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             effects: StoreEffects::system(),
+            ticket_effects: TicketEffects::system(),
         }
     }
 }
@@ -61,6 +66,14 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
 
     match command {
         Command::Init { machine } => init::run(&store, machine, &environment.effects),
+        Command::New(arguments) => new::run(
+            &tikk_core::open(&store)?,
+            arguments,
+            environment.working_directory,
+            &environment.ticket_effects,
+        ),
+        Command::Show { id } => show::run(&tikk_core::open(&store)?, &id),
+        Command::Ls(arguments) => ls::run(&tikk_core::open(&store)?, arguments),
     }
 }
 
@@ -100,6 +113,7 @@ fn usage_response(json: bool, error: &clap::Error) -> Response {
     let failure = Failure {
         code: "invalidArguments",
         message,
+        field: None,
         exit: Exit::WrongUsage,
     };
 
