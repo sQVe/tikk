@@ -95,7 +95,7 @@ pub enum StoreError {
 
 #[derive(Clone, Copy)]
 pub struct StoreEffects {
-    pub run_git: fn(&Path, &[&str]) -> Result<String, StoreError>,
+    pub run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
     pub read_host_name: fn() -> Result<String, StoreError>,
 }
 

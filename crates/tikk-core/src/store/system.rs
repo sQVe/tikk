@@ -14,11 +14,16 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
-pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
+// Returns Git's standard output as bytes, since a path it prints need not be UTF-8.
+pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     run_git_with("git", directory, arguments)
 }
 
-fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
+fn run_git_with(
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Vec<u8>, StoreError> {
     let mut command = git_command(program, directory, arguments);
 
     // Git stops looking for a repository at the store's parent, so it never finds another one.
@@ -40,8 +45,7 @@ fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<S
         ));
     }
 
-    String::from_utf8(output.stdout)
-        .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned()))
+    Ok(output.stdout)
 }
 
 pub(crate) fn read_origin_url(directory: &Path) -> Result<Option<String>, StoreError> {

@@ -198,3 +198,60 @@ fn init_runs_no_post_commit_hook_from_the_global_git_config() {
     assert_eq!(home.git(&["rev-list", "--count", "main"]).trim(), "1");
     assert!(!marker.exists(), "the post-commit hook ran");
 }
+
+#[test]
+fn two_inits_at_once_on_one_empty_store_both_succeed_with_one_commit() {
+    for round in 0..5 {
+        let home = Home::new();
+        let children: Vec<_> = (0..2)
+            .map(|_| {
+                home.command(&["init", "--json", "--machine", "test"])
+                    .stdout(std::process::Stdio::piped())
+                    .stderr(std::process::Stdio::piped())
+                    .spawn()
+                    .expect("start the tikk binary")
+            })
+            .collect();
+        let runs: Vec<_> = children
+            .into_iter()
+            .map(|child| support::finish(child.wait_with_output().expect("wait for tikk")))
+            .collect();
+
+        for run in &runs {
+            assert_eq!(run.exit_code, 0, "round {round}: {}", run.stderr);
+        }
+        let created = runs
+            .iter()
+            .filter(|run| parse_json(&run.stdout)["created"] == json!(true))
+            .count();
+        assert_eq!(created, 1, "round {round}");
+        assert_eq!(
+            home.git(&["rev-list", "--count", "main"]).trim(),
+            "1",
+            "round {round}"
+        );
+    }
+}
+
+#[test]
+fn a_second_init_on_a_store_path_that_is_not_utf8_reports_the_store_exists() {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let home = Home::new();
+    let store = home.work().join(std::ffi::OsStr::from_bytes(b"store-\xff"));
+    let init = || {
+        let mut command = home.command(&["init", "--json", "--machine", "test"]);
+
+        command.env("TIKK_HOME", &store);
+
+        support::finish(command.output().expect("start the tikk binary"))
+    };
+
+    let first = init();
+    let second = init();
+
+    assert_eq!(first.exit_code, 0, "first: {}", first.stderr);
+    assert_eq!(parse_json(&first.stdout)["created"], json!(true));
+    assert_eq!(second.exit_code, 0, "second: {}", second.stderr);
+    assert_eq!(parse_json(&second.stdout)["created"], json!(false));
+}
