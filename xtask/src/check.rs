@@ -3,7 +3,7 @@ use std::process::{Command, ExitCode};
 
 use thiserror::Error;
 
-use crate::{boundaries, raw_values};
+use crate::{boundaries, module_table, raw_values};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
@@ -21,7 +21,6 @@ struct Step {
 }
 
 const DENY_WARNINGS: (&str, &str) = ("CARGO_BUILD_WARNINGS", "deny");
-const BOUNDARY_CHECK_NAME: &str = "crate-boundaries";
 
 const STEPS: &[Step] = &[
     Step {
@@ -89,6 +88,14 @@ const STEPS: &[Step] = &[
     },
 ];
 
+type SourceCheck = fn(&Path) -> anyhow::Result<()>;
+
+const SOURCE_CHECKS: &[(&str, SourceCheck)] = &[
+    ("crate-boundaries", boundaries::check),
+    ("module-table", module_table::check),
+    ("raw-values", raw_values::check),
+];
+
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("Unknown check arguments: {}. Use tidy, build, or none.", arguments.join(" "))]
 struct UnknownArguments {
@@ -130,18 +137,21 @@ fn run_step(root: &Path, step: &Step) -> bool {
 
 #[expect(
     clippy::print_stderr,
-    reason = "boundary progress and failures are the command's output"
+    reason = "source check progress and failures are the command's output"
 )]
-fn run_boundary_check(root: &Path) -> bool {
-    eprintln!("==> {BOUNDARY_CHECK_NAME}");
+fn failed_source_checks(root: &Path) -> Vec<&'static str> {
+    let mut failed = Vec::new();
 
-    match boundaries::check(root) {
-        Ok(()) => true,
-        Err(error) => {
+    for (name, source_check) in SOURCE_CHECKS {
+        eprintln!("==> {name}");
+
+        if let Err(error) = source_check(root) {
             eprintln!("{error:#}");
-            false
+            failed.push(*name);
         }
     }
+
+    failed
 }
 
 // Runs every selected step, even after a failure, so one run shows every problem.
@@ -161,17 +171,8 @@ fn failed_steps<'a>(root: &Path, steps: &'a [Step], groups: &[Group]) -> Vec<&'a
 fn check_steps(root: &Path, steps: &[Step], groups: &[Group]) -> ExitCode {
     let mut failed = failed_steps(root, steps, groups);
 
-    if groups.contains(&Group::Tidy) && !run_boundary_check(root) {
-        failed.push(BOUNDARY_CHECK_NAME);
-    }
-
     if groups.contains(&Group::Tidy) {
-        eprintln!("==> raw-values");
-
-        if let Err(error) = raw_values::check(root) {
-            eprintln!("{error:#}");
-            failed.push("raw-values");
-        }
+        failed.extend(failed_source_checks(root));
     }
 
     if failed.is_empty() {
@@ -388,12 +389,20 @@ mod tests {
         }
     }
 
-    #[test]
-    fn tidy_passes_when_boundary_metadata_has_no_violations() {
+    fn source_folders() -> tempfile::TempDir {
         let root = crate::test_support::temporary_directory();
 
         std::fs::create_dir_all(root.path().join("crates/tikk-ui/src"))
             .expect("create UI source folder");
+        std::fs::create_dir_all(root.path().join("crates/tikk-core/src"))
+            .expect("create core source folder");
+
+        root
+    }
+
+    fn workspace_with_valid_metadata() -> tempfile::TempDir {
+        let root = source_folders();
+
         std::fs::create_dir(root.path().join("src")).expect("create source folder");
         std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
         std::fs::write(root.path().join("Cargo.toml"),
@@ -406,6 +415,14 @@ mod tests {
             .expect("start cargo to prepare fixture");
 
         assert!(status.success());
+
+        root
+    }
+
+    #[test]
+    fn tidy_passes_when_boundary_metadata_has_no_violations() {
+        let root = workspace_with_valid_metadata();
+
         assert_eq!(
             check_steps(root.path(), &[], &[Group::Tidy]),
             ExitCode::SUCCESS
@@ -426,8 +443,27 @@ mod tests {
     }
 
     #[test]
+    fn tidy_fails_when_a_module_uses_a_forbidden_module() {
+        let root = workspace_with_valid_metadata();
+        let ticket = root.path().join("crates/tikk-core/src/ticket.rs");
+        std::fs::write(&ticket, "use crate::store::read;\n").expect("write forbidden use");
+
+        assert_eq!(
+            check_steps(root.path(), &[], &[Group::Tidy]),
+            ExitCode::FAILURE
+        );
+
+        std::fs::write(&ticket, "").expect("remove forbidden use");
+
+        assert_eq!(
+            check_steps(root.path(), &[], &[Group::Tidy]),
+            ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
     fn tidy_fails_when_boundary_metadata_cannot_be_read() {
-        let root = crate::test_support::temporary_directory();
+        let root = source_folders();
 
         assert_eq!(
             check_steps(root.path(), &[], &[Group::Tidy]),

@@ -1,12 +1,14 @@
 mod boundaries;
 mod check;
 mod mock;
+mod module_table;
 mod mutation;
 mod raw_values;
 #[cfg(target_os = "linux")]
 mod ruta;
 #[cfg(target_os = "linux")]
 mod scene;
+mod source_files;
 #[cfg(test)]
 mod test_support;
 
