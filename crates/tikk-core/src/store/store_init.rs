@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -37,7 +38,7 @@ pub fn init(
     let has_config = has_config(root)? && has_repository(root, effects)?;
 
     if !has_config {
-        ensure_no_files(root)?;
+        ensure_empty_or_unfinished(root, effects)?;
     }
 
     let machine = choose_machine(root, machine, effects)?;
@@ -90,26 +91,51 @@ fn has_repository(root: &Path, effects: &StoreEffects) -> Result<bool, StoreErro
     Ok(true)
 }
 
-fn ensure_no_files(root: &Path) -> Result<(), StoreError> {
-    let mut entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(source) => {
-            return Err(StoreError::Io {
-                action: "read",
-                path: root.to_path_buf(),
-                source,
-            });
-        }
+/// A folder that an interrupted `init` left, with only the store's own repository with no commit
+/// and maybe `.gitattributes`, counts as empty, so `init` can finish it.
+fn ensure_empty_or_unfinished(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
+    let names = entry_names(root)?;
+    let not_empty = || StoreError::FolderNotEmpty {
+        store: root.to_path_buf(),
     };
+    let has_leftover = names
+        .iter()
+        .any(|name| name != ".git" && name != ATTRIBUTES_FILE);
 
-    if entries.next().is_some() {
-        return Err(StoreError::FolderNotEmpty {
-            store: root.to_path_buf(),
-        });
+    if has_leftover {
+        return Err(not_empty());
+    }
+
+    if names.is_empty() {
+        return Ok(());
+    }
+
+    if !has_repository(root, effects)? {
+        return Err(not_empty());
+    }
+
+    if has_first_commit(root, effects) {
+        return Err(not_empty());
     }
 
     Ok(())
+}
+
+fn entry_names(root: &Path) -> Result<Vec<OsString>, StoreError> {
+    let read_error = |source| StoreError::Io {
+        action: "read",
+        path: root.to_path_buf(),
+        source,
+    };
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(source) => return Err(read_error(source)),
+    };
+
+    entries
+        .map(|entry| entry.map(|entry| entry.file_name()).map_err(read_error))
+        .collect()
 }
 
 fn choose_machine(
@@ -392,6 +418,98 @@ mod tests {
             .expect("start git");
 
         assert!(status.success(), "git {arguments:?} failed");
+    }
+
+    #[test]
+    fn init_finishes_a_store_left_after_git_init() {
+        for with_attributes in [false, true] {
+            let directory = temporary_directory();
+            let root = directory.path().join("store");
+            fs::create_dir(&root).expect("create the store folder");
+            git_in(&root, &["init", "--quiet", "--initial-branch=main"]);
+            if with_attributes {
+                fs::write(root.join(".gitattributes"), "facts/** merge=union\n")
+                    .expect("write .gitattributes");
+            }
+
+            let outcome = init(&root, None, &effects_with_host(laptop_host))
+                .expect("init finishes the store");
+
+            assert!(outcome.created, "case {with_attributes}");
+            assert_eq!(commit_count(&root), "1", "case {with_attributes}");
+            assert_eq!(
+                git_output(&root, &["ls-tree", "--name-only", "main"]),
+                ".gitattributes\ntikk.json",
+                "case {with_attributes}"
+            );
+        }
+    }
+
+    #[test]
+    fn init_refuses_a_git_init_result_with_another_leftover() {
+        let directory = temporary_directory();
+        let root = directory.path().join("store");
+        fs::create_dir(&root).expect("create the store folder");
+        git_in(&root, &["init", "--quiet", "--initial-branch=main"]);
+        fs::write(root.join("notes.txt"), "mine").expect("write a file");
+
+        let error = init(&root, None, &effects_with_host(laptop_host))
+            .expect_err("another file is not an unfinished init");
+
+        assert!(
+            matches!(&error, StoreError::FolderNotEmpty { store } if *store == root),
+            "{error:?}"
+        );
+        assert!(!root.join("tikk.json").exists());
+        assert!(!root.join(".gitattributes").exists());
+    }
+
+    #[test]
+    fn init_refuses_a_repository_with_commits_but_no_tikk_json() {
+        let directory = temporary_directory();
+        let root = directory.path().join("store");
+        fs::create_dir(&root).expect("create the store folder");
+        git_in(&root, &["init", "--quiet", "--initial-branch=main"]);
+        git_in(
+            &root,
+            &[
+                "-c",
+                "user.name=test",
+                "-c",
+                "user.email=test@localhost",
+                "commit",
+                "--quiet",
+                "--allow-empty",
+                "--message",
+                "someone else's work",
+            ],
+        );
+
+        let error = init(&root, None, &effects_with_host(laptop_host))
+            .expect_err("a repository with history is not an unfinished init");
+
+        assert!(
+            matches!(&error, StoreError::FolderNotEmpty { store } if *store == root),
+            "{error:?}"
+        );
+        assert_eq!(commit_count(&root), "1");
+        assert!(!root.join("tikk.json").exists());
+    }
+
+    #[test]
+    fn init_refuses_an_empty_git_folder_without_tikk_json() {
+        let directory = temporary_directory();
+        let root = directory.path().join("store");
+        fs::create_dir_all(root.join(".git")).expect("create an empty .git folder");
+
+        let error = init(&root, None, &effects_with_host(laptop_host))
+            .expect_err("an empty .git folder is not the store's repository");
+
+        assert!(
+            matches!(&error, StoreError::ForeignRepository { store } if *store == root),
+            "{error:?}"
+        );
+        assert!(!root.join("tikk.json").exists());
     }
 
     #[test]
