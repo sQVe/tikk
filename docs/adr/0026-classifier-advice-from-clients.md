@@ -4,7 +4,7 @@
 **Status**: Accepted\
 **Related**: [ADR 0010 (The CLI contract for agents)](./0010-cli-contract-for-agents.md),
 [ADR 0015 (Observed facts in per-machine JSONL)](./0015-facts-in-per-machine-jsonl.md), [ADR 0021
-(Strict validation at claim, submit, and done)](./0021-validation-levels.md)
+(Strict validation at claim, submit, and audit)](./0021-validation-levels.md)
 
 ## Context
 
