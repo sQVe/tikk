@@ -9,6 +9,8 @@ use thiserror::Error;
 
 use use_paths::crate_paths;
 
+use crate::source_files::sorted_rust_files;
+
 const CORE_SOURCE: &str = "crates/tikk-core/src";
 const CRATE_ROOT_FILE: &str = "lib.rs";
 
@@ -159,13 +161,11 @@ fn read_module(root: &Path, directory: &Path, name: &str) -> anyhow::Result<Modu
     let entry_file = directory.join(format!("{name}.rs"));
     let folder = directory.join(name);
     let has_entry_file = entry_file.is_file();
-    let mut files = Vec::new();
-
-    if folder.is_dir() {
-        collect_files(&folder, &mut files)?;
-    }
-
-    files.sort();
+    let mut files = if folder.is_dir() {
+        sorted_rust_files(&folder)?
+    } else {
+        Vec::new()
+    };
 
     let path = if has_entry_file {
         files.insert(0, entry_file.clone());
@@ -178,25 +178,6 @@ fn read_module(root: &Path, directory: &Path, name: &str) -> anyhow::Result<Modu
         path: relative_path(root, &path),
         files,
     })
-}
-
-fn collect_files(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
-    let entries = fs::read_dir(directory)
-        .with_context(|| format!("Could not list {}", directory.display()))?;
-
-    for entry in entries {
-        let path = entry
-            .with_context(|| format!("Could not read an entry of {}", directory.display()))?
-            .path();
-
-        if path.is_dir() {
-            collect_files(&path, files)?;
-        } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
-            files.push(path);
-        }
-    }
-
-    Ok(())
 }
 
 fn relative_path(root: &Path, path: &Path) -> String {
