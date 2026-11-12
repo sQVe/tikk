@@ -8,7 +8,8 @@ use tikk_core::{EditEffects, QueryEffects, StoreEffects, StoreError, TicketEffec
 
 use crate::command::{Cli, Command};
 use crate::output::{Exit, Failure, Output, Response};
-use crate::{cancel, done, edit, init, ls, new, show, store_error, write};
+use crate::ticket_row::written_output;
+use crate::{edit, init, ls, new, show, store_error};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -88,11 +89,12 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             arguments,
             &environment.query_effects,
         ),
-        Command::Write { id, file, hash } => write::run(
+        Command::Write { id, file, hash } => tikk_core::write_ticket(
             &tikk_core::open(&store)?,
             tikk_core::TicketWrite { id, file, hash },
             &environment.write_effects,
-        ),
+        )
+        .map(|written| written_output(&written)),
         Command::Edit { id } => edit::run(
             &tikk_core::open(&store)?,
             &id,
@@ -100,14 +102,16 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &environment.edit_effects,
         ),
         Command::Done { id } => {
-            done::run(&tikk_core::open(&store)?, &id, &environment.write_effects)
+            tikk_core::mark_done(&tikk_core::open(&store)?, &id, &environment.write_effects)
+                .map(|done| written_output(&done))
         }
-        Command::Cancel { id, reason } => cancel::run(
+        Command::Cancel { id, reason } => tikk_core::cancel_ticket(
             &tikk_core::open(&store)?,
             &id,
             &reason,
             &environment.write_effects,
-        ),
+        )
+        .map(|canceled| written_output(&canceled)),
     }
 }
 
