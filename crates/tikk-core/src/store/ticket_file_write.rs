@@ -119,4 +119,20 @@ mod tests {
         );
         assert_eq!(folder_names(directory.path()), ["personal-abcd-a.md"]);
     }
+
+    #[test]
+    fn replace_reports_a_read_error_that_is_not_a_missing_file() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let path = directory.path().join("personal-abcd-a.md");
+        fs::create_dir(&path).expect("put a folder where the ticket file was");
+
+        let error = replace_ticket_file(&path, "new", &sha256_hex(b"old"))
+            .expect_err("a folder cannot be read as a file");
+
+        assert!(
+            matches!(&error, StoreError::Io { action: "read", path: found, .. } if *found == path),
+            "{error:?}"
+        );
+        assert_eq!(folder_names(directory.path()), ["personal-abcd-a.md"]);
+    }
 }

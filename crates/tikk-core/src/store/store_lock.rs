@@ -16,19 +16,12 @@ pub enum LockAccess {
     Exclusive,
 }
 
-/// Holds the store lock until it drops. The operating system releases it when the process ends.
+/// Holds the store lock until it drops. Closing the file releases the lock, and so does the end of
+/// the process.
 #[derive(Debug)]
 pub struct StoreLock {
+    #[expect(dead_code, reason = "the open file holds the lock until it closes")]
     file: File,
-}
-
-impl Drop for StoreLock {
-    #[expect(clippy::print_stderr, reason = "no caller can take an error from drop")]
-    fn drop(&mut self) {
-        if let Err(error) = self.file.unlock() {
-            eprintln!("Could not release the store lock: {error}");
-        }
-    }
 }
 
 pub(crate) fn lock_store(root: &Path, access: LockAccess) -> Result<StoreLock, StoreError> {
