@@ -25,7 +25,7 @@ to review a file, never a check that fails.
 ### Owners
 
 - An owner is a user-facing noun for behavior that changes on its own, whether an entity or a
-  capability. Use the same noun for it in every module, so its CLI, cache, and desktop files share a
+  capability. Use the same noun for it in every module, so its core, CLI, and desktop files share a
   prefix.
 - Infrastructure that belongs to no feature has its own owner noun, such as `lock` or `clock`.
 - An owner may have several files, one per behavior that changes on its own, such as parsing,

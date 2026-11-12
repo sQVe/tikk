@@ -1,6 +1,44 @@
 mod support;
 
-use support::Home;
+use support::{Home, parse_json};
+
+fn new_id(home: &Home, arguments: &[&str]) -> String {
+    let run = home.tikk(arguments);
+
+    assert_eq!(run.exit_code, 0, "step 2, {arguments:?}: {}", run.stderr);
+
+    let id = run.stdout.trim_end().to_owned();
+
+    assert!(
+        id.starts_with("personal-") && !id.contains('\n'),
+        "step 2, {arguments:?} prints one ID: {}",
+        run.stdout
+    );
+
+    id
+}
+
+fn listed_titles(home: &Home, arguments: &[&str]) -> Vec<String> {
+    let run = home.tikk(arguments);
+
+    assert_eq!(run.exit_code, 0, "step 3, {arguments:?}: {}", run.stderr);
+
+    let mut titles: Vec<String> = parse_json(&run.stdout)["tickets"]
+        .as_array()
+        .expect("ls lists tickets")
+        .iter()
+        .map(|ticket| {
+            ticket["title"]
+                .as_str()
+                .expect("a row has a title")
+                .to_owned()
+        })
+        .collect();
+
+    titles.sort();
+
+    titles
+}
 
 #[test]
 fn tickets_by_hand() {
@@ -24,5 +62,31 @@ fn tickets_by_hand() {
         second.stdout.contains("already exists"),
         "step 1, second init: {}",
         second.stdout
+    );
+
+    let plan = new_id(&home, &["new", "plan", "Move to tikk"]);
+    let titles = [
+        "Decide the lease length",
+        "Write the import note",
+        "Ask about Windows",
+    ];
+
+    for title in titles {
+        new_id(&home, &["new", "task", title, "--parent", &plan]);
+    }
+
+    assert_eq!(
+        listed_titles(&home, &["ls", "--parent", &plan, "--json"]),
+        [
+            "Ask about Windows",
+            "Decide the lease length",
+            "Write the import note"
+        ],
+        "step 3, ls --parent"
+    );
+    assert_eq!(
+        listed_titles(&home, &["ls", "--search", "lease", "--json"]),
+        ["Decide the lease length"],
+        "step 3, ls --search lease"
     );
 }

@@ -27,6 +27,7 @@ impl Exit {
 pub(crate) struct Failure {
     pub(crate) code: &'static str,
     pub(crate) message: String,
+    pub(crate) field: Option<String>,
     pub(crate) exit: Exit,
 }
 
@@ -54,9 +55,13 @@ impl Response {
 
     pub(crate) fn failure(json: bool, failure: &Failure) -> Self {
         let stderr = if json {
-            let error = json!({ "error": { "code": failure.code, "message": failure.message } });
+            let mut error = json!({ "code": failure.code, "message": failure.message });
 
-            format!("{error}\n")
+            if let Some(field) = &failure.field {
+                error["field"] = json!(field);
+            }
+
+            format!("{}\n", json!({ "error": error }))
         } else {
             format!("error: {}\n", failure.message)
         };
@@ -144,6 +149,7 @@ mod tests {
         let failure = Failure {
             code: "notInitialized",
             message: "No store.".to_owned(),
+            field: None,
             exit: Exit::Refused,
         };
 
@@ -165,6 +171,7 @@ mod tests {
         let failure = Failure {
             code: "notInitialized",
             message: "No store.".to_owned(),
+            field: None,
             exit: Exit::Refused,
         };
 
@@ -172,5 +179,30 @@ mod tests {
 
         assert_eq!(response.stdout, "");
         assert_eq!(response.stderr, "error: No store.\n");
+    }
+
+    #[test]
+    fn failure_with_a_field_names_it_beside_the_code() {
+        let failure = Failure {
+            code: "invalidTicket",
+            message: "`parent` is wrong.".to_owned(),
+            field: Some("parent".to_owned()),
+            exit: Exit::Refused,
+        };
+
+        let response = Response::failure(true, &failure);
+
+        let printed: serde_json::Value =
+            serde_json::from_str(&response.stderr).expect("the error is one JSON value");
+        assert_eq!(
+            printed,
+            json!({
+                "error": {
+                    "code": "invalidTicket",
+                    "message": "`parent` is wrong.",
+                    "field": "parent",
+                }
+            })
+        );
     }
 }

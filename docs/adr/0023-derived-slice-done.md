@@ -50,7 +50,8 @@ new audit runs.
 
 ### Negative
 
-- Derived done depends on fresh `gh` facts. A stale cache can show a slice open.
+- Derived done depends on fresh `gh` facts. A slice reads as open until a `gh` fact records its
+  merge.
 - A slice sits as merged but unverified until an audit runs.
 
 ## Alternatives considered

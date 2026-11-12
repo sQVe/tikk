@@ -2,7 +2,7 @@
 
 **Date**: 2026-11-04\
 **Status**: Accepted\
-**Related**: [ADR 0017 (A disposable SQLite cache)](./0017-disposable-sqlite-cache.md),
+**Related**: [ADR 0033 (Every command reads the store files, with no cache)](./0033-files-only-store-without-a-cache.md),
 [ADR 0010 (The CLI contract for agents)](./0010-cli-contract-for-agents.md)
 
 ## Context
