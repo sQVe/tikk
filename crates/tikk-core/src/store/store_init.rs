@@ -16,9 +16,10 @@ const FIRST_COMMIT: &[&str] = &[
     "user.email=tikk@localhost",
     "-c",
     "commit.gpgsign=false",
+    "-c",
+    "core.hooksPath=/dev/null",
     "commit",
     "--quiet",
-    "--no-verify",
     "--message",
     "Create the tikk store",
 ];

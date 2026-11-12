@@ -162,3 +162,43 @@ fn init_with_a_relative_store_path_never_commits_a_parent_repository() {
         "unrelated.txt"
     );
 }
+
+#[test]
+fn init_runs_no_post_commit_hook_from_the_global_git_config() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let home = Home::new();
+    let setup = tempfile::tempdir().expect("create a temporary directory");
+    let hooks = setup.path().join("hooks");
+    let marker = setup.path().join("hook-ran");
+    std::fs::create_dir(&hooks).expect("create the hooks folder");
+    let hook = hooks.join("post-commit");
+    std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display()))
+        .expect("write the hook");
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755))
+        .expect("make the hook executable");
+    let global_config = setup.path().join("gitconfig");
+    std::fs::write(
+        &global_config,
+        format!("[core]\n\thooksPath = {}\n", hooks.display()),
+    )
+    .expect("write the global Git config");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tikk"))
+        .args(["init", "--json", "--machine", "laptop"])
+        .env("TIKK_HOME", home.store())
+        .env("GIT_CONFIG_GLOBAL", &global_config)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .expect("start the tikk binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(home.git(&["rev-list", "--count", "main"]).trim(), "1");
+    assert!(!marker.exists(), "the post-commit hook ran");
+}
