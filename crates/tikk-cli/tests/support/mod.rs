@@ -63,13 +63,24 @@ impl Home {
     }
 
     pub(crate) fn tikk_in(&self, directory: &Path, arguments: &[&str]) -> Run {
+        self.tikk_with_environment(directory, &[], arguments)
+    }
+
+    /// Runs `tikk` in `directory` with extra environment variables for the tikk process only.
+    pub(crate) fn tikk_with_environment(
+        &self,
+        directory: &Path,
+        environment: &[(&str, &Path)],
+        arguments: &[&str],
+    ) -> Run {
         let mut command = Command::new(env!("CARGO_BIN_EXE_tikk"));
 
         command
             .args(arguments)
             .current_dir(directory)
             .env("TIKK_HOME", self.store())
-            .env("HOME", self.directory.path().join("home"));
+            .env("HOME", self.directory.path().join("home"))
+            .envs(environment.iter().copied());
 
         for name in REPOSITORY_ENVIRONMENT {
             command.env_remove(name);

@@ -53,7 +53,17 @@ fn read_origin_url_with(program: &str, directory: &Path) -> Result<Option<String
         arguments: arguments.join(" "),
         message,
     };
-    let output = git_command(program, directory, &arguments)
+    let mut command = git_command(program, directory, &arguments);
+
+    // Only the repository's own config names its origin. A global or system `origin`, or one
+    // passed in the environment, belongs to no repository.
+    command
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env_remove("GIT_CONFIG_PARAMETERS");
+
+    let output = command
         .output()
         .map_err(|error| git_error(error.to_string()))?;
     let url = String::from_utf8(output.stdout)

@@ -209,3 +209,36 @@ fn new_with_a_parent_or_edge_that_two_files_hold_is_id_shared_and_writes_nothing
 
     assert_eq!(home.ticket_files(), before);
 }
+
+#[test]
+fn a_global_origin_never_sets_the_project_of_new() {
+    let home = Home::initialized();
+    let global_config = home.work().join("global.gitconfig");
+    std::fs::write(
+        &global_config,
+        "[remote \"origin\"]\n\turl = git@github.com:owner/global.git\n",
+    )
+    .expect("write a global Git config");
+    let without_origin = home.work().join("without-origin");
+    std::fs::create_dir(&without_origin).expect("create the repository folder");
+    run_git(&without_origin, &["init", "--quiet"]);
+    let cases = [
+        ("outside a repository", home.work()),
+        ("in a repository without origin", without_origin),
+    ];
+
+    for (name, directory) in cases {
+        let run = home.tikk_with_environment(
+            &directory,
+            &[("GIT_CONFIG_GLOBAL", &global_config)],
+            &["new", "task", "Renew the domain", "--json"],
+        );
+
+        assert_eq!(run.exit_code, 0, "case {name}: {}", run.stderr);
+        let id = parse_json(&run.stdout)["id"]
+            .as_str()
+            .expect("new prints the ID")
+            .to_owned();
+        assert!(id.starts_with("personal-"), "case {name}: {id}");
+    }
+}
