@@ -223,14 +223,27 @@ fn a_global_origin_never_sets_the_project_of_new() {
     std::fs::create_dir(&without_origin).expect("create the repository folder");
     run_git(&without_origin, &["init", "--quiet"]);
     let cases = [
-        ("outside a repository", home.work()),
-        ("in a repository without origin", without_origin),
+        (
+            "global, outside a repository",
+            "GIT_CONFIG_GLOBAL",
+            home.work(),
+        ),
+        (
+            "global, in a repository without origin",
+            "GIT_CONFIG_GLOBAL",
+            without_origin,
+        ),
+        (
+            "GIT_CONFIG, outside a repository",
+            "GIT_CONFIG",
+            home.work(),
+        ),
     ];
 
-    for (name, directory) in cases {
+    for (name, variable, directory) in cases {
         let run = home.tikk_with_environment(
             &directory,
-            &[("GIT_CONFIG_GLOBAL", &global_config)],
+            &[(variable, &global_config)],
             &["new", "task", "Renew the domain", "--json"],
         );
 
