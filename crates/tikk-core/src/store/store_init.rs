@@ -33,16 +33,22 @@ pub fn init(
     machine: Option<MachineName>,
     effects: &StoreEffects,
 ) -> Result<InitOutcome, StoreError> {
-    let created = !has_config(root)?;
+    let has_config = has_config(root)?;
 
-    if created {
+    if !has_config {
         ensure_no_files(root)?;
     }
 
     let machine = choose_machine(root, machine, effects)?;
 
+    if !has_config {
+        create_store_files(root, effects)?;
+    }
+
+    let created = !has_config || !has_first_commit(root, effects);
+
     if created {
-        create_store(root, effects)?;
+        commit_store_files(root, effects)?;
     }
 
     if let Some(machine) = machine {
@@ -102,7 +108,17 @@ fn choose_machine(
     MachineName::from_host_name(&host_name).map(Some)
 }
 
-fn create_store(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
+/// A failed first commit leaves `tikk.json` with no commit, and the next `init` finishes the store.
+/// Any rev-parse failure counts as no commit; the `git add` that follows reports a Git that cannot run.
+fn has_first_commit(root: &Path, effects: &StoreEffects) -> bool {
+    (effects.run_git)(
+        root,
+        &["rev-parse", "--verify", "--quiet", "refs/heads/main"],
+    )
+    .is_ok()
+}
+
+fn create_store_files(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
     fs::create_dir_all(root).map_err(|source| StoreError::Io {
         action: "create",
         path: root.to_path_buf(),
@@ -111,7 +127,10 @@ fn create_store(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
     (effects.run_git)(root, &["init", "--quiet", "--initial-branch=main"])?;
     write_file(&root.join(ATTRIBUTES_FILE), ATTRIBUTES)?;
     // tikk.json marks a store, so it is written after the other files.
-    write_file(&root.join(CONFIG_FILE), CONFIG)?;
+    write_file(&root.join(CONFIG_FILE), CONFIG)
+}
+
+fn commit_store_files(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
     (effects.run_git)(root, &["add", "--", CONFIG_FILE, ATTRIBUTES_FILE])?;
     (effects.run_git)(root, FIRST_COMMIT)
 }
@@ -168,11 +187,11 @@ mod tests {
         fs::read_to_string(root.join(".git/tikk-machine")).expect("read the machine file")
     }
 
-    fn commit_count(root: &Path) -> String {
+    fn git_output(root: &Path, arguments: &[&str]) -> String {
         let output = Command::new("git")
             .arg("-C")
             .arg(root)
-            .args(["rev-list", "--count", "main"])
+            .args(arguments)
             .env_remove("GIT_DIR")
             .env_remove("GIT_INDEX_FILE")
             .output()
@@ -182,6 +201,50 @@ mod tests {
             .expect("git prints UTF-8")
             .trim()
             .to_owned()
+    }
+
+    fn commit_count(root: &Path) -> String {
+        git_output(root, &["rev-list", "--count", "main"])
+    }
+
+    fn git_without_commit(directory: &Path, arguments: &[&str]) -> Result<(), StoreError> {
+        if arguments.contains(&"commit") {
+            return Err(StoreError::Git {
+                arguments: arguments.join(" "),
+                message: "the commit fails in this test".to_owned(),
+            });
+        }
+
+        (StoreEffects::system().run_git)(directory, arguments)
+    }
+
+    #[test]
+    fn init_after_a_failed_first_commit_finishes_the_store() {
+        let directory = temporary_directory();
+        let root = directory.path().join("store");
+        let failing = StoreEffects {
+            run_git: git_without_commit,
+            read_host_name: laptop_host,
+        };
+        let error = init(&root, None, &failing).expect_err("the commit fails");
+        assert!(matches!(error, StoreError::Git { .. }), "{error:?}");
+
+        let outcome =
+            init(&root, None, &effects_with_host(laptop_host)).expect("the retry succeeds");
+
+        assert_eq!(
+            outcome,
+            InitOutcome {
+                store: root.clone(),
+                created: true
+            }
+        );
+        assert_eq!(commit_count(&root), "1");
+        assert_eq!(
+            git_output(&root, &["ls-tree", "--name-only", "main"]),
+            ".gitattributes\ntikk.json"
+        );
+        assert_eq!(machine_file(&root), "laptop\n");
     }
 
     #[test]
