@@ -3,6 +3,7 @@ mod store_init;
 mod system;
 mod ticket_create;
 mod ticket_files;
+mod ticket_id_draw;
 mod ticket_queries;
 
 use std::ffi::OsString;

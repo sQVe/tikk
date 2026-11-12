@@ -1,21 +1,18 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::store::system;
 use crate::store::ticket_files::{
-    StoredTicket, TICKETS_FOLDER, exists, io_error, is_folder, read_tickets, sha256_hex,
-    sorted_entries,
+    StoredTicket, TICKETS_FOLDER, io_error, read_tickets, sha256_hex,
 };
+use crate::store::ticket_id_draw::draw_free_id;
 use crate::store::{Store, StoreError};
 use crate::ticket::{
     Kind, ProjectName, TicketDocument, TicketError, TicketFields, TicketId, ticket_file_name,
     write_document,
 };
-
-const DRAW_ATTEMPTS: usize = 100;
-const RANDOM_BYTES: usize = 16;
 
 #[derive(Clone, Copy)]
 pub struct TicketEffects {
@@ -143,54 +140,6 @@ fn choose_project(
     }
 }
 
-fn draw_free_id(
-    project: &ProjectName,
-    folder: &Path,
-    effects: &TicketEffects,
-) -> Result<TicketId, StoreError> {
-    let taken = taken_ids(project, folder)?;
-
-    for _ in 0..DRAW_ATTEMPTS {
-        let mut bytes = [0u8; RANDOM_BYTES];
-
-        (effects.fill_random)(&mut bytes)?;
-
-        if let Some(id) = TicketId::draw(project, &bytes)
-            && !taken.contains(&id)
-        {
-            return Ok(id);
-        }
-    }
-
-    Err(StoreError::NoFreeId {
-        project: project.to_string(),
-    })
-}
-
-/// The IDs of the ticket files and ticket folders in a project folder.
-fn taken_ids(project: &ProjectName, folder: &Path) -> Result<HashSet<TicketId>, StoreError> {
-    let mut taken = HashSet::new();
-
-    if !exists(folder)? {
-        return Ok(taken);
-    }
-
-    for path in sorted_entries(folder)? {
-        let name = path.file_name().unwrap_or_default().to_string_lossy();
-        let id = if is_folder(&path)? {
-            TicketId::parse(&name)
-                .ok()
-                .filter(|id| id.project() == project)
-        } else {
-            TicketId::from_file_name(project, &name)
-        };
-
-        taken.extend(id);
-    }
-
-    Ok(taken)
-}
-
 fn write_new_file(folder: &Path, path: &Path, text: &str) -> Result<(), StoreError> {
     fs::create_dir_all(folder).map_err(|source| io_error("create", folder, source))?;
 
@@ -210,9 +159,9 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{NewTicket, NewTicketSource, TicketEffects, create_ticket, draw_free_id};
-    use crate::store::{Store, StoreError, system};
-    use crate::ticket::{ID_ALPHABET, Kind, ProjectName, TicketError, TicketId};
+    use super::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
+    use crate::store::{Store, StoreError};
+    use crate::ticket::{Kind, ProjectName, TicketError, TicketId};
 
     thread_local! {
         static DRAWS: Cell<u8> = const { Cell::new(0) };
@@ -239,12 +188,6 @@ mod tests {
         });
 
         buffer.fill(value);
-
-        Ok(())
-    }
-
-    fn zero_random(buffer: &mut [u8]) -> Result<(), StoreError> {
-        buffer.fill(0);
 
         Ok(())
     }
@@ -461,61 +404,5 @@ mod tests {
             matches!(&error, StoreError::Io { action: "read", path, .. } if *path == missing),
             "{error:?}"
         );
-    }
-
-    #[test]
-    fn draw_free_id_draws_again_when_a_file_or_folder_has_the_id() {
-        DRAWS.set(0);
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        fs::write(directory.path().join("personal-3333-taken.md"), "").expect("write a file");
-        fs::create_dir(directory.path().join("personal-4444")).expect("create a folder");
-
-        let id = draw_free_id(&project("personal"), directory.path(), &effects(no_origin))
-            .expect("a free ID exists");
-
-        assert_eq!(id.to_string(), "personal-6666");
-    }
-
-    #[test]
-    fn draw_free_id_gives_up_when_every_draw_is_taken() {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        fs::write(directory.path().join("personal-3333.md"), "").expect("write a file");
-        let always_taken = TicketEffects {
-            read_origin_url: no_origin,
-            fill_random: zero_random,
-        };
-
-        let error = draw_free_id(&project("personal"), directory.path(), &always_taken)
-            .expect_err("every draw is taken");
-
-        assert!(
-            matches!(&error, StoreError::NoFreeId { project } if project == "personal"),
-            "{error:?}"
-        );
-    }
-
-    #[test]
-    fn ten_thousand_ids_from_the_system_source_use_only_the_alphabet() {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        let system_effects = TicketEffects {
-            read_origin_url: no_origin,
-            fill_random: system::fill_random,
-        };
-
-        for _ in 0..10_000 {
-            let id = draw_free_id(&project("personal"), directory.path(), &system_effects)
-                .expect("an ID is drawn");
-            let text = id.to_string();
-            let code = text
-                .strip_prefix("personal-")
-                .expect("the ID starts with the project");
-
-            assert_eq!(code.len(), 4, "{text}");
-            assert!(
-                code.chars()
-                    .all(|character| ID_ALPHABET.contains(character)),
-                "{text}"
-            );
-        }
     }
 }
