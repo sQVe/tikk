@@ -109,6 +109,30 @@ mod tests {
     }
 
     #[test]
+    fn display_prints_the_kind_and_status_names() {
+        let kinds = [
+            (Kind::Plan, "plan"),
+            (Kind::Slice, "slice"),
+            (Kind::Instruction, "instruction"),
+            (Kind::Task, "task"),
+        ];
+        let statuses = [
+            (Status::Draft, "draft"),
+            (Status::Open, "open"),
+            (Status::Done, "done"),
+            (Status::Canceled, "canceled"),
+        ];
+
+        for (kind, name) in kinds {
+            assert_eq!(kind.to_string(), name, "case {name}");
+        }
+
+        for (status, name) in statuses {
+            assert_eq!(status.to_string(), name, "case {name}");
+        }
+    }
+
+    #[test]
     fn unknown_names_are_refused() {
         assert_eq!(
             Kind::parse("epic"),

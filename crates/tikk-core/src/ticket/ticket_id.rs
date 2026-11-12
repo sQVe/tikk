@@ -141,8 +141,11 @@ mod tests {
 
     #[test]
     fn draw_maps_bytes_to_the_alphabet_and_skips_biased_bytes() {
-        let id = TicketId::draw(&project(), &[0, 255, 26, 27, UNBIASED_LIMIT - 1, 9])
-            .expect("four bytes are usable");
+        let id = TicketId::draw(
+            &project(),
+            &[0, 255, UNBIASED_LIMIT, 26, 27, UNBIASED_LIMIT - 1, 9],
+        )
+        .expect("four bytes are usable");
 
         assert_eq!(id.to_string(), "my-app-3z3z");
     }

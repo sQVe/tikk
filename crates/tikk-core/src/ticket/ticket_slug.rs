@@ -49,6 +49,8 @@ mod tests {
     #[test]
     fn slug_joins_lowercase_ascii_words() {
         let long_word = "a".repeat(60);
+        let fits_exactly = format!("{} bcde", "a".repeat(45));
+        let one_over = format!("{} bcdef", "a".repeat(45));
         let cases = [
             (
                 "Decide the lease length",
@@ -62,6 +64,8 @@ mod tests {
                 "one-two-three-four-five-six-seven-eight-nine-ten".to_owned(),
             ),
             (long_word.as_str(), "a".repeat(50)),
+            (fits_exactly.as_str(), format!("{}-bcde", "a".repeat(45))),
+            (one_over.as_str(), "a".repeat(45)),
         ];
 
         for (title, expected) in cases {
