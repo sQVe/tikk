@@ -43,8 +43,6 @@ fn code_tokens(source: &str) -> Vec<Token<'_>> {
     tokens
 }
 
-// Reads the first segment after each `crate::`, and each first-level item of a
-// `crate::{...}` group. String literals are single tokens, so their text never matches.
 pub(super) fn crate_paths(source: &str) -> Vec<CratePath<'_>> {
     let tokens = code_tokens(source);
     let mut paths = Vec::new();
