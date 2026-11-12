@@ -62,6 +62,7 @@ evidence; the review must still match the code state being assessed.
 - A slice covers the plan criteria in its `covers`. A slice with no `covers` covers none. Only
   slices cover plan criteria, and only instructions cover slice criteria.
 - A canceled slice or instruction covers nothing, and a canceled plan or slice reports no gaps.
+  Canceled is the stored `status` in the ticket file; no fact records it.
   Archived tickets are left out. A `covers` ID that names no criterion of the parent is ignored.
 - `tikk coverage [<id>]` reports each plan criterion that no slice covers and each slice criterion
   that no instruction covers. It takes a plan or a slice and exits 0 when it finds gaps.

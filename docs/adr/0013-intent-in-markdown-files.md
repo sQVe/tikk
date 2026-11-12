@@ -12,22 +12,26 @@ tickets, and each write must not overwrite what the user changed.
 
 ## Decision
 
-Ticket intent lives in Markdown files with front matter. The user edits them in any text editor. The
-front matter holds `kind`, `title`, `project`, `parent`, `rank`, `blockedBy`, `status`, and
-`criteria`. The body is prose. tikk decodes the front matter with serde and then checks it with
-domain validation.
+Ticket intent lives in Markdown files with YAML front matter. The user edits them in any text
+editor. A file is `tickets/<project>/<id>-<slug>.md`. The ID comes from the file name and the
+project from the folder, so the front matter has no `project` field. The front matter holds `kind`,
+`title`, `status`, `reason`, `parent`, `rank`, `blockedBy`, `discoveredFrom`, `related`, and, on
+plans and slices, `criteria`. The body is prose. tikk decodes the front matter with serde and then
+checks it with domain validation, which names the field it refuses.
 
-Stored `status` is only a human decision: `draft`, `open`, or `canceled`, and for tasks also `done`.
-Derived states such as ready, active, and done come from facts and are never written to the file. A
-file that agents rewrite with state would conflict across machines.
+Stored `status` is only a human decision: `draft`, `open`, or `canceled` for plans and slices, and
+`open`, `done`, or `canceled` for instructions and tasks. A canceled ticket has a `reason`. The
+status and the reason live only in the ticket file, and no fact records them. Derived states such as
+ready, active, and done come from facts and are never written to the file. A file that agents
+rewrite with state would conflict across machines.
 
-Agent writes check the file's content hash from the cache and refuse when the file changed since the
-agent read it. A file that fails to parse keeps its last good state in the cache, shows the error,
-and is never rewritten by tikk.
+An agent reads a ticket's `hash`, the SHA-256 of its file. Agent writes pass that hash back and are
+refused when the file on disk has another hash. A file that fails to parse has no other state: tikk
+lists its path and error, refuses to show it as a ticket, and never rewrites it.
 
 A human ticket may have a folder, `tickets/<project>/<id>/`, beside its file. A plan keeps its
 `design.md` and report files there. Sync commits the folder's files as they are. tikk does not
-validate them, and the cache never reads them as tickets. `tikk show --json` lists them.
+validate them and never reads them as tickets. `tikk show --json` lists them.
 
 ## Consequences
 
@@ -38,7 +42,7 @@ validate them, and the cache never reads them as tickets. `tikk show --json` lis
 
 ### Negative
 
-- A hand edit that breaks front matter hides the ticket's new intent until it is fixed.
+- A hand edit that breaks front matter hides the whole ticket from reads until it is fixed.
 - Two machines that edit one ticket offline produce a conflict that the user resolves.
 
 ## Alternatives considered

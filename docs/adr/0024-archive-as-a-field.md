@@ -15,11 +15,11 @@ stand-alone ticket is done or canceled. It then sets it on every ticket below th
 included. Archived tickets leave `ready`, `needs`, `ls`, and the default desktop views. Files never
 move.
 
-The finish date is the newest `status` fact that names the ticket's current status, or the `accept`
-fact of a done instruction. A plan or slice whose done is derived has no such fact. Its finish date
-is the newest fact that completed the done conditions: the merge, the audit, or the finish of the
-last child that counted. A status set by a hand edit has no fact. tikk appends a `status` fact when
-it first sees that edit, and the 14 days start at that fact.
+A plan or slice whose done is derived finishes at the newest fact that completed the done
+conditions: the merge, the audit, or the finish of the last child that counted. A stored status
+lives only in the ticket file, and no `status` fact records it ([ADR
+0013](./0013-intent-in-markdown-files.md)). The finish date of a ticket that its file marks done or
+canceled is set when archive is built.
 
 `tikk archive` sets the field by hand. `tikk unarchive` removes it and appends an `unarchive` fact
 for each ticket it clears. tikk does not archive that ticket again for a finish older than the fact.

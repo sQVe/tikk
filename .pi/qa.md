@@ -1,7 +1,7 @@
 # QA guide
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
-`tikk` has `init`, `--help`, and `--version`, and `tikk-desktop` is a stub. A mock scene of the UI
+`tikk` has `init`, `new`, `show`, `ls`, `--help`, and `--version`, and `tikk-desktop` is a stub. A mock scene of the UI
 opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
 folder under `/tmp`.
 
@@ -39,9 +39,11 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
 A journey is one user's path through several commands. Each journey file lists its steps, and its
 test runs them against the built binary.
 
-| Journey                                           | Goal                                              | Run it when the change touches            | Test                                               |
-| ------------------------------------------------- | ------------------------------------------------- | ----------------------------------------- | -------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md) | Set up a store and keep a plan's to-dos in order. | `tikk init`, the store layout, CLI output | `crates/tikk-cli/tests/journey_tickets_by_hand.rs` |
+| Journey                                                     | Goal                                                                      | Run it when the change touches                         | Test                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, the store layout, CLI output | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, ticket validation           | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`         | `crates/tikk-cli/tests/journey_trouble.rs`              |
 
 ## Before a launch
 
@@ -97,8 +99,9 @@ Never:
 
 ### External programs
 
-`tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. Both run from
-`PATH` with an argument list.
+`tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
+`--parent` and `--project` starts `git config --get remote.origin.url` in the working directory. All
+run from `PATH` with an argument list.
 
 ### What to check
 
@@ -118,6 +121,31 @@ Never:
 - `target/debug/tikk init --json --no-such-flag` exits with 2 and prints
   `{"error":{"code":"invalidArguments",...}}` on standard error. Without `--json`, it prints
   the error and the usage on standard error.
+- `target/debug/tikk new <kind> <title> [--parent <id>] [--project <p>]` with the kind `plan`,
+  `slice`, `instruction`, or `task` prints the new ID and writes
+  `$TIKK_HOME/tickets/<project>/<id>-<slug>.md`. It makes no commit. With `--json`, it prints
+  `{"id":...,"path":...}`. From the worktree root, a ticket without `--parent` and `--project` is in
+  the project `tikk`, from `origin`. From a folder outside a repository, such as `/tmp`, it is in
+  `personal`.
+- `target/debug/tikk new --file <path> --json` creates a ticket from a document of the ticket file
+  form, such as `---`, `kind: task`, `title: T`, `parent: <slice>`, `---`. A task under a slice
+  exits with 1 and prints `{"error":{"code":"invalidTicket","field":"parent",...}}`, and no file is
+  written. A slice with `--parent <plan>` and a `--project` that differs from the plan's exits with
+  1 and the field `project`.
+- `target/debug/tikk show <id> --json` exits with 0 and prints the front matter fields, `path`,
+  `hash` (the SHA-256 of the file, which `sha256sum <path>` prints), `body`, `children` as rows,
+  and `files` of the folder `tickets/<project>/<id>/`. Without `--json`, it prints the ticket's row,
+  its children's rows indented, and the body. An unknown ID exits with 1 and `notFound`, and a
+  malformed ID exits with 2 and `invalidArguments`.
+- `target/debug/tikk ls [--project <p>] [--kind <k>] [--parent <id>] [--status <s>]
+  [--search <text>] --json` prints `{"errors":[...],"tickets":[...]}`. Each row holds `id`, `title`,
+  `kind`, `status`, and `parent`. `--search` matches the title or body without regard to case.
+  Without `--json`, it prints `<id>  <kind>  <status>  <parent or ->  <title>` per ticket.
+- A ticket file broken by hand, such as one that holds only `kind: [`, appears in
+  `target/debug/tikk ls --json` under `errors` with its `path` and `message`, and the other tickets
+  stay listed. `target/debug/tikk show <its id> --json` exits with 1 and `parseError`.
+- `target/debug/tikk ls --json` with a `TIKK_HOME` that holds no store exits with 1, prints nothing
+  on standard output, and prints `{"error":{"code":"notInitialized",...}}` on standard error.
 
 ## Scene window
 
