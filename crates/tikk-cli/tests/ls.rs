@@ -116,6 +116,32 @@ fn a_hand_broken_ticket_is_listed_under_errors_and_show_is_a_parse_error() {
 }
 
 #[test]
+fn ls_and_show_read_a_hand_edited_task_under_a_slice() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let slice = home.new_ticket(&["slice", "Add ticket files", "--parent", &plan]);
+    let task = home.new_ticket(&["task", "Write a note"]);
+    let path = home
+        .store()
+        .join(format!("tickets/personal/{task}-write-a-note.md"));
+    std::fs::write(
+        &path,
+        format!("---\nkind: task\ntitle: Write a note\nparent: {slice}\n---\n"),
+    )
+    .expect("move the task under the slice by hand");
+
+    let listing = home.tikk(&["ls", "--parent", &slice, "--json"]);
+    let show = home.tikk(&["show", &task, "--json"]);
+
+    assert_eq!(listing.exit_code, 0, "stderr: {}", listing.stderr);
+    let listed = parse_json(&listing.stdout);
+    assert_eq!(listed["errors"], json!([]));
+    assert_eq!(listed["tickets"][0]["id"], json!(task));
+    assert_eq!(show.exit_code, 0, "stderr: {}", show.stderr);
+    assert_eq!(parse_json(&show.stdout)["parent"], json!(slice));
+}
+
+#[test]
 fn ls_json_on_a_missing_store_is_not_initialized() {
     let home = Home::new();
 

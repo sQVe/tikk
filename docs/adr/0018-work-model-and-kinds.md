@@ -28,9 +28,10 @@ parent must be a plan, and an instruction's parent must be a slice. A task sits 
 no parent; no task sits under a slice. A loose task, one with no parent, becomes a slice or plan in
 place with the same ID. A loose task is found by its missing parent, so no flag such as `new: true`
 marks it. The tool rejects other pairs, cycles, and missing targets, and its error names the field.
-Criteria are required on plans and slices only, and no other kind holds them. An instruction covers
-all of its slice's criteria unless it names some. `tikk review add` accepts a slice or an
-instruction only.
+A read checks each file alone, so it still shows a hand-edited file whose parent kind or edge target
+breaks these rules. A command that writes a ticket checks its links to other tickets. Criteria are
+required on plans and slices only, and no other kind holds them. An instruction covers all of its
+slice's criteria unless it names some. `tikk review add` accepts a slice or an instruction only.
 
 ## Consequences
 
