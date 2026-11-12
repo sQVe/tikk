@@ -1,5 +1,7 @@
 use std::fmt;
 
+use serde::{Serialize, Serializer};
+
 use crate::ticket::TicketError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -48,6 +50,12 @@ impl Kind {
     }
 }
 
+impl Serialize for Kind {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 impl fmt::Display for Kind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.as_str())
@@ -83,6 +91,12 @@ impl Status {
             Self::Done => "done",
             Self::Canceled => "canceled",
         }
+    }
+}
+
+impl Serialize for Status {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 

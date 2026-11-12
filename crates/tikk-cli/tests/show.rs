@@ -40,6 +40,70 @@ fn show_json_of_a_slice_lists_its_instruction_with_the_hash_and_body() {
 }
 
 #[test]
+fn show_json_prints_every_field_of_the_ticket() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let blocker = home.new_ticket(&["task", "Decide the lease length", "--parent", &plan]);
+    let document = home.document(
+        "slice.md",
+        &format!(
+            "---\nkind: slice\ntitle: Lock the store\nstatus: canceled\nreason: Out of scope\nparent: {plan}\nrank: 2\nblockedBy: [{blocker}]\ndiscoveredFrom: {blocker}\nrelated: [{plan}]\ncriteria:\n  - id: c1\n    check: cargo nextest run\n    expected: passes\n---\nBody\n"
+        ),
+    );
+    let slice = home.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")]);
+    let bare = home.new_ticket(&["task", "Renew the domain"]);
+
+    let full = home.tikk(&["show", &slice, "--json"]);
+    let empty = home.tikk(&["show", &bare, "--json"]);
+
+    assert_eq!(full.exit_code, 0, "stderr: {}", full.stderr);
+    let shown = parse_json(&full.stdout);
+    let path = shown["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    let hash = shown["hash"]
+        .as_str()
+        .expect("show prints the hash")
+        .to_owned();
+    assert_eq!(
+        shown,
+        json!({
+            "id": slice,
+            "project": "personal",
+            "kind": "slice",
+            "title": "Lock the store",
+            "status": "canceled",
+            "reason": "Out of scope",
+            "parent": plan,
+            "rank": 2,
+            "blockedBy": [blocker],
+            "discoveredFrom": blocker,
+            "related": [plan],
+            "criteria": [{ "id": "c1", "check": "cargo nextest run", "expected": "passes" }],
+            "path": path,
+            "hash": hash,
+            "body": "Body\n",
+            "children": [],
+            "files": [],
+        })
+    );
+    assert_eq!(empty.exit_code, 0, "stderr: {}", empty.stderr);
+    let bare_shown = parse_json(&empty.stdout);
+    for (key, expected) in [
+        ("reason", json!(null)),
+        ("parent", json!(null)),
+        ("rank", json!(null)),
+        ("blockedBy", json!([])),
+        ("discoveredFrom", json!(null)),
+        ("related", json!([])),
+        ("criteria", json!([])),
+    ] {
+        assert_eq!(bare_shown[key], expected, "case {key}");
+    }
+}
+
+#[test]
 fn show_json_returns_the_body_of_a_ticket_document() {
     let home = Home::initialized();
     let document = home.document(

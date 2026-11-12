@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
-use crate::ticket::{TicketError, TicketFields, TicketId};
+use crate::ticket::{TicketError, TicketFields};
 
 const FENCE: &str = "---";
 
@@ -29,8 +29,7 @@ impl TicketDocument {
 }
 
 pub(crate) fn write_document(fields: &TicketFields, body: &str) -> String {
-    let front_matter = FrontMatterOut::from(fields);
-    let yaml = serde_saphyr::to_string(&front_matter)
+    let yaml = serde_saphyr::to_string(fields)
         .expect("front matter of strings, numbers, and lists always serializes");
 
     format!("{FENCE}\n{yaml}{FENCE}\n{body}")
@@ -60,64 +59,6 @@ pub(crate) struct RawCriterion {
     pub(crate) id: Option<String>,
     pub(crate) check: Option<String>,
     pub(crate) expected: Option<String>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct FrontMatterOut<'a> {
-    kind: &'static str,
-    title: &'a str,
-    status: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    reason: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parent: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    rank: Option<i64>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    blocked_by: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    discovered_from: Option<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    related: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    criteria: Vec<CriterionOut<'a>>,
-}
-
-#[derive(Serialize)]
-struct CriterionOut<'a> {
-    id: &'a str,
-    check: &'a str,
-    expected: &'a str,
-}
-
-impl<'a> From<&'a TicketFields> for FrontMatterOut<'a> {
-    fn from(fields: &'a TicketFields) -> Self {
-        Self {
-            kind: fields.kind().as_str(),
-            title: fields.title(),
-            status: fields.status().as_str(),
-            reason: fields.reason(),
-            parent: fields.parent().map(TicketId::to_string),
-            rank: fields.rank(),
-            blocked_by: id_texts(fields.blocked_by()),
-            discovered_from: fields.discovered_from().map(TicketId::to_string),
-            related: id_texts(fields.related()),
-            criteria: fields
-                .criteria()
-                .iter()
-                .map(|criterion| CriterionOut {
-                    id: &criterion.id,
-                    check: &criterion.check,
-                    expected: &criterion.expected,
-                })
-                .collect(),
-        }
-    }
-}
-
-fn id_texts(ids: &[TicketId]) -> Vec<String> {
-    ids.iter().map(TicketId::to_string).collect()
 }
 
 fn split_front_matter(text: &str) -> Result<(&str, &str), TicketError> {
@@ -182,6 +123,19 @@ mod tests {
         let written = write_document(&document.fields, &document.body);
 
         assert_eq!(TicketDocument::parse(&written), Ok(document));
+    }
+
+    #[test]
+    fn write_puts_every_field_in_its_fixed_order() {
+        let text = "---\ncriteria:\n  - expected: passes\n    check: cargo nextest run\n    id: c1\nrelated: [personal-3333]\ndiscoveredFrom: personal-4444\nblockedBy: [personal-6666, personal-7777]\nrank: 2\nparent: personal-abcd\nreason: Out of scope\nstatus: canceled\ntitle: Lock the store\nkind: slice\n---\nBody\n";
+        let document = TicketDocument::parse(text).expect("the document parses");
+
+        let written = write_document(&document.fields, &document.body);
+
+        assert_eq!(
+            written,
+            "---\nkind: slice\ntitle: Lock the store\nstatus: canceled\nreason: Out of scope\nparent: personal-abcd\nrank: 2\nblockedBy:\n- personal-6666\n- personal-7777\ndiscoveredFrom: personal-4444\nrelated:\n- personal-3333\ncriteria:\n- id: c1\n  check: cargo nextest run\n  expected: passes\n---\nBody\n"
+        );
     }
 
     #[test]

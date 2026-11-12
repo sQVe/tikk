@@ -1,5 +1,7 @@
 use std::fmt;
 
+use serde::{Serialize, Serializer};
+
 use crate::ticket::{ProjectName, TicketError};
 
 /// The ID alphabet leaves out the look-alike characters 0, 1, 2, 5, l, o, s, u, and v.
@@ -69,6 +71,12 @@ impl TicketId {
 
     pub fn project(&self) -> &ProjectName {
         &self.project
+    }
+}
+
+impl Serialize for TicketId {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
     }
 }
 

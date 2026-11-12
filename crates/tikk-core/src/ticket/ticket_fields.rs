@@ -1,23 +1,34 @@
 use std::collections::BTreeSet;
 
+use serde::Serialize;
+
 use crate::ticket::ticket_document::{RawCriterion, RawFrontMatter};
 use crate::ticket::{Kind, Status, TicketError, TicketId};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Serializes as front matter: fields in file order, with empty ones left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TicketFields {
     kind: Kind,
     title: String,
     status: Status,
+    #[serde(skip_serializing_if = "Option::is_none")]
     reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<TicketId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     rank: Option<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     blocked_by: Vec<TicketId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     discovered_from: Option<TicketId>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     related: Vec<TicketId>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     criteria: Vec<Criterion>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Criterion {
     pub id: String,
     pub check: String,

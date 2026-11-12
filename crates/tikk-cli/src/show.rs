@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use tikk_core::{ShownTicket, Store, StoreError, TicketFields, TicketId};
+use tikk_core::{ShownTicket, Store, StoreError, TicketId};
 
 use crate::output::Output;
 use crate::ticket_row::{row_json, row_text};
@@ -21,40 +21,22 @@ fn shown_json(shown: &ShownTicket) -> Value {
     json!({
         "id": ticket.id.to_string(),
         "project": ticket.id.project().as_str(),
-        "kind": fields.kind().as_str(),
+        "kind": fields.kind(),
         "title": fields.title(),
-        "status": fields.status().as_str(),
+        "status": fields.status(),
         "reason": fields.reason(),
-        "parent": fields.parent().map(ToString::to_string),
+        "parent": fields.parent(),
         "rank": fields.rank(),
-        "blockedBy": id_texts(fields.blocked_by()),
-        "discoveredFrom": fields.discovered_from().map(ToString::to_string),
-        "related": id_texts(fields.related()),
-        "criteria": criteria_json(fields),
+        "blockedBy": fields.blocked_by(),
+        "discoveredFrom": fields.discovered_from(),
+        "related": fields.related(),
+        "criteria": fields.criteria(),
         "path": ticket.path.to_string_lossy(),
         "hash": ticket.hash,
         "body": ticket.document.body,
         "children": children,
         "files": shown.files,
     })
-}
-
-fn criteria_json(fields: &TicketFields) -> Vec<Value> {
-    fields
-        .criteria()
-        .iter()
-        .map(|criterion| {
-            json!({
-                "id": criterion.id,
-                "check": criterion.check,
-                "expected": criterion.expected,
-            })
-        })
-        .collect()
-}
-
-fn id_texts(ids: &[TicketId]) -> Vec<String> {
-    ids.iter().map(ToString::to_string).collect()
 }
 
 fn shown_text(shown: &ShownTicket) -> String {
