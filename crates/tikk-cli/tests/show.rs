@@ -185,3 +185,35 @@ fn show_without_json_prints_the_ticket_and_its_children() {
         run.stdout
     );
 }
+
+#[test]
+fn show_without_json_prints_the_reason_children_and_body() {
+    let home = Home::initialized();
+    let document = home.document(
+        "plan.md",
+        "---\nkind: plan\ntitle: Move to tikk\nstatus: canceled\nreason: Out of scope\n---\nThe design.\n\nMore text.\n\n",
+    );
+    let plan = home.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")]);
+    let task = home.new_ticket(&["task", "Ask about Windows", "--parent", &plan]);
+
+    let run = home.tikk(&["show", &plan]);
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        format!(
+            "{plan}  plan  canceled  -  Move to tikk\nreason: Out of scope\n  {task}  task  open  {plan}  Ask about Windows\n\nThe design.\n\nMore text.\n"
+        )
+    );
+}
+
+#[test]
+fn show_without_json_leaves_out_an_empty_reason_and_body() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+
+    let run = home.tikk(&["show", &plan]);
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(run.stdout, format!("{plan}  plan  open  -  Move to tikk\n"));
+}

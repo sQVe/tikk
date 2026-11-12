@@ -142,6 +142,35 @@ fn ls_and_show_read_a_hand_edited_task_under_a_slice() {
 }
 
 #[test]
+fn a_ticket_file_with_invalid_utf8_is_listed_under_errors_and_show_refuses_it() {
+    let home = Home::initialized();
+    let good = home.new_ticket(&["task", "Renew the domain"]);
+    let broken = home.new_ticket(&["task", "Lock the store"]);
+    let path = home
+        .store()
+        .join(format!("tickets/personal/{broken}-lock-the-store.md"));
+    std::fs::write(&path, b"---\nkind: task\ntitle: \xff\xfe\n---\n").expect("write bad bytes");
+
+    let listing = home.tikk(&["ls", "--json"]);
+    let show = home.tikk(&["show", &broken, "--json"]);
+
+    assert_eq!(listing.exit_code, 0, "stderr: {}", listing.stderr);
+    assert_eq!(listed_ids(&listing.stdout), vec![good]);
+    let errors = &parse_json(&listing.stdout)["errors"];
+    assert_eq!(errors.as_array().map(Vec::len), Some(1), "{errors}");
+    assert_eq!(
+        errors[0]["path"],
+        json!(path.to_str().expect("a UTF-8 path"))
+    );
+    assert_eq!(show.exit_code, 1);
+    assert_eq!(show.stdout, "");
+    assert_eq!(
+        parse_json(&show.stderr)["error"]["code"],
+        json!("parseError")
+    );
+}
+
+#[test]
 fn ls_json_on_a_missing_store_is_not_initialized() {
     let home = Home::new();
 
