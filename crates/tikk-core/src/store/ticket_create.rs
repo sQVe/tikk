@@ -68,7 +68,7 @@ pub fn create_ticket(
         effects,
     )?;
     let folder = store.root().join(TICKETS_FOLDER).join(project.as_str());
-    let id = draw_free_id(&project, &folder, effects)?;
+    let id = draw_free_id(&project, &folder, effects.fill_random)?;
     let path = folder.join(ticket_file_name(&id, document.fields.title()));
     let text = write_document(&document.fields, &document.body);
 

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::store::StoreError;
-use crate::store::ticket_create::TicketEffects;
 use crate::store::ticket_files::{exists, is_folder, sorted_entries};
 use crate::ticket::{ProjectName, TicketId};
 
@@ -12,14 +11,14 @@ const RANDOM_BYTES: usize = 16;
 pub(crate) fn draw_free_id(
     project: &ProjectName,
     folder: &Path,
-    effects: &TicketEffects,
+    fill_random: fn(&mut [u8]) -> Result<(), StoreError>,
 ) -> Result<TicketId, StoreError> {
     let taken = taken_ids(project, folder)?;
 
     for _ in 0..DRAW_ATTEMPTS {
         let mut bytes = [0u8; RANDOM_BYTES];
 
-        (effects.fill_random)(&mut bytes)?;
+        fill_random(&mut bytes)?;
 
         if let Some(id) = TicketId::draw(project, &bytes)
             && !taken.contains(&id)
@@ -60,19 +59,13 @@ fn taken_ids(project: &ProjectName, folder: &Path) -> Result<HashSet<TicketId>, 
 mod tests {
     use std::cell::Cell;
     use std::fs;
-    use std::path::Path;
 
     use super::draw_free_id;
-    use crate::store::ticket_create::TicketEffects;
     use crate::store::{StoreError, system};
     use crate::ticket::{ID_ALPHABET, ProjectName};
 
     thread_local! {
         static DRAWS: Cell<u8> = const { Cell::new(0) };
-    }
-
-    fn no_origin(_: &Path) -> Result<Option<String>, StoreError> {
-        Ok(None)
     }
 
     fn counting_random(buffer: &mut [u8]) -> Result<(), StoreError> {
@@ -93,13 +86,6 @@ mod tests {
         Ok(())
     }
 
-    fn effects(fill_random: fn(&mut [u8]) -> Result<(), StoreError>) -> TicketEffects {
-        TicketEffects {
-            read_origin_url: no_origin,
-            fill_random,
-        }
-    }
-
     fn project(name: &str) -> ProjectName {
         ProjectName::parse(name).expect("a valid project name")
     }
@@ -111,12 +97,8 @@ mod tests {
         fs::write(directory.path().join("personal-3333-taken.md"), "").expect("write a file");
         fs::create_dir(directory.path().join("personal-4444")).expect("create a folder");
 
-        let id = draw_free_id(
-            &project("personal"),
-            directory.path(),
-            &effects(counting_random),
-        )
-        .expect("a free ID exists");
+        let id = draw_free_id(&project("personal"), directory.path(), counting_random)
+            .expect("a free ID exists");
 
         assert_eq!(id.to_string(), "personal-6666");
     }
@@ -125,9 +107,7 @@ mod tests {
     fn draw_free_id_gives_up_when_every_draw_is_taken() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         fs::write(directory.path().join("personal-3333.md"), "").expect("write a file");
-        let always_taken = effects(zero_random);
-
-        let error = draw_free_id(&project("personal"), directory.path(), &always_taken)
+        let error = draw_free_id(&project("personal"), directory.path(), zero_random)
             .expect_err("every draw is taken");
 
         assert!(
@@ -139,10 +119,8 @@ mod tests {
     #[test]
     fn ten_thousand_ids_from_the_system_source_use_only_the_alphabet() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
-        let system_effects = effects(system::fill_random);
-
         for _ in 0..10_000 {
-            let id = draw_free_id(&project("personal"), directory.path(), &system_effects)
+            let id = draw_free_id(&project("personal"), directory.path(), system::fill_random)
                 .expect("an ID is drawn");
             let text = id.to_string();
             let code = text
