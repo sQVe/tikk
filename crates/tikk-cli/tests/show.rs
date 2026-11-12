@@ -140,6 +140,28 @@ fn show_json_lists_the_files_of_the_ticket_folder() {
 }
 
 #[test]
+fn show_json_lists_a_symlink_in_the_ticket_folder_as_one_file() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let folder = home.store().join("tickets/personal").join(&plan);
+    let outside = home.work().join("outside");
+    std::fs::create_dir_all(outside.join("deep")).expect("create an outside folder");
+    std::fs::write(outside.join("deep/secret.md"), "secret").expect("write an outside file");
+    std::fs::create_dir_all(&folder).expect("create the ticket folder");
+    std::os::unix::fs::symlink(&folder, folder.join("loop")).expect("link the folder to itself");
+    std::os::unix::fs::symlink(&outside, folder.join("elsewhere"))
+        .expect("link to an outside folder");
+
+    let run = home.tikk(&["show", &plan, "--json"]);
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(
+        parse_json(&run.stdout)["files"],
+        json!(["elsewhere", "loop"])
+    );
+}
+
+#[test]
 fn show_of_an_unknown_id_is_not_found() {
     let home = Home::initialized();
 

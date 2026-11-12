@@ -1,7 +1,8 @@
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::store::ticket_files::{
-    StoredTicket, TICKETS_FOLDER, UnreadableTicket, exists, is_folder, read_tickets, sorted_entries,
+    StoredTicket, TICKETS_FOLDER, UnreadableTicket, exists, io_error, read_tickets, sorted_entries,
 };
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, ProjectName, Status, TicketId};
@@ -160,7 +161,7 @@ fn collect_files(folder: &Path, prefix: &str, files: &mut Vec<String>) -> Result
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let relative = format!("{prefix}{name}");
 
-        if is_folder(&path)? {
+        if is_real_folder(&path)? {
             collect_files(&path, &format!("{relative}/"), files)?;
         } else {
             files.push(relative);
@@ -168,6 +169,13 @@ fn collect_files(folder: &Path, prefix: &str, files: &mut Vec<String>) -> Result
     }
 
     Ok(())
+}
+
+/// A symlink counts as a file, so a link to an ancestor or an outside folder is never walked.
+fn is_real_folder(path: &Path) -> Result<bool, StoreError> {
+    fs::symlink_metadata(path)
+        .map(|metadata| metadata.is_dir())
+        .map_err(|source| io_error("check", path, source))
 }
 
 #[cfg(test)]
