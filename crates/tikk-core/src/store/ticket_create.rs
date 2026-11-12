@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::store::system;
 use crate::store::ticket_files::{
-    StoredTicket, TICKETS_FOLDER, io_error, read_tickets, sha256_hex,
+    StoredTicket, TICKETS_FOLDER, TicketScan, io_error, read_tickets, sha256_hex,
 };
 use crate::store::ticket_id_draw::draw_free_id;
 use crate::store::{Store, StoreError};
@@ -53,6 +53,9 @@ pub fn create_ticket(
 ) -> Result<StoredTicket, StoreError> {
     let document = read_source(request.source)?;
     let scan = read_tickets(store.root())?;
+
+    refuse_shared_links(&document.fields, &scan)?;
+
     let kinds: HashMap<&TicketId, Kind> = scan
         .tickets
         .iter()
@@ -80,6 +83,31 @@ pub fn create_ticket(
         hash: sha256_hex(text.as_bytes()),
         document,
     })
+}
+
+/// A linked ID that two files hold names no single ticket, so its kind and project are unknown.
+fn refuse_shared_links(fields: &TicketFields, scan: &TicketScan) -> Result<(), StoreError> {
+    let mut paths: HashMap<&TicketId, Vec<PathBuf>> = HashMap::new();
+    let parsed = scan.tickets.iter().map(|ticket| (&ticket.id, &ticket.path));
+    let broken = scan
+        .errors
+        .iter()
+        .filter_map(|error| error.id.as_ref().map(|id| (id, &error.path)));
+
+    for (id, path) in parsed.chain(broken) {
+        paths.entry(id).or_default().push(path.clone());
+    }
+
+    for id in fields.linked_ids() {
+        if let Some(shared) = paths.get(id).filter(|shared| shared.len() > 1) {
+            return Err(StoreError::IdShared {
+                id: id.to_string(),
+                paths: shared.clone(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 fn read_source(source: NewTicketSource) -> Result<TicketDocument, StoreError> {

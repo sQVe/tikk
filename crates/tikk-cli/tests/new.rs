@@ -173,3 +173,39 @@ fn new_on_a_missing_store_is_not_initialized() {
         json!("notInitialized")
     );
 }
+
+#[test]
+fn new_with_a_parent_or_edge_that_two_files_hold_is_id_shared_and_writes_nothing() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let folder = home.store().join("tickets/personal");
+    std::fs::write(
+        folder.join(format!("{plan}-copy.md")),
+        "---\nkind: task\ntitle: A copy\n---\n",
+    )
+    .expect("write a second file with the plan's ID");
+    let blocked = home.document(
+        "blocked.md",
+        &format!("---\nkind: task\ntitle: Wait\nblockedBy: [{plan}]\n---\n"),
+    );
+    let blocked_path = blocked.to_str().expect("a UTF-8 path").to_owned();
+    let before = home.ticket_files();
+    let cases: [&[&str]; 2] = [
+        &["new", "slice", "Add files", "--parent", &plan, "--json"],
+        &["new", "--file", &blocked_path, "--json"],
+    ];
+
+    for arguments in cases {
+        let run = home.tikk(arguments);
+
+        assert_eq!(run.exit_code, 1, "case {arguments:?}");
+        assert_eq!(run.stdout, "", "case {arguments:?}");
+        assert_eq!(
+            parse_json(&run.stderr)["error"]["code"],
+            json!("idShared"),
+            "case {arguments:?}"
+        );
+    }
+
+    assert_eq!(home.ticket_files(), before);
+}

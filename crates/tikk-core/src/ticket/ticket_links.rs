@@ -38,6 +38,17 @@ impl TicketFields {
     }
 }
 
+impl TicketFields {
+    /// Every ticket this one names: its parent and the targets of its edges.
+    pub(crate) fn linked_ids(&self) -> impl Iterator<Item = &TicketId> {
+        self.parent()
+            .into_iter()
+            .chain(self.blocked_by())
+            .chain(self.discovered_from())
+            .chain(self.related())
+    }
+}
+
 fn allows_parent(kind: Kind, parent: Kind) -> bool {
     matches!(
         (kind, parent),
