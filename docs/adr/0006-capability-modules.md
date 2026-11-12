@@ -56,8 +56,9 @@ new ADR.
 ### Negative
 
 - Every new module or edge needs a table change, which adds friction to small additions.
-- The check reads `use` paths and crate dependencies only. It does not detect I/O reached through
-  `std` calls such as `std::time::SystemTime::now`.
+- The module check reads paths that start with `crate::`, in `use` items and inline, and the crate
+  check reads crate dependencies. Neither detects a `super::` path that leaves a module, or I/O
+  reached through `std` calls such as `std::time::SystemTime::now`.
 
 ## Alternatives considered
 
