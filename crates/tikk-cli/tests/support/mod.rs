@@ -41,7 +41,6 @@ impl Home {
         Self { directory }
     }
 
-    /// A home with an initialized store.
     pub(crate) fn initialized() -> Self {
         let home = Self::new();
         let run = home.tikk(&["init", "--machine", "test"]);
@@ -55,7 +54,6 @@ impl Home {
         self.directory.path().join("store")
     }
 
-    /// The working directory of `tikk`, a folder outside any Git repository.
     pub(crate) fn work(&self) -> PathBuf {
         self.directory.path().join("work")
     }
@@ -86,7 +84,6 @@ impl Home {
         }
     }
 
-    /// Runs `tikk new ... --json` and returns the new ID.
     pub(crate) fn new_ticket(&self, arguments: &[&str]) -> String {
         let mut all = vec!["new", "--json"];
 
@@ -102,7 +99,6 @@ impl Home {
             .to_owned()
     }
 
-    /// Writes a ticket document into the working directory and returns its path.
     pub(crate) fn document(&self, name: &str, text: &str) -> PathBuf {
         let path = self.work().join(name);
 
@@ -111,7 +107,6 @@ impl Home {
         path
     }
 
-    /// Returns every ticket file in the store, sorted.
     pub(crate) fn ticket_files(&self) -> Vec<PathBuf> {
         let mut files = Vec::new();
         let Ok(projects) = std::fs::read_dir(self.store().join("tickets")) else {

@@ -57,7 +57,6 @@ fn id_texts(ids: &[TicketId]) -> Vec<String> {
     ids.iter().map(ToString::to_string).collect()
 }
 
-/// The ticket's row, its reason, its children's rows, and its body.
 fn shown_text(shown: &ShownTicket) -> String {
     let mut lines = vec![row_text(&shown.ticket)];
 

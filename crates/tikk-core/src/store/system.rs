@@ -43,9 +43,6 @@ fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<S
         .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned()))
 }
 
-/// Returns the `origin` URL of the repository that holds `directory`, or `None` outside a
-/// repository or without an `origin`. Unlike the store's Git calls, Git searches the parent
-/// folders here, because the working directory may be deep inside its repository.
 pub(crate) fn read_origin_url(directory: &Path) -> Result<Option<String>, StoreError> {
     read_origin_url_with("git", directory)
 }
@@ -62,7 +59,6 @@ fn read_origin_url_with(program: &str, directory: &Path) -> Result<Option<String
     let url = String::from_utf8(output.stdout)
         .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned()))?;
 
-    // `git config --get` exits with 1 when the key is not set.
     match output.status.code() {
         Some(0) => Ok(Some(url.trim().to_owned())),
         Some(1) => Ok(None),

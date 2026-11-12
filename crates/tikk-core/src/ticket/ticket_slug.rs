@@ -2,7 +2,6 @@ use crate::ticket::TicketId;
 
 const SLUG_LIMIT: usize = 50;
 
-/// The file name of a new ticket, `<id>-<slug>.md`, or `<id>.md` when the title gives no slug.
 pub(crate) fn ticket_file_name(id: &TicketId, title: &str) -> String {
     let slug = slug(title);
 
@@ -13,7 +12,6 @@ pub(crate) fn ticket_file_name(id: &TicketId, title: &str) -> String {
     format!("{id}-{slug}.md")
 }
 
-/// Lowercase ASCII words of the title joined by hyphens, cut at a word end within the limit.
 fn slug(title: &str) -> String {
     let mut slug = String::new();
     let words = title

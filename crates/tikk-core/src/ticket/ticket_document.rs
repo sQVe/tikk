@@ -4,7 +4,6 @@ use crate::ticket::{TicketError, TicketFields, TicketId};
 
 const FENCE: &str = "---";
 
-/// A ticket file or a ticket document: YAML front matter between two `---` lines, then the body.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketDocument {
     pub fields: TicketFields,
@@ -29,7 +28,6 @@ impl TicketDocument {
     }
 }
 
-/// Writes the front matter in a fixed field order and leaves out empty fields.
 pub(crate) fn write_document(fields: &TicketFields, body: &str) -> String {
     let front_matter = FrontMatterOut::from(fields);
     let yaml = serde_saphyr::to_string(&front_matter)

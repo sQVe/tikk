@@ -18,7 +18,6 @@ pub struct StoredTicket {
     pub document: TicketDocument,
 }
 
-/// A file in the tickets folder that is not a valid ticket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnreadableTicket {
     pub path: PathBuf,
@@ -32,8 +31,6 @@ pub(crate) struct TicketScan {
     pub(crate) errors: Vec<UnreadableTicket>,
 }
 
-/// Reads every ticket file under `tickets/<project>/`. A file that fails to parse goes to
-/// `errors` and never stops the scan.
 pub(crate) fn read_tickets(root: &Path) -> Result<TicketScan, StoreError> {
     let mut scan = TicketScan::default();
     let folder = root.join(TICKETS_FOLDER);

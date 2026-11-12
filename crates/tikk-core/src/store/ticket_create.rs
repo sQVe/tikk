@@ -36,7 +36,6 @@ pub enum NewTicketSource {
         title: String,
         parent: Option<TicketId>,
     },
-    /// A ticket document at this path, in the form of a ticket file.
     File(PathBuf),
 }
 
@@ -44,11 +43,9 @@ pub enum NewTicketSource {
 pub struct NewTicket {
     pub source: NewTicketSource,
     pub project: Option<ProjectName>,
-    /// The project comes from this folder's `origin` when neither a parent nor `project` sets it.
     pub working_directory: PathBuf,
 }
 
-/// Writes a new ticket file. It makes no commit.
 pub fn create_ticket(
     store: &Store,
     request: NewTicket,
@@ -104,8 +101,6 @@ fn read_source(source: NewTicketSource) -> Result<TicketDocument, StoreError> {
     }
 }
 
-/// A ticket with a parent is in the parent's project. Without one, `requested` wins over the
-/// working directory's `origin`.
 fn choose_project(
     fields: &TicketFields,
     requested: Option<ProjectName>,
@@ -179,7 +174,6 @@ mod tests {
         Ok(Some("git@github.com:owner/my_app.git".to_owned()))
     }
 
-    /// Each call fills the buffer with the next byte value: 0 gives `3333`, 1 gives `4444`.
     fn counting_random(buffer: &mut [u8]) -> Result<(), StoreError> {
         let value = DRAWS.with(|draws| {
             let value = draws.get();

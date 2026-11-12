@@ -33,7 +33,6 @@ pub(crate) fn draw_free_id(
     })
 }
 
-/// The IDs of the ticket files and ticket folders in a project folder.
 fn taken_ids(project: &ProjectName, folder: &Path) -> Result<HashSet<TicketId>, StoreError> {
     let mut taken = HashSet::new();
 
@@ -76,7 +75,6 @@ mod tests {
         Ok(None)
     }
 
-    /// Each call fills the buffer with the next byte value: 0 gives `3333`, 1 gives `4444`.
     fn counting_random(buffer: &mut [u8]) -> Result<(), StoreError> {
         let value = DRAWS.with(|draws| {
             let value = draws.get();

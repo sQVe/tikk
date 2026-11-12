@@ -6,8 +6,6 @@ use crate::store::ticket_files::{
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, ProjectName, Status, TicketId};
 
-/// Every set filter must match. `search` matches the title or body as a substring, without
-/// regard to case.
 #[derive(Debug, Clone, Default)]
 pub struct TicketFilter {
     pub project: Option<ProjectName>,
@@ -27,7 +25,6 @@ pub struct TicketListing {
 pub struct ShownTicket {
     pub ticket: StoredTicket,
     pub children: Vec<StoredTicket>,
-    /// The files of the ticket's folder, `tickets/<project>/<id>/`, as relative paths.
     pub files: Vec<String>,
 }
 

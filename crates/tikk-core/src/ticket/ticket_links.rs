@@ -1,8 +1,6 @@
 use crate::ticket::{Kind, TicketError, TicketFields, TicketId};
 
 impl TicketFields {
-    /// Checks the parent kind and that every edge names a ticket. `kind_of` returns the kind of
-    /// an existing ticket, or `None` when no ticket has the ID.
     pub fn check_links(
         &self,
         kind_of: impl Fn(&TicketId) -> Option<Kind>,

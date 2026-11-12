@@ -7,8 +7,6 @@ pub const ID_ALPHABET: &str = "346789abcdefghijkmnpqrtwxyz";
 
 const CODE_LENGTH: usize = 4;
 
-/// A byte at or above this value would favor the first characters of the alphabet, so a draw
-/// skips it.
 const UNBIASED_LIMIT: u8 = (256 / ID_ALPHABET.len() * ID_ALPHABET.len()) as u8;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -41,8 +39,6 @@ impl TicketId {
         })
     }
 
-    /// Draws an ID from random bytes. Returns `None` when the bytes hold fewer than four that
-    /// map to the alphabet without bias.
     pub fn draw(project: &ProjectName, random: &[u8]) -> Option<Self> {
         let alphabet = ID_ALPHABET.as_bytes();
         let code: String = random
@@ -58,7 +54,6 @@ impl TicketId {
         })
     }
 
-    /// Reads the ID from a ticket file name, `<id>-<slug>.md` or `<id>.md`, in a project folder.
     pub fn from_file_name(project: &ProjectName, file_name: &str) -> Option<Self> {
         let stem = file_name.strip_suffix(".md")?;
         let rest = stem.strip_prefix(project.as_str())?.strip_prefix('-')?;

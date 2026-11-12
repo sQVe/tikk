@@ -32,7 +32,6 @@ fn listing_json(listing: &TicketListing) -> Value {
     json!({ "tickets": tickets, "errors": errors })
 }
 
-/// A row per ticket, then a line per file that fails to parse.
 fn listing_text(listing: &TicketListing) -> String {
     let rows = listing.tickets.iter().map(row_text);
     let errors = listing

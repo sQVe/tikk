@@ -28,7 +28,6 @@ pub enum TicketError {
     InvalidStatus { value: String },
     #[error("The ticket document does not parse: {message}")]
     Parse { message: String },
-    /// A ticket breaks a rule. `field` names the front matter field to fix.
     #[error("`{field}` {problem}.")]
     Invalid { field: String, problem: String },
 }

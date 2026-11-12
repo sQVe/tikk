@@ -29,13 +29,10 @@ impl ProjectName {
         Ok(Self(name.to_owned()))
     }
 
-    /// The project of a ticket made outside a Git repository with an `origin`.
     pub fn personal() -> Self {
         Self(PERSONAL.to_owned())
     }
 
-    /// The lowercase repository name at the end of an `origin` URL, such as `tikk` for
-    /// `git@github.com:owner/Tikk.git`.
     pub fn from_origin_url(url: &str) -> Result<Self, TicketError> {
         let trimmed = url.trim().trim_end_matches('/');
         let last = trimmed.rsplit(['/', ':']).next().unwrap_or_default();

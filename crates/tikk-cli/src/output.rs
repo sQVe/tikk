@@ -27,7 +27,6 @@ impl Exit {
 pub(crate) struct Failure {
     pub(crate) code: &'static str,
     pub(crate) message: String,
-    /// The ticket field a validation error names.
     pub(crate) field: Option<String>,
     pub(crate) exit: Exit,
 }

@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use crate::ticket::ticket_document::{RawCriterion, RawFrontMatter};
 use crate::ticket::{Kind, Status, TicketError, TicketId};
 
-/// The front matter of a ticket that passed the rules one file can show.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TicketFields {
     kind: Kind,
@@ -26,7 +25,6 @@ pub struct Criterion {
 }
 
 impl TicketFields {
-    /// An open ticket with no criteria and no edges.
     pub fn new(kind: Kind, title: &str, parent: Option<TicketId>) -> Result<Self, TicketError> {
         let fields = Self {
             kind,

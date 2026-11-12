@@ -13,7 +13,6 @@ pub(crate) fn row_json(ticket: &StoredTicket) -> Value {
     })
 }
 
-/// `<id>  <kind>  <status>  <parent or ->  <title>`
 pub(crate) fn row_text(ticket: &StoredTicket) -> String {
     let fields = &ticket.document.fields;
     let parent = fields
