@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::store::system;
@@ -8,6 +7,7 @@ use crate::store::ticket_files::{
     StoredTicket, TICKETS_FOLDER, TicketScan, io_error, read_tickets, sha256_hex,
 };
 use crate::store::ticket_id_draw::draw_free_id;
+use crate::store::ticket_new_file::{write_bytes, write_new_file};
 use crate::store::{Store, StoreError};
 use crate::ticket::{
     Kind, ProjectName, TicketDocument, TicketError, TicketFields, TicketId, ticket_file_name,
@@ -75,7 +75,7 @@ pub fn create_ticket(
     let path = folder.join(ticket_file_name(&id, document.fields.title()));
     let text = write_document(&document.fields, &document.body);
 
-    write_new_file(&folder, &path, &text)?;
+    write_new_file(&folder, &path, &text, write_bytes)?;
 
     Ok(StoredTicket {
         id,
@@ -160,19 +160,6 @@ fn choose_project(
             ProjectName::from_origin_url(&url).map_err(|_| StoreError::InvalidOrigin { url })
         }
     }
-}
-
-fn write_new_file(folder: &Path, path: &Path, text: &str) -> Result<(), StoreError> {
-    fs::create_dir_all(folder).map_err(|source| io_error("create", folder, source))?;
-
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|source| io_error("create", path, source))?;
-
-    file.write_all(text.as_bytes())
-        .map_err(|source| io_error("write", path, source))
 }
 
 #[cfg(test)]
