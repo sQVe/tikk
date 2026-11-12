@@ -6,6 +6,7 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
     let (code, exit) = match error {
         StoreError::NotInitialized { .. } => ("notInitialized", Exit::Refused),
         StoreError::FolderNotEmpty { .. } => ("folderNotEmpty", Exit::Refused),
+        StoreError::InvalidConfig { .. } => ("invalidConfig", Exit::Refused),
         StoreError::NoStorePath => ("noStorePath", Exit::Refused),
         StoreError::InvalidMachineName { .. } => ("invalidArguments", Exit::WrongUsage),
         StoreError::InvalidHostName { .. } => ("invalidHostName", Exit::Refused),
@@ -55,6 +56,13 @@ mod tests {
                     store: PathBuf::from("/tmp/store"),
                 },
                 "folderNotEmpty",
+                Exit::Refused,
+            ),
+            (
+                StoreError::InvalidConfig {
+                    path: PathBuf::from("/tmp/store/tikk.json"),
+                },
+                "invalidConfig",
                 Exit::Refused,
             ),
             (StoreError::NoStorePath, "noStorePath", Exit::Refused),

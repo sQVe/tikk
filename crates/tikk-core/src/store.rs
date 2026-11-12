@@ -3,6 +3,7 @@ mod store_init;
 mod system;
 
 use std::ffi::OsString;
+use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -20,6 +21,8 @@ pub enum StoreError {
     NotInitialized { store: PathBuf },
     #[error("{} holds files but no tikk store.", store.display())]
     FolderNotEmpty { store: PathBuf },
+    #[error("{} is not a tikk config with version 1.", path.display())]
+    InvalidConfig { path: PathBuf },
     #[error("Neither TIKK_HOME nor HOME is set, so the store has no path.")]
     NoStorePath,
     #[error("`{name}` is not a machine name: {reason}.")]
@@ -91,14 +94,27 @@ pub fn open(root: &Path) -> Result<Store, StoreError> {
     })
 }
 
+/// Returns whether the folder holds `tikk.json`, and refuses one that is not version 1.
 fn has_config(root: &Path) -> Result<bool, StoreError> {
     let path = root.join(CONFIG_FILE);
+    let text = match fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(source) => {
+            return Err(StoreError::Io {
+                action: "read",
+                path,
+                source,
+            });
+        }
+    };
+    let config: Option<serde_json::Value> = serde_json::from_str(&text).ok();
 
-    path.try_exists().map_err(|source| StoreError::Io {
-        action: "check",
-        path,
-        source,
-    })
+    if config != Some(serde_json::json!({ "version": 1 })) {
+        return Err(StoreError::InvalidConfig { path });
+    }
+
+    Ok(true)
 }
 
 #[cfg(test)]

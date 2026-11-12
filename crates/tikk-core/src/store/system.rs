@@ -14,9 +14,18 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
 ];
 
 pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<(), StoreError> {
-    let mut command = Command::new("git");
+    run_git_with("git", directory, arguments)
+}
+
+fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<(), StoreError> {
+    let mut command = Command::new(program);
 
     command.arg("-C").arg(directory).args(arguments);
+
+    // Git stops looking for a repository at the store's parent, so it never finds another one.
+    if let Some(parent) = directory.parent() {
+        command.env("GIT_CEILING_DIRECTORIES", parent);
+    }
 
     for name in REPOSITORY_ENVIRONMENT {
         command.env_remove(name);
@@ -41,7 +50,11 @@ pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<(), StoreE
 
 /// `uname -n` prints the host name on Linux and macOS, where a `hostname` program may be missing.
 pub(crate) fn read_host_name() -> Result<String, StoreError> {
-    let output = Command::new("uname").arg("-n").output().map_err(|error| {
+    read_host_name_with("uname")
+}
+
+fn read_host_name_with(program: &str) -> Result<String, StoreError> {
+    let output = Command::new(program).arg("-n").output().map_err(|error| {
         StoreError::HostNameUnavailable {
             message: format!("could not start uname: {error}"),
         }
@@ -62,7 +75,10 @@ pub(crate) fn read_host_name() -> Result<String, StoreError> {
 mod tests {
     use std::process::Command;
 
-    use super::read_host_name;
+    use std::path::Path;
+
+    use super::{read_host_name, read_host_name_with, run_git, run_git_with};
+    use crate::store::StoreError;
 
     #[test]
     fn read_host_name_returns_what_uname_prints() {
@@ -76,5 +92,41 @@ mod tests {
 
         assert!(!expected.trim().is_empty(), "uname printed no host name");
         assert_eq!(host_name, expected);
+    }
+
+    #[test]
+    fn a_git_that_exits_nonzero_gives_a_git_error() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+
+        let error =
+            run_git_with("false", directory.path(), &["status"]).expect_err("the program fails");
+
+        assert!(
+            matches!(&error, StoreError::Git { arguments, .. } if arguments == "status"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_uname_that_exits_nonzero_gives_host_name_unavailable() {
+        let error = read_host_name_with("false").expect_err("the program fails");
+
+        assert!(
+            matches!(error, StoreError::HostNameUnavailable { .. }),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn run_git_never_reaches_a_parent_repository() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let parent = directory.path();
+        run_git(parent, &["init", "--quiet"]).expect("init the parent repository");
+        let child = parent.join("child");
+        std::fs::create_dir(&child).expect("create the child folder");
+
+        let result = run_git(Path::new(&child), &["rev-parse", "--git-dir"]);
+
+        assert!(matches!(result, Err(StoreError::Git { .. })), "{result:?}");
     }
 }

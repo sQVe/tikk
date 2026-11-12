@@ -6371,6 +6371,7 @@ dependencies = [
 name = "tikk-core"
 version = "0.0.0"
 dependencies = [
+ "serde_json",
  "tempfile",
  "thiserror 2.0.21",
 ]

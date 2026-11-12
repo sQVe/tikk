@@ -33,7 +33,8 @@ pub fn init(
     machine: Option<MachineName>,
     effects: &StoreEffects,
 ) -> Result<InitOutcome, StoreError> {
-    let has_config = has_config(root)?;
+    // A tikk.json without the store's own repository is not a store, so Git never runs there.
+    let has_config = has_config(root)? && has_repository(root)?;
 
     if !has_config {
         ensure_no_files(root)?;
@@ -58,6 +59,16 @@ pub fn init(
     Ok(InitOutcome {
         store: root.to_path_buf(),
         created,
+    })
+}
+
+fn has_repository(root: &Path) -> Result<bool, StoreError> {
+    let path = root.join(".git");
+
+    path.try_exists().map_err(|source| StoreError::Io {
+        action: "check",
+        path,
+        source,
     })
 }
 
@@ -348,6 +359,67 @@ mod tests {
             "{error:?}"
         );
         assert!(!root.join(".git").exists());
+    }
+
+    fn git_in(directory: &Path, arguments: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(directory)
+            .args(arguments)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_INDEX_FILE")
+            .status()
+            .expect("start git");
+
+        assert!(status.success(), "git {arguments:?} failed");
+    }
+
+    #[test]
+    fn init_inside_another_repository_leaves_that_repository_alone() {
+        let directory = temporary_directory();
+        let parent = directory.path();
+        git_in(parent, &["init", "--quiet"]);
+        fs::write(parent.join("unrelated.txt"), "parent work").expect("write a parent file");
+        git_in(parent, &["add", "unrelated.txt"]);
+        let root = parent.join("candidate");
+        fs::create_dir(&root).expect("create the store folder");
+        fs::write(root.join("tikk.json"), "{\"version\":1}\n").expect("write tikk.json");
+
+        let error = init(&root, None, &effects_with_host(laptop_host))
+            .expect_err("a folder without its own repository is not a store");
+
+        assert!(
+            matches!(&error, StoreError::FolderNotEmpty { store } if *store == root),
+            "{error:?}"
+        );
+        assert_eq!(git_output(parent, &["rev-list", "--all", "--count"]), "0");
+        assert_eq!(
+            git_output(parent, &["diff", "--cached", "--name-only"]),
+            "unrelated.txt"
+        );
+        assert!(!root.join(".git").exists());
+    }
+
+    #[test]
+    fn init_refuses_a_tikk_json_that_is_not_version_1_and_writes_nothing() {
+        for config in ["{\"version\":2}", "not json", "{}"] {
+            let directory = temporary_directory();
+            let root = directory.path().to_path_buf();
+            fs::write(root.join("tikk.json"), config).expect("write tikk.json");
+
+            let error = init(&root, None, &effects_with_host(laptop_host))
+                .expect_err("a foreign tikk.json is refused");
+
+            assert!(
+                matches!(&error, StoreError::InvalidConfig { path } if *path == root.join("tikk.json")),
+                "case {config}: {error:?}"
+            );
+            let names: Vec<_> = fs::read_dir(&root)
+                .expect("read the folder")
+                .map(|entry| entry.expect("read an entry").file_name())
+                .collect();
+            assert_eq!(names, vec![OsString::from("tikk.json")], "case {config}");
+        }
     }
 
     #[test]
