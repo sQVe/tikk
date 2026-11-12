@@ -34,7 +34,7 @@ pub fn init(
     effects: &StoreEffects,
 ) -> Result<InitOutcome, StoreError> {
     // A tikk.json without the store's own repository is not a store, so Git never runs there.
-    let has_config = has_config(root)? && has_repository(root)?;
+    let has_config = has_config(root)? && has_repository(root, effects)?;
 
     if !has_config {
         ensure_no_files(root)?;
@@ -62,14 +62,32 @@ pub fn init(
     })
 }
 
-fn has_repository(root: &Path) -> Result<bool, StoreError> {
+/// A `.git` folder counts only when Git resolves the store's repository to it.
+fn has_repository(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError> {
     let path = root.join(".git");
-
-    path.try_exists().map_err(|source| StoreError::Io {
+    let exists = path.try_exists().map_err(|source| StoreError::Io {
         action: "check",
-        path,
+        path: path.clone(),
         source,
-    })
+    })?;
+
+    if !exists {
+        return Ok(false);
+    }
+
+    let foreign = || StoreError::ForeignRepository {
+        store: root.to_path_buf(),
+    };
+    let git_directory =
+        (effects.run_git)(root, &["rev-parse", "--absolute-git-dir"]).map_err(|_| foreign())?;
+    let resolved = fs::canonicalize(git_directory.trim()).map_err(|_| foreign())?;
+    let expected = fs::canonicalize(&path).map_err(|_| foreign())?;
+
+    if resolved != expected {
+        return Err(foreign());
+    }
+
+    Ok(true)
 }
 
 fn ensure_no_files(root: &Path) -> Result<(), StoreError> {
@@ -143,7 +161,9 @@ fn create_store_files(root: &Path, effects: &StoreEffects) -> Result<(), StoreEr
 
 fn commit_store_files(root: &Path, effects: &StoreEffects) -> Result<(), StoreError> {
     (effects.run_git)(root, &["add", "--", CONFIG_FILE, ATTRIBUTES_FILE])?;
-    (effects.run_git)(root, FIRST_COMMIT)
+    (effects.run_git)(root, FIRST_COMMIT)?;
+
+    Ok(())
 }
 
 fn write_file(path: &Path, contents: &str) -> Result<(), StoreError> {
@@ -218,7 +238,7 @@ mod tests {
         git_output(root, &["rev-list", "--count", "main"])
     }
 
-    fn git_without_commit(directory: &Path, arguments: &[&str]) -> Result<(), StoreError> {
+    fn git_without_commit(directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
         if arguments.contains(&"commit") {
             return Err(StoreError::Git {
                 arguments: arguments.join(" "),
@@ -398,6 +418,37 @@ mod tests {
             "unrelated.txt"
         );
         assert!(!root.join(".git").exists());
+    }
+
+    #[test]
+    fn init_refuses_an_empty_git_folder_inside_another_repository() {
+        let directory = temporary_directory();
+        let parent = directory.path();
+        git_in(parent, &["init", "--quiet"]);
+        fs::write(parent.join("unrelated.txt"), "parent work").expect("write a parent file");
+        git_in(parent, &["add", "unrelated.txt"]);
+        let root = parent.join("candidate");
+        fs::create_dir_all(root.join(".git")).expect("create an empty .git folder");
+        fs::write(root.join("tikk.json"), "{\"version\":1}\n").expect("write tikk.json");
+
+        let error = init(
+            &root,
+            Some(MachineName::parse("laptop").expect("a valid name")),
+            &effects_with_host(laptop_host),
+        )
+        .expect_err("an empty .git folder is not the store's repository");
+
+        assert!(
+            matches!(&error, StoreError::ForeignRepository { store } if *store == root),
+            "{error:?}"
+        );
+        assert_eq!(git_output(parent, &["rev-list", "--all", "--count"]), "0");
+        assert_eq!(
+            git_output(parent, &["diff", "--cached", "--name-only"]),
+            "unrelated.txt"
+        );
+        let git_entries = fs::read_dir(root.join(".git")).expect("read .git").count();
+        assert_eq!(git_entries, 0);
     }
 
     #[test]

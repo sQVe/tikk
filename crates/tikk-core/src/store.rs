@@ -23,6 +23,8 @@ pub enum StoreError {
     FolderNotEmpty { store: PathBuf },
     #[error("{} is not a tikk config with version 1.", path.display())]
     InvalidConfig { path: PathBuf },
+    #[error("{}/.git is not the store's own Git repository.", store.display())]
+    ForeignRepository { store: PathBuf },
     #[error("Neither TIKK_HOME nor HOME is set, so the store has no path.")]
     NoStorePath,
     #[error("`{name}` is not a machine name: {reason}.")]
@@ -43,7 +45,7 @@ pub enum StoreError {
 
 #[derive(Clone, Copy)]
 pub struct StoreEffects {
-    pub run_git: fn(&Path, &[&str]) -> Result<(), StoreError>,
+    pub run_git: fn(&Path, &[&str]) -> Result<String, StoreError>,
     pub read_host_name: fn() -> Result<String, StoreError>,
 }
 
@@ -72,14 +74,23 @@ pub fn store_path(
     home: Option<OsString>,
 ) -> Result<PathBuf, StoreError> {
     if let Some(tikk_home) = tikk_home.filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(tikk_home));
+        return absolute(PathBuf::from(tikk_home));
     }
 
     let home = home
         .filter(|value| !value.is_empty())
         .ok_or(StoreError::NoStorePath)?;
 
-    Ok(PathBuf::from(home).join(STORE_UNDER_HOME))
+    absolute(PathBuf::from(home).join(STORE_UNDER_HOME))
+}
+
+/// Git ignores a relative `GIT_CEILING_DIRECTORIES`, so every store path is absolute.
+fn absolute(path: PathBuf) -> Result<PathBuf, StoreError> {
+    std::path::absolute(&path).map_err(|source| StoreError::Io {
+        action: "resolve",
+        path,
+        source,
+    })
 }
 
 pub fn open(root: &Path) -> Result<Store, StoreError> {
@@ -147,6 +158,18 @@ mod tests {
         let store = open(directory.path()).expect("the store opens");
 
         assert_eq!(store.root(), directory.path());
+    }
+
+    #[test]
+    fn store_path_makes_a_relative_tikk_home_absolute() {
+        let path = store_path(Some(OsString::from("candidate")), None).expect("a path is found");
+
+        assert_eq!(
+            path,
+            std::env::current_dir()
+                .expect("read the current folder")
+                .join("candidate")
+        );
     }
 
     #[test]

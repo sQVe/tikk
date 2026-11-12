@@ -7,6 +7,7 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::NotInitialized { .. } => ("notInitialized", Exit::Refused),
         StoreError::FolderNotEmpty { .. } => ("folderNotEmpty", Exit::Refused),
         StoreError::InvalidConfig { .. } => ("invalidConfig", Exit::Refused),
+        StoreError::ForeignRepository { .. } => ("foreignRepository", Exit::Refused),
         StoreError::NoStorePath => ("noStorePath", Exit::Refused),
         StoreError::InvalidMachineName { .. } => ("invalidArguments", Exit::WrongUsage),
         StoreError::InvalidHostName { .. } => ("invalidHostName", Exit::Refused),
@@ -63,6 +64,13 @@ mod tests {
                     path: PathBuf::from("/tmp/store/tikk.json"),
                 },
                 "invalidConfig",
+                Exit::Refused,
+            ),
+            (
+                StoreError::ForeignRepository {
+                    store: PathBuf::from("/tmp/store"),
+                },
+                "foreignRepository",
                 Exit::Refused,
             ),
             (StoreError::NoStorePath, "noStorePath", Exit::Refused),

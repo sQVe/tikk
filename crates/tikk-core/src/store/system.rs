@@ -13,11 +13,11 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
-pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<(), StoreError> {
+pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
     run_git_with("git", directory, arguments)
 }
 
-fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<(), StoreError> {
+fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
     let mut command = Command::new(program);
 
     command.arg("-C").arg(directory).args(arguments);
@@ -45,7 +45,8 @@ fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<(
         ));
     }
 
-    Ok(())
+    String::from_utf8(output.stdout)
+        .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned()))
 }
 
 /// `uname -n` prints the host name on Linux and macOS, where a `hostname` program may be missing.
