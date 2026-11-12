@@ -1,5 +1,8 @@
 mod app;
+mod cancel;
 mod command;
+mod done;
+mod edit;
 mod init;
 mod ls;
 mod new;
@@ -7,6 +10,7 @@ mod output;
 mod show;
 mod store_error;
 mod ticket_row;
+mod write;
 
 use std::process::ExitCode;
 

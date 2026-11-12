@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Command;
 
@@ -91,6 +92,29 @@ fn git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     command
 }
 
+/// The shell splits `EDITOR` into words, so an editor with arguments, such as `code --wait`,
+/// works.
+pub(crate) fn start_editor(editor: &OsStr, path: &Path) -> Result<(), StoreError> {
+    let status = Command::new("sh")
+        .arg("-c")
+        .arg("$EDITOR \"$1\"")
+        .arg("sh")
+        .arg(path)
+        .env("EDITOR", editor)
+        .status()
+        .map_err(|error| StoreError::EditorFailed {
+            message: format!("could not start sh: {error}"),
+        })?;
+
+    if !status.success() {
+        return Err(StoreError::EditorFailed {
+            message: format!("it ended with {status}"),
+        });
+    }
+
+    Ok(())
+}
+
 pub(crate) fn fill_random(buffer: &mut [u8]) -> Result<(), StoreError> {
     getrandom::fill(buffer).map_err(|error| StoreError::RandomUnavailable {
         message: error.to_string(),
@@ -128,7 +152,7 @@ mod tests {
 
     use super::{
         fill_random, read_host_name, read_host_name_with, read_origin_url, read_origin_url_with,
-        run_git, run_git_with,
+        run_git, run_git_with, start_editor,
     };
     use crate::store::StoreError;
 
@@ -242,5 +266,20 @@ mod tests {
         fill_random(&mut second).expect("the operating system gives random bytes");
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn start_editor_reports_an_editor_that_fails() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let path = directory.path().join("ticket.md");
+
+        let passed = start_editor(std::ffi::OsStr::new("true"), &path);
+        let failed = start_editor(std::ffi::OsStr::new("false"), &path);
+
+        assert!(passed.is_ok(), "{passed:?}");
+        assert!(
+            matches!(&failed, Err(StoreError::EditorFailed { message }) if message.contains("exit status: 1")),
+            "{failed:?}"
+        );
     }
 }

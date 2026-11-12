@@ -4,11 +4,11 @@ use std::path::PathBuf;
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
-use tikk_core::{StoreEffects, StoreError, TicketEffects};
+use tikk_core::{EditEffects, QueryEffects, StoreEffects, StoreError, TicketEffects, WriteEffects};
 
 use crate::command::{Cli, Command};
 use crate::output::{Exit, Failure, Output, Response};
-use crate::{init, ls, new, show, store_error};
+use crate::{cancel, done, edit, init, ls, new, show, store_error, write};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -16,8 +16,12 @@ pub(crate) struct Environment {
     pub(crate) tikk_home: Option<OsString>,
     pub(crate) home: Option<OsString>,
     pub(crate) working_directory: PathBuf,
+    pub(crate) editor: Option<OsString>,
     pub(crate) effects: StoreEffects,
     pub(crate) ticket_effects: TicketEffects,
+    pub(crate) query_effects: QueryEffects,
+    pub(crate) write_effects: WriteEffects,
+    pub(crate) edit_effects: EditEffects,
 }
 
 impl Environment {
@@ -27,8 +31,12 @@ impl Environment {
             home: std::env::var_os("HOME"),
             // Git then reports the folder it cannot enter when it reads `origin`.
             working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            editor: std::env::var_os("EDITOR"),
             effects: StoreEffects::system(),
             ticket_effects: TicketEffects::system(),
+            query_effects: QueryEffects::system(),
+            write_effects: WriteEffects::system(),
+            edit_effects: EditEffects::system(),
         }
     }
 }
@@ -72,8 +80,34 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             environment.working_directory,
             &environment.ticket_effects,
         ),
-        Command::Show { id } => show::run(&tikk_core::open(&store)?, &id),
-        Command::Ls(arguments) => ls::run(&tikk_core::open(&store)?, arguments),
+        Command::Show { id } => {
+            show::run(&tikk_core::open(&store)?, &id, &environment.query_effects)
+        }
+        Command::Ls(arguments) => ls::run(
+            &tikk_core::open(&store)?,
+            arguments,
+            &environment.query_effects,
+        ),
+        Command::Write { id, file, hash } => write::run(
+            &tikk_core::open(&store)?,
+            tikk_core::TicketWrite { id, file, hash },
+            &environment.write_effects,
+        ),
+        Command::Edit { id } => edit::run(
+            &tikk_core::open(&store)?,
+            &id,
+            environment.editor.as_deref(),
+            &environment.edit_effects,
+        ),
+        Command::Done { id } => {
+            done::run(&tikk_core::open(&store)?, &id, &environment.write_effects)
+        }
+        Command::Cancel { id, reason } => cancel::run(
+            &tikk_core::open(&store)?,
+            &id,
+            &reason,
+            &environment.write_effects,
+        ),
     }
 }
 
