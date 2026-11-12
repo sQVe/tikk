@@ -85,7 +85,6 @@ pub fn create_ticket(
     })
 }
 
-/// A linked ID that two files hold names no single ticket, so its kind and project are unknown.
 fn refuse_shared_links(fields: &TicketFields, scan: &TicketScan) -> Result<(), StoreError> {
     let mut paths: HashMap<&TicketId, Vec<PathBuf>> = HashMap::new();
     let parsed = scan.tickets.iter().map(|ticket| (&ticket.id, &ticket.path));

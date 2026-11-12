@@ -39,7 +39,6 @@ impl TicketFields {
 }
 
 impl TicketFields {
-    /// Every ticket this one names: its parent and the targets of its edges.
     pub(crate) fn linked_ids(&self) -> impl Iterator<Item = &TicketId> {
         self.parent()
             .into_iter()
