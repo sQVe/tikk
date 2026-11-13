@@ -47,16 +47,23 @@ pub fn claim_slice(
     let facts = read_facts(store.root())?;
     let now = (effects.lease.now)();
 
-    if let Some(current) = current_claims(&facts.facts).get(id) {
+    let current = current_claims(&facts.facts).remove(id);
+
+    if let Some(current) = &current {
         refuse_other_holder(id, current, &agent, now)?;
     }
 
-    let claim = Claim::starting(
-        agent,
-        caller.session.clone(),
-        caller.session_log.clone(),
-        now,
-    );
+    // A renewal by the holder keeps each stored session value that the caller leaves unset.
+    let own = current.filter(|current| current.agent == agent);
+    let session = caller
+        .session
+        .clone()
+        .or_else(|| own.as_ref().and_then(|own| own.session.clone()));
+    let session_log = caller
+        .session_log
+        .clone()
+        .or_else(|| own.and_then(|own| own.session_log));
+    let claim = Claim::starting(agent, session, session_log, now);
 
     append_fact(
         store.root(),
@@ -376,6 +383,39 @@ mod tests {
         );
         assert_eq!(facts.errors.len(), 1, "{:?}", facts.errors);
         assert_eq!(facts.errors[0].line, 1);
+    }
+
+    #[test]
+    fn a_renewal_keeps_each_stored_session_value_the_caller_leaves_unset() {
+        let (_directory, store) = store_with_slice();
+        let slice = id("personal-kkkk");
+        let first = Identity {
+            session: Some("session-1".to_owned()),
+            session_log: Some("/logs/session-1.jsonl".to_owned()),
+            ..agent("manager")
+        };
+        let new_session_only = Identity {
+            session: Some("session-2".to_owned()),
+            ..agent("manager")
+        };
+        set_clock(0);
+        claim_slice(&store, &slice, &first, &claim_effects()).expect("the slice is free");
+
+        set_clock(HOUR);
+        let kept = claim_slice(&store, &slice, &agent("manager"), &claim_effects())
+            .expect("the holder renews");
+        set_clock(2 * HOUR);
+        let mixed = claim_slice(&store, &slice, &new_session_only, &claim_effects())
+            .expect("the holder renews");
+
+        assert_eq!(kept.session.as_deref(), Some("session-1"));
+        assert_eq!(kept.session_log.as_deref(), Some("/logs/session-1.jsonl"));
+        assert_eq!(mixed.session.as_deref(), Some("session-2"));
+        assert_eq!(mixed.session_log.as_deref(), Some("/logs/session-1.jsonl"));
+        assert_eq!(
+            mixed.lease_end,
+            fake_now().after(Duration::from_secs(4 * HOUR))
+        );
     }
 
     #[test]

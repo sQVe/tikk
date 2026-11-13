@@ -44,7 +44,8 @@ merge does not stop the claim.
   ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
 - A claim records the agent session that took it, from `TIKK_SESSION` and `TIKK_SESSION_LOG`, so
   `tikk show` points at the log of the work. The log stays outside the store, since raw session
-  dumps never enter it.
+  dumps never enter it. A renewal by the holder's `tikk claim` records each of the two values that
+  the caller gives, and keeps the stored value of each one that is unset.
 - Fetching before a claim narrows the window for two machines to claim one slice. Offline, the
   clash is possible, and tikk does not report it.
 
