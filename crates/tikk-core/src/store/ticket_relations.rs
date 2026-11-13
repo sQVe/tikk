@@ -30,15 +30,19 @@ pub fn block_ticket(
     })
 }
 
-// A blocker that no longer exists can still be removed, so the blocker is not looked up.
+/// Removes the edge even when the blocker no longer exists. The blocker is looked up only when
+/// there is no edge. The links the ticket keeps are not checked, so a ticket with a broken link
+/// can be repaired.
 pub fn unblock_ticket(
     store: &Store,
     id: &TicketId,
     blocker: &TicketId,
     effects: &WriteEffects,
 ) -> Result<StoredTicket, StoreError> {
-    change_ticket(store, id, effects, |fields, _scan| {
+    change_ticket(store, id, effects, |fields, scan| {
         if !fields.blocked_by().contains(blocker) {
+            find_ticket(scan, blocker)?;
+
             return Ok(None);
         }
 
@@ -233,6 +237,32 @@ mod tests {
             [id("personal-cccc")]
         );
         assert_eq!(unblocked.document.fields.rank(), Some(4));
+    }
+
+    #[test]
+    fn unblock_of_a_missing_blocker_removes_its_edge_or_reports_it_not_found() {
+        let (directory, store, path) = store_with_ranked_task();
+        fs::remove_file(directory.path().join("tickets/personal/personal-cccc-c.md"))
+            .expect("delete the blocker C");
+        let task = id("personal-aaaa");
+
+        let absent = unblock_ticket(&store, &task, &id("personal-zzzz"), &counting_effects());
+
+        assert!(
+            matches!(&absent, Err(StoreError::NotFound { id }) if id == "personal-zzzz"),
+            "{absent:?}"
+        );
+        assert_eq!(WRITES.with(Cell::get), 0);
+        assert_eq!(fs::read_to_string(&path).expect("read the task"), RANKED);
+
+        let removed = unblock_ticket(&store, &task, &id("personal-cccc"), &counting_effects())
+            .expect("an edge to a deleted blocker can be removed");
+
+        assert_eq!(removed.document.fields.blocked_by(), [id("personal-bbbb")]);
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the task"),
+            removed.text
+        );
     }
 
     #[test]

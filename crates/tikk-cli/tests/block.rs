@@ -147,3 +147,16 @@ fn block_without_json_prints_the_ticket_row() {
         format!("{task}  task  open  -  Renew the domain\n")
     );
 }
+
+#[test]
+fn unblock_with_no_edge_and_a_missing_blocker_exits_with_1_and_not_found() {
+    let home = Home::initialized();
+    let task = home.new_ticket(&["task", "Renew the domain"]);
+    let before = file_text(&home, &task);
+
+    let run = home.tikk(&["unblock", &task, "personal-zzzz", "--json"]);
+
+    assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
+    assert_eq!(parse_json(&run.stderr)["error"]["code"], json!("notFound"));
+    assert_eq!(file_text(&home, &task), before);
+}
