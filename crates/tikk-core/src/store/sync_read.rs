@@ -95,8 +95,6 @@ pub(crate) fn read_plan(
     Ok(plan)
 }
 
-/// The fetched commit to merge, after the checks that make a merge or a commit safe: the store is
-/// on `main`, no merge is in progress, and nothing is staged.
 pub(crate) fn read_fetched_commit(
     root: &Path,
     fetched: bool,

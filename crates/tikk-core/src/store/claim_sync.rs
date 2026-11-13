@@ -11,14 +11,12 @@ use crate::store::sync_merge::merge_or_note;
 use crate::store::sync_read::{SyncPlan, read_fetched_commit, read_plan};
 use crate::store::ticket_files::{TicketScan, read_tickets};
 
-/// The result of a write that syncs the store around it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Synced<T> {
     pub value: T,
     pub sync: SyncOutcome,
 }
 
-/// What the change under the lock returns: its value and whether it appended a fact.
 pub(crate) struct Change<T> {
     pub(crate) value: T,
     pub(crate) appended: bool,
@@ -29,10 +27,6 @@ struct Steps<T> {
     change: Result<T, StoreError>,
 }
 
-/// Fetches outside the lock. Then, in one hold of the exclusive lock, merges the fetched commit,
-/// runs the change on the merged tickets, and commits what it appended with the settled files.
-/// Then pushes outside the lock. A failed fetch, merge, commit, or push is a problem in the sync
-/// result, not an error, unless it leaves a merge in progress. The result is saved either way.
 pub(crate) fn sync_around<T>(
     root: &Path,
     effects: &SyncEffects,
@@ -108,7 +102,6 @@ fn run_steps<T>(
     })
 }
 
-/// Commits the appended fact and the settled files. A failure is a problem, and the plan is `None`.
 fn commit_change(
     root: &Path,
     effects: &SyncEffects,

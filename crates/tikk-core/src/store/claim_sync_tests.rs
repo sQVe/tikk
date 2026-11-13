@@ -42,9 +42,6 @@ fn failed(arguments: &[&str]) -> StoreError {
     }
 }
 
-/// Real Git, except that `origin/main` has one new commit and every merge fails. `ABORT_FAILS` makes
-/// the abort fail, `HEAD_STAYS` leaves `MERGE_HEAD` after the abort, and `CONFLICT` makes the merge
-/// stop on a conflict in the plan.
 fn git_with_a_failing_merge(root: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     match arguments {
         ["for-each-ref", ..] => Ok(FETCHED.as_bytes().to_vec()),
@@ -65,7 +62,6 @@ fn git_with_a_failing_merge(root: &Path, arguments: &[&str]) -> Result<Vec<u8>, 
     }
 }
 
-/// `MERGE_HEAD` exists from the failed merge until its abort.
 fn entry_with_merge_head(path: &Path) -> Result<Option<FileEntry>, StoreError> {
     if path.ends_with(".git/MERGE_HEAD") && MERGE_STARTED.get() {
         return Ok(Some(FileEntry {

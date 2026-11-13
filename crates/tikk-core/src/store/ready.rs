@@ -63,7 +63,6 @@ pub enum Hold {
         state: BlockerState,
     },
     Claimed(Claim),
-    /// The slice's own ID is in more than one file, so no claim is read for it.
     IdShared {
         paths: Vec<PathBuf>,
     },

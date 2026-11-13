@@ -29,8 +29,6 @@ pub(crate) fn merge_fetched(
     }
 }
 
-/// Merges like `merge_fetched`, but a merge that fails and leaves no merge in progress adds a
-/// problem and returns `false`. A merge that cannot be aborted, or stays in progress, is an error.
 pub(crate) fn merge_or_note(
     root: &Path,
     commit: &str,

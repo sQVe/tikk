@@ -238,8 +238,6 @@ impl Home {
         parse_json(&run.stdout)
     }
 
-    /// Copies the ticket file of the ID to a second file with the same ID, and returns both paths
-    /// in the order tikk lists them.
     pub(crate) fn share_id(&self, id: &str) -> Vec<String> {
         let first = PathBuf::from(
             self.show_json(id)["path"]

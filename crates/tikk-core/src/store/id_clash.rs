@@ -6,7 +6,6 @@ use crate::store::ticket_files::TicketScan;
 use crate::store::ticket_queries::TicketIndex;
 use crate::ticket::TicketId;
 
-/// Two or more ticket files in one project that carry one ID.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IdClash {
     pub id: TicketId,

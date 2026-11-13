@@ -87,7 +87,6 @@ pub enum PendingReason {
 pub struct SyncProblem {
     pub step: SyncStep,
     pub message: String,
-    /// The files of a merge conflict.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
 }
@@ -154,7 +153,6 @@ pub fn sync_store(store: &Store, effects: &SyncEffects) -> Result<SyncOutcome, S
     }
 }
 
-/// Saves the result as the last sync result. A failed save joins the problems.
 pub(crate) fn save_outcome(
     root: &Path,
     effects: &SyncEffects,
@@ -169,14 +167,12 @@ pub(crate) fn save_outcome(
     outcome
 }
 
-/// Saves the error as the last sync result, and returns it.
 pub(crate) fn save_error(root: &Path, effects: &SyncEffects, error: StoreError) -> StoreError {
     let saved = save_result(root, &saved_error(now(effects), &error));
 
     not_saved(error, saved)
 }
 
-/// Saves the steps that ran before a refusal, and returns the refusal.
 pub(crate) fn save_refused(
     root: &Path,
     effects: &SyncEffects,
@@ -235,8 +231,6 @@ fn run_sync(root: &Path, effects: &SyncEffects) -> Result<SyncOutcome, StoreErro
     })
 }
 
-/// Fetches from `origin` and returns whether the fetch ran. A store with no `origin` and a failed
-/// fetch each add a problem.
 pub(crate) fn fetch_origin(
     root: &Path,
     origin: Option<&str>,
@@ -283,7 +277,6 @@ pub(crate) fn push(root: &Path, effects: &SyncEffects, problems: &mut Vec<SyncPr
     }
 }
 
-/// The ID clashes of the store, with paths relative to it. The caller holds the store lock.
 pub(crate) fn read_clashes(root: &Path) -> Result<Vec<IdClash>, StoreError> {
     let scan = read_tickets(root)?;
 

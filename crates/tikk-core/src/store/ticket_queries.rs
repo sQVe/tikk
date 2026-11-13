@@ -54,8 +54,6 @@ pub struct ShownTicket {
     pub claim: Option<ShownClaim>,
 }
 
-/// Lists the tickets that match the filter, ranked ones first, then by ID. Every file that
-/// fails to parse is in `errors`, and every ID clash in `clashes`, whatever the filter.
 pub fn list_tickets(
     store: &Store,
     filter: &TicketFilter,
