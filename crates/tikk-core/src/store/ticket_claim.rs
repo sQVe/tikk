@@ -185,7 +185,7 @@ mod tests {
     use crate::store::ticket_status::mark_done;
     use crate::store::ticket_write::WriteEffects;
     use crate::store::{Store, StoreError};
-    use crate::ticket::{Status, TicketId};
+    use crate::ticket::{Kind, Status, TicketError, TicketId};
 
     const PLAN: &str = "---\nkind: plan\ntitle: Plan\n---\n";
     const SLICE: &str = "---\nkind: slice\ntitle: Slice\nparent: personal-pppp\ncriteria:\n  - id: s1\n    check: c\n    expected: e\n---\n";
@@ -270,6 +270,86 @@ mod tests {
             .expect("the slice is shown")
             .claim
             .map(|shown| shown.state)
+    }
+
+    fn write_ticket(directory: &TempDir, name: &str, text: &str) {
+        fs::write(directory.path().join("tickets/personal").join(name), text)
+            .expect("write a ticket");
+    }
+
+    #[test]
+    fn claim_names_the_field_that_fails_strict_validation_and_writes_nothing() {
+        let (directory, store) = store_with_slice();
+        let criteria = "criteria:\n  - id: s1\n    check: c\n    expected: e\n";
+        let cases = [
+            (
+                "personal-aaaa-bare.md",
+                "---\nkind: slice\ntitle: Bare\nparent: personal-pppp\n---\n".to_owned(),
+                "criteria",
+            ),
+            (
+                "personal-bbbb-draft.md",
+                format!(
+                    "---\nkind: slice\ntitle: Draft\nstatus: draft\nparent: personal-pppp\n{criteria}---\n"
+                ),
+                "status",
+            ),
+            (
+                "personal-cccc-blocked.md",
+                format!(
+                    "---\nkind: slice\ntitle: Blocked\nparent: personal-pppp\nblockedBy: [personal-zzzz]\n{criteria}---\n"
+                ),
+                "blockedBy",
+            ),
+        ];
+        set_clock(0);
+
+        for (name, text, expected) in cases {
+            write_ticket(&directory, name, &text);
+            let slice = id(&name[..13]);
+
+            let error = claim_slice(&store, &slice, &agent("manager"), &claim_effects())
+                .expect_err("the slice fails strict validation");
+
+            assert!(
+                matches!(&error, StoreError::Ticket(TicketError::Invalid { field, .. }) if field == expected),
+                "case {expected}: {error:?}"
+            );
+        }
+        assert!(!directory.path().join("facts").exists());
+    }
+
+    #[test]
+    fn claim_and_release_refuse_a_ticket_that_is_not_a_slice() {
+        let (directory, store) = store_with_slice();
+        write_ticket(
+            &directory,
+            "personal-tttt-task.md",
+            "---\nkind: task\ntitle: Task\nparent: personal-pppp\n---\n",
+        );
+        let task = id("personal-tttt");
+        set_clock(0);
+
+        let claimed = claim_slice(&store, &task, &agent("manager"), &claim_effects());
+        let released = release_slice(&store, &task, &Identity::default(), &claim_effects());
+
+        for (name, result) in [
+            ("claim", claimed.map(|_| ())),
+            ("release", released.map(|_| ())),
+        ] {
+            assert!(
+                matches!(
+                    &result,
+                    Err(StoreError::WrongKind {
+                        kind: Kind::Task,
+                        allowed: "a slice",
+                        ..
+                    })
+                ),
+                "case {name}: {result:?}"
+            );
+        }
+        assert!(!directory.path().join("facts").exists());
     }
 
     #[test]

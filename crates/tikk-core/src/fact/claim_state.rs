@@ -128,6 +128,12 @@ mod tests {
     }
 
     #[test]
+    fn each_claim_state_has_its_contract_name() {
+        assert_eq!(ClaimState::Claimed.as_str(), "claimed");
+        assert_eq!(ClaimState::StaleClaim.as_str(), "staleClaim");
+    }
+
+    #[test]
     fn the_last_claim_wins_and_a_release_ends_it() {
         let first = claim_by("manager-1", "2026-11-13T00:00:00Z");
         let second = claim_by("manager-2", "2026-11-13T05:00:00Z");
