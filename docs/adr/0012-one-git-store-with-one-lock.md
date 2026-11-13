@@ -65,9 +65,15 @@ private GitHub repository.
   lock. A file that changed again stays pending as `settling`, and one that does not parse stays
   pending as `unparsed`. Other files outside `facts/` follow the same two-second rule. Sync stages
   the bytes it checked, not a later read of the file.
+- Sync refuses an index with staged changes before it stages, so every entry it stages is its own.
+  When staging or the commit fails, sync unstages only those paths and reports the error, so the
+  next sync needs no `git reset` by hand.
 - Sync saves its last result, or its error, in `.git/tikk-sync.json`, outside the synced content.
 - The Git calls of sync and `init --remote` run with no hook, no signing, no terminal prompt, no
-  autostash, and no global or system Git config, with the fixed identity `tikk`.
+  autostash, and null standard input, with the fixed identity `tikk`. The local steps (stage,
+  commit, merge, and abort) also read no global or system Git config. The network steps (fetch,
+  push, the remote read, and clone) keep it, because a private remote over HTTPS needs the user's
+  credential helper. They turn hooks and signing off with `-c`, which overrides that config.
 
 ## Consequences
 
@@ -81,8 +87,8 @@ private GitHub repository.
 - A store lock serializes writes from all agents on a machine.
 - Facts are permanent in Git, so a leaked secret needs a history rewrite.
 - Two offline machines can claim the same slice. tikk does not report that clash yet.
-- Sync ignores the global Git config, so a credential helper set there does not apply. A remote
-  must authenticate without it, as an SSH remote with a key does.
+- The network steps read the user's global Git config, so a setting there that `-c` does not
+  override, such as a URL rewrite, changes where sync fetches and pushes.
 - A conflict stops every sync until the user merges `origin/main` by hand.
 
 ## Alternatives considered

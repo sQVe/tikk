@@ -105,9 +105,10 @@ Never:
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
 `--parent` and `--project`, and `tikk ready` without them, start
 `git config --get remote.origin.url` in the working directory. `tikk sync` and
-`tikk init --remote` start `git` in the store with no hook, no signing, no terminal prompt, and no
-global or system Git config, as the author `tikk <tikk@localhost>`. Their network steps (`fetch`,
-`push`, `ls-remote`, and `clone`) stop after 30 seconds. `tikk init --remote` without `--machine`
+`tikk init --remote` start `git` in the store with no hook, no signing, and no terminal prompt, as
+the author `tikk <tikk@localhost>`. Their local steps read no global or system Git config. Their
+network steps (`fetch`, `push`, `ls-remote`, and `clone`) keep it, so a credential helper or a
+`url.<base>.insteadOf` there applies, and they stop after 30 seconds. `tikk init --remote` without `--machine`
 also starts `uname -n`. All run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
 and its arguments. It runs the program with no shell, with those arguments and then the ticket file
 path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and

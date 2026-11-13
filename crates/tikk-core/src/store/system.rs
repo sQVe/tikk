@@ -15,7 +15,8 @@ const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 const NETWORK_POLL: Duration = Duration::from_millis(20);
 
 /// Settings for every Git call of sync and `init --remote`. Hooks, signing, and an autostash could
-/// run a program, prompt, or move local changes, so each one is off.
+/// run a program, prompt, or move local changes, so each one is off. They override the global
+/// config that the network steps keep for credential helpers and URL rewrites.
 const STORE_SETTINGS: &[&str] = &[
     "-c",
     "core.hooksPath=/dev/null",
@@ -163,7 +164,20 @@ pub(crate) fn read_store_origin(root: &Path) -> Result<Option<String>, StoreErro
     }
 }
 
+/// A local step reads only the repository's own config.
 fn store_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
+    let mut command = network_git_command(program, directory, arguments);
+
+    command
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
+
+    command
+}
+
+/// A network step keeps the global and system config, so the user's credential helper reaches a
+/// private remote.
+fn network_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     let mut command = Command::new(program);
 
     command
@@ -172,8 +186,6 @@ fn store_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Com
         .args(STORE_SETTINGS)
         .args(arguments)
         .stdin(Stdio::null())
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .envs(IDENTITY.iter().copied())
@@ -210,7 +222,7 @@ fn run_git_within(
     };
     let mut stdout = capture()?;
     let mut stderr = capture()?;
-    let mut command = store_git_command(program, directory, arguments);
+    let mut command = network_git_command(program, directory, arguments);
 
     command
         .stdout(clone_capture(&stdout).map_err(git_error)?)
@@ -362,8 +374,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        fill_random, read_host_name, read_host_name_with, read_origin_url, read_origin_url_with,
-        read_store_origin, run_git, run_git_with, run_git_within, run_store_git, start_editor,
+        fill_random, network_git_command, read_host_name, read_host_name_with, read_origin_url,
+        read_origin_url_with, read_store_origin, run_git, run_git_with, run_git_within,
+        run_store_git, start_editor, store_git_command,
     };
     use crate::store::StoreError;
 
@@ -377,6 +390,44 @@ mod tests {
             .expect("make the script executable");
 
         path.to_str().expect("a UTF-8 path").to_owned()
+    }
+
+    /// What a fake Git sees: its arguments, then the config and prompt variables.
+    fn seen_by_git(command: &mut Command) -> String {
+        let output = command.output().expect("start the script");
+
+        String::from_utf8(output.stdout).expect("the script prints UTF-8")
+    }
+
+    #[test]
+    fn local_steps_drop_the_global_config_and_network_steps_keep_it() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let program = fake_git(
+            directory.path(),
+            "echo \"$*|${GIT_CONFIG_GLOBAL-unset}|${GIT_CONFIG_NOSYSTEM-unset}|$GIT_TERMINAL_PROMPT\"",
+        );
+        let settings = "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgSign=false -c tag.gpgSign=false -c merge.autoStash=false -c merge.ff=true";
+
+        let local = seen_by_git(&mut store_git_command(
+            &program,
+            directory.path(),
+            &["merge"],
+        ));
+        let network = seen_by_git(&mut network_git_command(
+            &program,
+            directory.path(),
+            &["fetch"],
+        ));
+
+        let folder = directory.path().display();
+        assert_eq!(
+            local,
+            format!("-C {folder} {settings} merge|/dev/null|1|0\n")
+        );
+        assert_eq!(
+            network,
+            format!("-C {folder} {settings} fetch|unset|unset|0\n")
+        );
     }
 
     #[test]
