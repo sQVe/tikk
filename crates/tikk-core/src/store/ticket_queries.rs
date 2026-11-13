@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::fact::Timestamp;
+use crate::store::id_clash::{IdClash, id_clashes};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_claim::{ShownClaim, shown_claim};
@@ -42,6 +43,7 @@ pub struct TicketFilter {
 pub struct TicketListing {
     pub tickets: Vec<StoredTicket>,
     pub errors: Vec<UnreadableTicket>,
+    pub clashes: Vec<IdClash>,
 }
 
 #[derive(Debug)]
@@ -53,7 +55,7 @@ pub struct ShownTicket {
 }
 
 /// Lists the tickets that match the filter, ranked ones first, then by ID. Every file that
-/// fails to parse is in `errors`, whatever the filter.
+/// fails to parse is in `errors`, and every ID clash in `clashes`, whatever the filter.
 pub fn list_tickets(
     store: &Store,
     filter: &TicketFilter,
@@ -65,6 +67,7 @@ pub fn list_tickets(
         read_tickets(store.root())?
     };
     let search = filter.search.as_deref().map(str::to_lowercase);
+    let clashes = id_clashes(&scan);
     let mut tickets: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -76,6 +79,7 @@ pub fn list_tickets(
     Ok(TicketListing {
         tickets,
         errors: scan.errors,
+        clashes,
     })
 }
 

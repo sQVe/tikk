@@ -123,3 +123,26 @@ fn done_on_an_instruction_of_a_slice_another_agent_holds_exits_with_claimed() {
     assert!(message.contains("manager-1"), "{message}");
     assert_eq!(std::fs::read(&path).expect("read the instruction"), before);
 }
+
+#[test]
+fn done_on_an_instruction_of_a_slice_with_a_shared_id_exits_with_id_shared_and_writes_nothing() {
+    let home = Home::initialized();
+    let (_plan, slice) = home.plan_and_slice();
+    let claim = home.tikk_as("manager", &["claim", &slice]);
+    assert_eq!(claim.exit_code, 0, "claim: {}", claim.stderr);
+    let instruction = home.new_ticket(&["instruction", "Write the lock", "--parent", &slice]);
+    let path = home.show_json(&instruction)["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    let before = std::fs::read(&path).expect("read the instruction");
+    let facts = home.fact_lines();
+    home.share_id(&slice);
+
+    let run = home.tikk_as("manager", &["done", &instruction, "--json"]);
+
+    assert_eq!(run.exit_code, 1, "{}", run.stdout);
+    assert_eq!(parse_json(&run.stderr)["error"]["code"], json!("idShared"));
+    assert_eq!(std::fs::read(&path).expect("read the instruction"), before);
+    assert_eq!(home.fact_lines(), facts, "no fact is appended");
+}
