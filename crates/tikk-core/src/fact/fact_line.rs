@@ -280,6 +280,13 @@ fn parse_verdict(raw: RawVerdict) -> Result<AuditVerdict, FactError> {
         ))
     })?;
 
+    if raw.evidence.trim().is_empty() {
+        return Err(FactError::new(format!(
+            "the verdict of `{}` has no evidence",
+            raw.criterion
+        )));
+    }
+
     Ok(AuditVerdict {
         criterion: raw.criterion,
         check: raw.check,
@@ -421,6 +428,10 @@ mod tests {
             ),
             (whole.replace("owner/app", "owner"), "not a repository"),
             (whole.replace("\"met\"", "\"passed\""), "not a verdict"),
+            (
+                whole.replace("\"evidence\":\"x\"", "\"evidence\":\" \""),
+                "`s1` has no evidence",
+            ),
         ];
 
         assert!(parse_fact_line(&format!("{start},{whole}}}")).is_ok());

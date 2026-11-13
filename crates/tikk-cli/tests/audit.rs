@@ -596,3 +596,33 @@ fn show_and_ls_text_print_the_derived_state_and_whether_the_audit_counts() {
         format!("{slice}  slice  open (mergedUnverified)  {plan}  Add the store\n")
     );
 }
+
+#[test]
+fn a_stored_audit_verdict_with_blank_evidence_does_not_count() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let (_plan, slice) = linked_slice(&home, &gh);
+    merge(&home, &gh, HEAD);
+    let line = json!({
+        "v": 1,
+        "kind": "audit",
+        "ticket": slice,
+        "at": "2026-11-13T02:00:00Z",
+        "repository": REPOSITORY,
+        "head": HEAD,
+        "ticketHash": hash_of(&home, &slice),
+        "verdicts": [{
+            "criterion": "s1",
+            "check": "cargo nextest run",
+            "expected": "The tests pass.",
+            "verdict": "met",
+            "evidence": " ",
+        }],
+    });
+    home.append_fact_line("2026-11.jsonl", &line.to_string());
+
+    let shown = home.show_json(&slice);
+
+    assert_eq!(shown["derivedStatus"], json!("mergedUnverified"), "{shown}");
+    assert_eq!(shown["audit"], Value::Null, "{shown}");
+}
