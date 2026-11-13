@@ -1,5 +1,7 @@
 mod support;
 
+use std::path::Path;
+
 use serde_json::json;
 
 use support::{Home, parse_json};
@@ -382,4 +384,73 @@ fn init_remote_on_a_remote_without_main_exits_with_1() {
         json!("remoteWithoutMain")
     );
     assert!(!home.store().join("tikk.json").exists());
+}
+
+fn relative_to_work(remote: &support::Remote) -> String {
+    let name = remote
+        .path()
+        .file_name()
+        .expect("the remote has a name")
+        .to_str()
+        .expect("a UTF-8 name");
+
+    format!("../../{name}")
+}
+
+fn assert_origin_is(home: &Home, remote: &support::Remote) {
+    let origin = home.git(&["remote", "get-url", "origin"]);
+    let origin = Path::new(origin.trim());
+
+    assert!(origin.is_absolute(), "{}", origin.display());
+    assert_eq!(
+        origin.canonicalize().expect("origin exists"),
+        remote.path().canonicalize().expect("the remote exists")
+    );
+}
+
+#[test]
+fn init_remote_with_a_relative_path_to_an_empty_remote_uses_the_working_directory() {
+    let remote = support::Remote::new();
+    let home = Home::new();
+
+    let run = home.tikk(&[
+        "init",
+        "--remote",
+        &relative_to_work(&remote),
+        "--machine",
+        "laptop",
+        "--json",
+    ]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(true));
+    assert_origin_is(&home, &remote);
+    assert_eq!(
+        remote.git(&["rev-parse", "main"]).trim(),
+        home.git(&["rev-parse", "main"]).trim()
+    );
+}
+
+#[test]
+fn init_remote_with_a_relative_path_to_a_populated_remote_uses_the_working_directory() {
+    let remote = support::Remote::new();
+    let laptop = Home::on_remote(&remote, "laptop");
+    let desktop = Home::new();
+
+    let run = desktop.tikk(&[
+        "init",
+        "--remote",
+        &relative_to_work(&remote),
+        "--machine",
+        "desktop",
+        "--json",
+    ]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(true));
+    assert_origin_is(&desktop, &remote);
+    assert_eq!(
+        desktop.git(&["rev-parse", "main"]).trim(),
+        laptop.git(&["rev-parse", "main"]).trim()
+    );
 }

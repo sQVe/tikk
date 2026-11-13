@@ -104,8 +104,13 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
         } => init::run(&store, machine, &environment.effects),
         Command::Init {
             machine,
-            remote: Some(url),
-        } => init::run_remote(&store, &url, machine, &environment.remote_init_effects),
+            remote: Some(remote),
+        } => init::run_remote(
+            &store,
+            &init::RemoteLocation::resolve(&remote, &environment.working_directory)?,
+            machine,
+            &environment.remote_init_effects,
+        ),
         Command::Sync => sync::run(&tikk_core::open(&store)?, &environment.sync_effects),
         Command::New(arguments) => new::run(
             &tikk_core::open(&store)?,

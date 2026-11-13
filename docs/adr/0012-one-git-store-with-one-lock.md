@@ -40,7 +40,8 @@ private GitHub repository.
   store has a `main` branch from the start. `tikk init --remote <url>` clones the remote's `main`,
   or creates the store and pushes `main` when the remote has no branches. It refuses a remote
   whose `main` holds the folder `facts/<machine>/` of the default machine name unless `--machine`
-  is given, so two machines never write one fact folder.
+  is given, so two machines never write one fact folder. A relative local path resolves from the
+  caller's working directory, and the store saves it as an absolute `origin`.
 - One sync fetches, then commits and merges in one hold of the exclusive lock, then pushes. A read
   command therefore never sees a half-merged store. The network steps run outside the lock,
   because writers wait for the lock at most five seconds. Each network step stops after 30
