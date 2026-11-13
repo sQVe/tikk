@@ -28,8 +28,10 @@ stacking. [ADR 0022](./0022-claims-leases-and-ready-queue.md) defines this rule.
 
 A ticket waits on its `blockedBy` targets and on its parent, because blockers flow down from a plan
 and a slice to the work under them. A new `blockedBy` edge or a new parent that would let a ticket
-wait on itself, through `blockedBy` or `parent` links, is refused, and the error names the cycle. A
-ticket cannot block itself.
+wait on itself, through `blockedBy` or `parent` links, is refused with the error code `cycle`. The
+error's field is the field that the command changes, `blockedBy` or `parent`. Its message lists the
+tickets of the cycle in order, starting and ending with the changed ticket, and says which links are
+`parent` links. A ticket cannot block itself; that is a cycle of one.
 
 ## Consequences
 

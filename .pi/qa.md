@@ -1,9 +1,10 @@
 # QA guide
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
-`tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `--help`, and
-`--version`, and `tikk-desktop` is a stub. A mock scene of the UI opens in the scene window, in the
-ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh folder under `/tmp`.
+`tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `block`, `unblock`,
+`move`, `rank`, `--help`, and `--version`, and `tikk-desktop` is a stub. A mock scene of the UI
+opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
+folder under `/tmp`.
 
 ## Choose sections
 
@@ -41,7 +42,7 @@ test runs them against the built binary.
 
 | Journey                                                     | Goal                                                                      | Run it when the change touches                                          | Test                                                    |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, the store layout, CLI output        | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output         | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
 | [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, ticket validation                            | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
 | [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
 
@@ -164,6 +165,29 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
 - `target/debug/tikk cancel <id> --reason <text> --json` exits with 0, and `tikk show <id> --json`
   then has the status `canceled` and the reason. Without `--reason`, it exits with 2 and
   `invalidArguments`.
+- `target/debug/tikk block <id> <blocker> --json` exits with 0 and prints the row of `<id>`, and
+  `tikk show <id> --json` then lists `<blocker>` in `blockedBy`.
+  `target/debug/tikk unblock <id> <blocker> --json` exits with 0 and empties the list again. A
+  second `block` of the same pair, or an `unblock` of a pair with no edge, exits with 0 and leaves
+  the file as it was. An unknown ID or blocker exits with 1 and `notFound`.
+- After `tikk block A B`, `target/debug/tikk block B A --json` exits with 1 and prints
+  `{"error":{"code":"cycle","field":"blockedBy","message":...}}`. The message lists B, A, and B in
+  that order. `tikk block <plan> <slice>`, with the slice under the plan, exits with 1 and `cycle`,
+  and the message says that the slice "has the parent" the plan. `tikk block <id> <id>` exits with 1
+  and `cycle`. A `tikk write` whose `blockedBy` closes a cycle exits with 1 and `cycle`, and the
+  file keeps its bytes.
+- `target/debug/tikk move <id> --parent <id> --json` and
+  `target/debug/tikk move <id> --no-parent --json` exit with 0, print the row with the new `parent`,
+  and clear the ticket's `rank`. An instruction moved under a plan, a slice moved with
+  `--no-parent`, and a parent in another project exit with 1 and
+  `{"error":{"code":"invalidTicket","field":"parent",...}}`. Without `--parent` or `--no-parent`, it
+  exits with 2.
+- `target/debug/tikk rank <id> --first`, `--last`, `--before <id>`, or `--after <id>` exits with 0
+  and prints the row. On slices A, B, and C ranked in that order under one plan,
+  `tikk rank C --before A`, then `tikk ls --parent <plan> --json` lists C, A, and B, with the ranks
+  1, 2, and 3 in `tikk show`. A `--before` or `--after` ticket with another parent exits with 1 and
+  `notSibling`, and the message starts with its ID. Without one of the four flags, or with two, it
+  exits with 2.
 - The store lock is the file `$TIKK_HOME/.git/tikk.lock`. While another process holds it, such as
   `flock $TIKK_HOME/.git/tikk.lock sleep 7`, `target/debug/tikk show <id> --json` waits five
   seconds, then exits with 1 and `locked`.

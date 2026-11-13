@@ -33,6 +33,11 @@ breaks these rules. A command that writes a ticket checks its links to other tic
 required on plans and slices only, and no other kind holds them. An instruction covers all of its
 slice's criteria unless it names some. `tikk review add` accepts a slice or an instruction only.
 
+`rank` orders siblings: tickets with the same parent, or the tickets without a parent in one
+project. Ranked tickets come first, by rank, then the others by ID. Placing a ticket among its
+siblings renumbers them all from 1 in the new order. A move to a new parent clears the ticket's
+rank, because the old rank ordered the old siblings.
+
 ## Consequences
 
 ### Positive
