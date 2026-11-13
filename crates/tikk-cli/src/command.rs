@@ -142,7 +142,8 @@ pub(crate) enum Command {
         #[arg(long, value_name = "TEXT", value_parser = parse_text)]
         text: String,
     },
-    /// List what waits on the user, and the problems in the store. It runs no `gh` and no Git.
+    /// List what waits on the user, and the problems in the store. It runs no `gh` and no network
+    /// Git.
     Needs,
     /// Record the PR of a slice, and read the state of linked PRs. Only these commands run `gh`.
     Pr {
