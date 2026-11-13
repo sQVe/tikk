@@ -69,7 +69,6 @@ pub(crate) fn append_pr(
     observation: PrObservation,
     lease: &LeaseEffects,
 ) -> Result<ShownPr, StoreError> {
-    let mut facts = read_facts(root)?.facts;
     let fact = FactLine {
         ticket: slice.clone(),
         at: (lease.now)(),
@@ -77,13 +76,13 @@ pub(crate) fn append_pr(
     };
 
     append_fact(root, &fact, lease.append_line)?;
-    facts.push(fact);
-    // A stable sort keeps the new line after older lines of the same time, as a read would.
-    facts.sort_by_key(|fact| fact.at);
+
+    // Read the facts again so a tie in time orders by file and line, as `show` does.
+    let facts = read_facts(root)?.facts;
 
     Ok(current_prs(&facts)
         .remove(slice)
-        .expect("the appended pr fact names the slice's PR"))
+        .expect("the slice has the pr fact just appended"))
 }
 
 pub(crate) fn check_linkable(scan: &TicketScan, slice: &TicketId) -> Result<(), StoreError> {
@@ -125,7 +124,7 @@ mod tests {
     use super::{PrEffects, link_pr};
     use crate::fact::{
         AgentName, Claim, FactEvent, FactLine, PrObservation, PrState, PullRequest, Timestamp,
-        current_claims,
+        current_claims, current_prs, write_fact_line,
     };
     use crate::store::claim_lease::LeaseEffects;
     use crate::store::fact_files::{append_fact, append_line, read_facts};
@@ -335,6 +334,44 @@ mod tests {
 
         assert_eq!(shown.observation, in_trunk);
         assert_eq!(shown.checked_at, one_hour());
+    }
+
+    #[test]
+    fn link_returns_the_pr_show_selects_when_another_machine_wrote_one_in_the_same_millisecond() {
+        let (directory, store) = store_with_claimed_slice("manager");
+        let other_pr = PrObservation {
+            pull_request: PullRequest::new("owner/app", 8).expect("a valid PR"),
+            state: PrState::Open,
+            base: "main".to_owned(),
+            head: "other".to_owned(),
+            merge_commit: None,
+            in_trunk: false,
+        };
+        let tie = FactLine {
+            ticket: id("personal-kkkk"),
+            at: one_hour(),
+            event: FactEvent::Pr(other_pr),
+        };
+        let later_machine = directory
+            .path()
+            .join(format!("facts/zeta/{}.jsonl", one_hour().month()));
+        append_line(&later_machine, &write_fact_line(&tie)).expect("write the other fact");
+
+        let shown = link_pr(
+            &store,
+            &id("personal-kkkk"),
+            &pull_request(),
+            &Identity::default(),
+            &effects(open_gh),
+        )
+        .expect("the PR is linked");
+
+        let facts = read_facts(store.root()).expect("read the facts").facts;
+        let selected = current_prs(&facts)
+            .remove(&id("personal-kkkk"))
+            .expect("the slice has a PR");
+        assert_eq!(shown.observation, selected.observation);
+        assert_eq!(shown.checked_at, selected.checked_at);
     }
 
     #[test]
