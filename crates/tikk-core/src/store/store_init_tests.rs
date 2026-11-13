@@ -487,6 +487,49 @@ fn git_after_a_stray_file(directory: &Path, arguments: &[&str]) -> Result<Vec<u8
     (StoreEffects::system().run_git)(directory, arguments)
 }
 
+// Another program writes a plain file at the raced root just before the first commit, so the rename
+// of the store folder onto it fails with an error that is not a collision.
+fn git_after_a_file_at_the_store_path(
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Vec<u8>, StoreError> {
+    if arguments.contains(&"commit") {
+        fs::write(raced_root(), "not a folder").expect("write a file at the store path");
+    }
+
+    (StoreEffects::system().run_git)(directory, arguments)
+}
+
+#[test]
+fn init_reports_a_rename_error_that_is_not_a_collision_and_keeps_the_destination() {
+    let directory = temporary_directory();
+    let root = directory.path().join("store");
+    RACED_ROOT.with(|raced| raced.replace(Some(root.clone())));
+    let effects = StoreEffects {
+        run_git: git_after_a_file_at_the_store_path,
+        read_host_name: laptop_host,
+    };
+
+    let error = init(&root, None, &effects).expect_err("a folder cannot replace a file");
+
+    assert!(
+        matches!(
+            &error,
+            StoreError::Io { action: "rename", path, source }
+                if *path == root && source.kind() == std::io::ErrorKind::NotADirectory
+        ),
+        "{error:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&root).expect("read the file at the store path"),
+        "not a folder"
+    );
+    assert_eq!(
+        sorted_names(directory.path()),
+        vec![OsString::from("store")]
+    );
+}
+
 #[test]
 fn init_that_loses_the_rename_reports_the_winning_store() {
     let directory = temporary_directory();
