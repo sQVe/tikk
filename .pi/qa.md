@@ -2,7 +2,8 @@
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
 `tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `block`, `unblock`,
-`move`, `rank`, `claim`, `release`, `ready`, `sync`, `--help`, and `--version`, and `tikk-desktop`
+`move`, `rank`, `claim`, `release`, `ready`, `sync`, `pr link`, `pr refresh`, `--help`, and
+`--version`, and `tikk-desktop`
 is a stub. A mock scene of the UI
 opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
 folder under `/tmp`.
@@ -41,12 +42,12 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
 A journey is one user's path through several commands. Each journey file lists its steps, and its
 test runs them against the built binary.
 
-| Journey                                                     | Goal                                                                            | Run it when the change touches                                                                                  | Test                                                    |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                               | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                                                 | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
-| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand.       | `tikk new --file`, `show`, `ready`, `claim`, `done`, ticket validation                                          | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
-| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.                  | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, `sync`, `claim`, ID clashes, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
-| [two-machines](qa/journeys/two-machines.md)                 | See the same tickets on both machines, and never let two agents hold one slice. | `tikk init --remote`, `sync`, `claim`, `release`, Git calls of sync                                             | `crates/tikk-cli/tests/journey_two_machines.rs`         |
+| Journey                                                     | Goal                                                                            | Run it when the change touches                                                                                                | Test                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                               | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                                                               | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand.       | `tikk new --file`, `show`, `ready`, `claim`, `done`, `pr link`, ticket validation                                             | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.                  | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, `sync`, `claim`, `pr refresh`, ID clashes, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
+| [two-machines](qa/journeys/two-machines.md)                 | See the same tickets on both machines, and never let two agents hold one slice. | `tikk init --remote`, `sync`, `claim`, `release`, Git calls of sync                                                           | `crates/tikk-cli/tests/journey_two_machines.rs`         |
 
 ## Before a launch
 
@@ -111,7 +112,13 @@ network steps (`fetch`, `push`, `ls-remote`, and `clone`) keep it, so a credenti
 `url.<base>.insteadOf` there applies, and they stop after 30 seconds. `tikk init --remote` resolves a relative
 path that names a folder from the working directory and saves it as an absolute `origin`; any
 other relative name, such as an `insteadOf` alias, stays as given. Without
-`--machine`, it also starts `uname -n`. All run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
+`--machine`, it also starts `uname -n`. `tikk pr link` and `tikk pr refresh` start `gh` with
+`GH_PROMPT_DISABLED=1` and no standard input, and stop it after 30 seconds. They run
+`gh pr view <number> --repo <owner/name> --json number,state,baseRefName,headRefOid,mergeCommit`,
+and for a merged PR also `gh repo view <owner/name> --json defaultBranchRef`, then, when the PR
+merged into a branch other than trunk and has a merge commit,
+`gh api repos/<owner/name>/compare/<trunk>...<merge commit>`. No other command starts `gh`. All
+run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
 and its arguments. It runs the program with no shell, with those arguments and then the ticket file
 path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
 `noEditor`.
@@ -273,6 +280,47 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   of the project that `tikk new` would choose, such as `tikk` from the worktree root, and
   `--project <p>` lists another project's. `--parent` with `--project` exits with 2. Without
   `--json`, it prints the candidate rows, then `skipped: <row>` with each hold indented below it.
+- `tikk pr link` and `tikk pr refresh` need a fake `gh`, never the real one. Make a folder with an
+  executable `bin/gh` that is a copy of the `SCRIPT` text in
+  `crates/tikk-cli/tests/support/gh.rs`, and run each command with `PATH=<folder>/bin:$PATH`. The
+  script logs each call to `<folder>/calls.log` and answers from
+  `<folder>/responses/pr/<owner>/<name>/<number>.json`, `responses/repo/<owner>/<name>.json`, and
+  `responses/api/repos/<owner>/<name>/compare/main...<merge commit>.json`. A `.fail` file in place
+  of a `.json` file makes the call print its text on standard error and exit with 1. An open PR is
+  `{"number":7,"state":"OPEN","baseRefName":"main","headRefOid":"abc123","mergeCommit":null}`, and
+  the repository is `{"defaultBranchRef":{"name":"main"}}`.
+- `target/debug/tikk pr link <slice> https://github.com/owner/app/pull/7 --json` exits with 0,
+  prints `{"id":<slice>,"pr":{"base":"main","head":"abc123","inTrunk":false,"mergeCommit":null,"number":7,"prCheckedAt":...,"repository":"owner/app","state":"open","url":"https://github.com/owner/app/pull/7"}}`,
+  logs one `pr view 7 --repo owner/app --json number,state,baseRefName,headRefOid,mergeCommit`
+  call, and appends a `{"v":1,"kind":"pr",...}` line with those fields to the fact file. Without
+  `--json`, it prints `<slice>  <url> open at abc123, checked <time>`. A URL that is not
+  `https://github.com/<owner>/<name>/pull/<number>` exits with 2 and `invalidArguments`, and a plan
+  exits with 1 and `wrongKind`. With another agent's `TIKK_AGENT` on a live claim, it exits with 1
+  and `claimed`, logs no `gh` call, and writes nothing. With the holder's `TIKK_AGENT`, it moves
+  the slice's `leaseEnd` forward. With `PATH` set to an empty folder, it exits with 1 and
+  `ghError`, and the error has `pullRequests` with the slice's `id`, `repository`, `number`,
+  `url`, and `message`.
+- After a link, `target/debug/tikk show <slice> --json` has `pr` with the same fields, and
+  `prCheckedAt` is the time of the newest `pr` line of that PR. Without `--json`, it prints a
+  `pr: <url> open at abc123, checked <time>` line. A ticket with no PR has `"pr":null`.
+- After a link, `target/debug/tikk ready --parent <plan> --json` lists a slice whose own
+  `blockedBy` names the linked slice as a candidate with
+  `"stackParent":{"head":"abc123","number":7,"prCheckedAt":...,"repository":"owner/app","slice":<linked slice>,"url":...}`.
+  Other candidates have `"stackParent":null`. Without `--json`, the candidate row is followed by
+  `  stacks on <url> of <linked slice> at abc123, checked <time>`. `tikk ready` and `tikk show`
+  add no line to `calls.log`.
+- `target/debug/tikk pr refresh --json` reads every linked PR not yet in trunk and prints
+  `{"refreshed":[{"id":<slice>,"pr":{...}}]}`. A PR answered as `"state":"MERGED"` with
+  `"baseRefName":"feature"` and `"mergeCommit":{"oid":"def456"}` logs a `repo view` and an
+  `api repos/owner/app/compare/main...def456` call, and has `"inTrunk":false` while the compare
+  answer is `{"status":"ahead"}` and `"inTrunk":true` after it is `{"status":"behind"}`. The next
+  `tikk pr refresh --json` prints `{"refreshed":[]}` and logs no call. `tikk pr refresh <slice>`
+  reads that slice's PR even when it is in trunk, and a slice with no PR exits with 1 and
+  `notLinked`. Without `--json`, it prints a line per PR, or `No PR to refresh.`
+- When the fake `gh` fails for one of two linked PRs, `target/debug/tikk pr refresh --json` exits
+  with 1, records the other PR, and prints
+  `{"error":{"code":"ghError","message":"gh could not read <url> of <slice> (...)","pullRequests":[...]}}`
+  that names only the failed PR. `tikk ready` then still exits with 0.
 - `target/debug/tikk init --remote <remote> --machine laptop --json`, with an empty local bare
   remote made by `git init --bare --initial-branch=main /tmp/tikk-qa-remote.git`, exits with 0,
   prints `{"created":true,"store":"<TIKK_HOME>"}`, and pushes the first commit

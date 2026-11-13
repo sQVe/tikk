@@ -10,7 +10,7 @@ Take a slice from ready to done, with no step that marks it done by hand.
 
 ## Test
 
-`crates/tikk-cli/tests/journey_manager_runs_a_slice.rs`
+`crates/tikk-cli/tests/journey_manager_runs_a_slice.rs`, with a fake `gh`.
 
 ## Steps
 
@@ -24,10 +24,14 @@ Take a slice from ready to done, with no step that marks it done by hand.
 4. `tikk new --file instruction.md --json` creates an instruction under the first slice, and
    `tikk done <instruction>` marks it done. `tikk show <first> --json` lists the instruction as
    done and a later `leaseEnd`.
+5. `tikk pr link <first> <url>` with an open PR. `tikk show <first> --json` has the PR number,
+   state, and `prCheckedAt`. `tikk ready --json` offers the second slice with that PR as its
+   stack parent.
 
 ## End state
 
 The store holds the plan, its two slices, and the done instruction under the first slice.
 `tikk show <first> --json` returns a `claim` held by the manager in the state `claimed`, with a
-`leaseEnd` later than the one `tikk claim` returned. `tikk show <second> --json` returns the first
-slice in `blockedBy`.
+`leaseEnd` later than the one `tikk claim` returned, and a `pr` in the state `open`.
+`tikk show <second> --json` returns the first slice in `blockedBy`, and `tikk ready --json` offers
+the second slice with the first slice's PR as its `stackParent`.
