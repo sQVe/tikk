@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use crate::fact::{FactEvent, FactLine, PrObservation, PullRequest, ShownPr};
+use crate::fact::{FactEvent, FactLine, PrObservation, PullRequest, ShownPr, current_prs};
 use crate::store::claim_lease::{LeaseEffects, check_holder, write_for_slice};
-use crate::store::fact_files::append_fact;
+use crate::store::fact_files::{append_fact, read_facts};
 use crate::store::identity::Identity;
 use crate::store::pr_github::{self, PrFailure, RunGh, read_pull_request};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
@@ -69,19 +69,21 @@ pub(crate) fn append_pr(
     observation: PrObservation,
     lease: &LeaseEffects,
 ) -> Result<ShownPr, StoreError> {
-    let now = (lease.now)();
+    let mut facts = read_facts(root)?.facts;
     let fact = FactLine {
         ticket: slice.clone(),
-        at: now,
-        event: FactEvent::Pr(observation.clone()),
+        at: (lease.now)(),
+        event: FactEvent::Pr(observation),
     };
 
     append_fact(root, &fact, lease.append_line)?;
+    facts.push(fact);
+    // A stable sort keeps the new line after older lines of the same time, as a read would.
+    facts.sort_by_key(|fact| fact.at);
 
-    Ok(ShownPr {
-        observation,
-        checked_at: now,
-    })
+    Ok(current_prs(&facts)
+        .remove(slice)
+        .expect("the appended pr fact names the slice's PR"))
 }
 
 pub(crate) fn check_linkable(scan: &TicketScan, slice: &TicketId) -> Result<(), StoreError> {
@@ -122,7 +124,8 @@ mod tests {
 
     use super::{PrEffects, link_pr};
     use crate::fact::{
-        AgentName, Claim, FactEvent, FactLine, PrState, PullRequest, Timestamp, current_claims,
+        AgentName, Claim, FactEvent, FactLine, PrObservation, PrState, PullRequest, Timestamp,
+        current_claims,
     };
     use crate::store::claim_lease::LeaseEffects;
     use crate::store::fact_files::{append_fact, append_line, read_facts};
@@ -301,6 +304,37 @@ mod tests {
         );
         assert_eq!(CALLS.with(|calls| calls.take()), Vec::<String>::new());
         assert_eq!(fact_count(&store), 1);
+    }
+
+    #[test]
+    fn link_returns_the_state_show_selects_when_a_weaker_read_follows_a_stronger_fact() {
+        let (directory, store) = store_with_claimed_slice("manager");
+        let in_trunk = PrObservation {
+            pull_request: pull_request(),
+            state: PrState::Merged,
+            base: "main".to_owned(),
+            head: "head".to_owned(),
+            merge_commit: Some("merge".to_owned()),
+            in_trunk: true,
+        };
+        let earlier = FactLine {
+            ticket: id("personal-kkkk"),
+            at: Timestamp::from_system_time(SystemTime::UNIX_EPOCH),
+            event: FactEvent::Pr(in_trunk.clone()),
+        };
+        append_fact(directory.path(), &earlier, append_line).expect("append the merged fact");
+
+        let shown = link_pr(
+            &store,
+            &id("personal-kkkk"),
+            &pull_request(),
+            &Identity::default(),
+            &effects(open_gh),
+        )
+        .expect("the PR is linked");
+
+        assert_eq!(shown.observation, in_trunk);
+        assert_eq!(shown.checked_at, one_hour());
     }
 
     #[test]
