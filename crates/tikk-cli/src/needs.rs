@@ -2,14 +2,14 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use tikk_core::{
-    Attention, AttentionItem, AttentionProblem, AttentionReason, QueryEffects, Store, StoreError,
-    TicketId,
+    Attention, AttentionEffects, AttentionItem, AttentionProblem, AttentionReason, Store,
+    StoreError, TicketId,
 };
 
 use crate::output::Output;
 use crate::pr::{pr_json, pr_text};
 
-pub(crate) fn run(store: &Store, effects: &QueryEffects) -> Result<Output, StoreError> {
+pub(crate) fn run(store: &Store, effects: &AttentionEffects) -> Result<Output, StoreError> {
     let attention = tikk_core::read_attention(store, effects)?;
 
     Ok(Output {

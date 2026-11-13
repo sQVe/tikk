@@ -58,7 +58,9 @@ refuses an `answer`, and an answer renews no lease.
 (`parseError`), IDs in more than one file (`idShared`), fact lines that do not parse
 (`factUnreadable`), and the last sync, read from its saved result, when it stopped (`syncFailed`)
 or reported a problem (`syncProblem`), with the files it names. A saved result that cannot be read
-is `syncResultUnreadable`. Each problem keeps the path fields that `tikk ls` and `tikk sync` use.
+is `syncResultUnreadable`. A store with no `origin` remote is a valid local-only store, so
+`tikk needs` reads the store's `origin` and, without one, leaves out a saved problem of the
+`fetch` step. Every other saved problem and a stopped sync still show. Each problem keeps the path fields that `tikk ls` and `tikk sync` use.
 A ticket file that cannot be read at all still fails the command, as it fails `tikk ls`.
 
 ## Consequences
@@ -71,8 +73,7 @@ A ticket file that cannot be read at all still fails the command, as it fails `t
 ### Negative
 
 - The desktop app cannot show anything the query does not return.
-- A store with no remote lists the fetch problem of its last sync, claim, or release, because
-  that sync reports it.
+- `tikk needs` starts `git config` in the store to read its `origin`, so it is not free of Git.
 - A merge shows only after a `tikk pr refresh`, because `tikk needs` runs no `gh`.
 
 ## Alternatives considered

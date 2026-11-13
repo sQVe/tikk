@@ -106,7 +106,8 @@ Never:
 
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
 `--parent` and `--project`, `tikk ready` without them, and `tikk audit` without `--repository`
-start `git config --get remote.origin.url` in the working directory. `tikk sync` and
+start `git config --get remote.origin.url` in the working directory. `tikk needs` starts the same
+command in the store, with the policy of a local sync step. `tikk sync` and
 `tikk init --remote` start `git` in the store with no hook, no signing, and no terminal prompt, as
 the author `tikk <tikk@localhost>`. Their local steps read no global or system Git config. Their
 network steps (`fetch`, `push`, `ls-remote`, and `clone`) keep it, so a credential helper or a
@@ -390,7 +391,7 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   `{"answer":...,"askedAt":...,"item":...,"text":...}` per question in the order asked, with
   `answer` `null` until an answer. Without `--json`, each question is one line:
   `question <item>: <text> (open)`, or `question <item>: <text> answer: <answer>`.
-- `target/debug/tikk needs --json` exits with 0, runs no `gh` and no Git, and prints
+- `target/debug/tikk needs --json` exits with 0, runs no `gh` and no network Git, and prints
   `{"items":[...],"problems":[...]}`. Items come in this order of reasons, then by ID:
   - `question` with `id`, `item`, and `text` for each open question.
   - `staleClaim` with `id`, `holder`, and `leaseEnd` for a claim whose lease ended. Append a claim
@@ -403,8 +404,10 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   Problems carry a `code`: `parseError` with `path` for a broken ticket file, `idShared` with `id`
   and `paths` for a copied ticket file, `factUnreadable` with `path` and `line` for a fact line
   such as `{"v":1,`, and `syncFailed` with `at`, `message`, and `files` after a `tikk sync` that
-  stopped on a conflict. In a store with no remote, the last sync, claim, or release leaves a
-  `syncProblem` with `"step":"fetch"`. Without `--json`, it prints one line per item, such as
+  stopped on a conflict, and `syncProblem` with `step` for a sync step that failed. In a store with
+  no `origin` remote, a sync, claim, or release leaves no `syncProblem` of the `fetch` step in
+  `needs`, so such a store can list no items and no problems. With an `origin` that cannot be
+  fetched, the `fetch` problem shows. Without `--json`, it prints one line per item, such as
   `<task>  blockingTask: blocks <slice>`, then one `problem <code>: <path>: <message>` line per
   problem, or `Nothing waits on you.` when both lists are empty.
 - `target/debug/tikk init --remote <remote> --machine laptop --json`, with an empty local bare

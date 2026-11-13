@@ -5,7 +5,7 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::fact::AttentionProblem;
-use crate::store::sync::RESULT_FILE;
+use crate::store::sync::{RESULT_FILE, SyncStep};
 
 // A saved outcome has `problems`, and a sync that stopped has `error`, with `conflict` for a
 // conflict.
@@ -26,8 +26,9 @@ struct SavedProblem {
     files: Vec<String>,
 }
 
-// The caller holds the store lock. No saved result means no sync ran, which is not a problem.
-pub(crate) fn read_sync_problems(root: &Path) -> Vec<AttentionProblem> {
+// The caller holds the store lock. No saved result means no sync ran, which is not a problem. A
+// store with no `origin` remote is local only, so the fetch it could not run is not a problem.
+pub(crate) fn read_sync_problems(root: &Path, has_origin: bool) -> Vec<AttentionProblem> {
     let path = root.join(RESULT_FILE);
     let unreadable = |message: String| {
         vec![AttentionProblem::SyncResultUnreadable {
@@ -59,6 +60,7 @@ pub(crate) fn read_sync_problems(root: &Path) -> Vec<AttentionProblem> {
 
     problems
         .into_iter()
+        .filter(|problem| has_origin || problem.step != SyncStep::Fetch.as_str())
         .map(|problem| AttentionProblem::SyncProblem {
             at: saved.at.clone(),
             step: problem.step,
@@ -76,6 +78,10 @@ mod tests {
     use crate::fact::AttentionProblem;
 
     fn read(saved: Option<&str>) -> Vec<AttentionProblem> {
+        read_with_origin(saved, true)
+    }
+
+    fn read_with_origin(saved: Option<&str>, has_origin: bool) -> Vec<AttentionProblem> {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         fs::create_dir(directory.path().join(".git")).expect("create the Git folder");
 
@@ -84,7 +90,7 @@ mod tests {
                 .expect("write the saved result");
         }
 
-        read_sync_problems(directory.path())
+        read_sync_problems(directory.path(), has_origin)
     }
 
     #[test]
@@ -145,5 +151,40 @@ mod tests {
                 "case {saved}: {problems:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_store_with_no_origin_drops_only_the_fetch_problem() {
+        let outcome = "{\"at\":\"2026-11-13T01:00:00.000Z\",\"problems\":[{\"step\":\"fetch\",\"message\":\"no origin\"},{\"step\":\"commit\",\"message\":\"failed\"}]}";
+        let stopped = "{\"at\":\"2026-11-13T01:00:00.000Z\",\"error\":\"Sync stopped.\"}";
+
+        let kept = read_with_origin(Some(outcome), false);
+        let failed = read_with_origin(Some(stopped), false);
+
+        assert!(
+            matches!(kept.as_slice(), [AttentionProblem::SyncProblem { step, .. }] if step == "commit"),
+            "{kept:?}"
+        );
+        assert!(
+            matches!(failed.as_slice(), [AttentionProblem::SyncFailed { .. }]),
+            "{failed:?}"
+        );
+    }
+
+    #[test]
+    fn a_saved_result_that_cannot_be_read_is_a_problem() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        fs::create_dir_all(directory.path().join(".git/tikk-sync.json"))
+            .expect("put a folder where the result file goes");
+
+        let problems = read_sync_problems(directory.path(), true);
+
+        assert!(
+            matches!(
+                problems.as_slice(),
+                [AttentionProblem::SyncResultUnreadable { path, .. }] if path.ends_with(".git/tikk-sync.json")
+            ),
+            "{problems:?}"
+        );
     }
 }

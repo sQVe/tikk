@@ -48,7 +48,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
-pub use attention_read::read_attention;
+pub use attention_read::{AttentionEffects, read_attention};
 pub use audit::{AuditEffects, AuditRequest, audit_slice};
 pub use audit_check::{AuditCheck, AuditReason};
 pub use claim_lease::LeaseEffects;

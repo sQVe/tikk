@@ -201,3 +201,44 @@ fn a_broken_ticket_file_an_id_clash_and_a_broken_fact_line_are_problems() {
     assert_eq!(problems[2]["line"], json!(1));
     assert_eq!(listed["items"], json!([]));
 }
+
+#[test]
+fn a_store_with_no_remote_lists_no_fetch_problem_after_a_claim_a_release_or_a_sync() {
+    let home = Home::initialized();
+    let (_plan, slice) = home.plan_and_slice();
+    let steps: [&[&str]; 3] = [
+        &["claim", &slice, "--json"],
+        &["release", &slice, "--json"],
+        &["sync", "--json"],
+    ];
+
+    for arguments in steps {
+        let run = home.tikk_as("manager", arguments);
+        assert_eq!(run.exit_code, 0, "{arguments:?}: {}", run.stderr);
+
+        assert_eq!(
+            needs(&home),
+            json!({ "items": [], "problems": [] }),
+            "after {arguments:?}"
+        );
+    }
+}
+
+#[test]
+fn a_store_whose_remote_cannot_be_fetched_lists_the_fetch_problem() {
+    let remote = Remote::new();
+    let home = Home::on_remote(&remote, "test");
+    let missing = remote.path().join("missing.git");
+    home.git(&[
+        "remote",
+        "set-url",
+        "origin",
+        missing.to_str().expect("a UTF-8 path"),
+    ]);
+    home.sync_json();
+
+    let problems = &needs(&home)["problems"];
+
+    assert_eq!(problems[0]["code"], json!("syncProblem"), "{problems}");
+    assert_eq!(problems[0]["step"], json!("fetch"), "{problems}");
+}

@@ -5,9 +5,9 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
 use tikk_core::{
-    AnswerEffects, AskEffects, AuditEffects, AuditRequest, ClaimEffects, EditEffects, Identity,
-    PrEffects, QueryEffects, ReadyEffects, ReadyScope, RemoteInitEffects, StoreEffects, StoreError,
-    SyncEffects, TicketEffects, WriteEffects,
+    AnswerEffects, AskEffects, AttentionEffects, AuditEffects, AuditRequest, ClaimEffects,
+    EditEffects, Identity, PrEffects, QueryEffects, ReadyEffects, ReadyScope, RemoteInitEffects,
+    StoreEffects, StoreError, SyncEffects, TicketEffects, WriteEffects,
 };
 
 use crate::command::{Cli, Command, PrCommand};
@@ -37,6 +37,7 @@ pub(crate) struct Environment {
     pub(crate) audit_effects: AuditEffects,
     pub(crate) ask_effects: AskEffects,
     pub(crate) answer_effects: AnswerEffects,
+    pub(crate) attention_effects: AttentionEffects,
     pub(crate) remote_init_effects: RemoteInitEffects,
     pub(crate) sync_effects: SyncEffects,
 }
@@ -63,6 +64,7 @@ impl Environment {
             audit_effects: AuditEffects::system(),
             ask_effects: AskEffects::system(),
             answer_effects: AnswerEffects::system(),
+            attention_effects: AttentionEffects::system(),
             remote_init_effects: RemoteInitEffects::system(),
             sync_effects: SyncEffects::system(),
         }
@@ -240,7 +242,7 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &text,
             &environment.answer_effects,
         ),
-        Command::Needs => needs::run(&tikk_core::open(&store)?, &environment.query_effects),
+        Command::Needs => needs::run(&tikk_core::open(&store)?, &environment.attention_effects),
         Command::Pr {
             command: PrCommand::Link { id, url },
         } => pr::run_link(
