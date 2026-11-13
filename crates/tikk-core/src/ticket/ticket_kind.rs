@@ -34,6 +34,13 @@ impl Kind {
         }
     }
 
+    pub fn can_sit_under(self, parent: Kind) -> bool {
+        matches!(
+            (self, parent),
+            (Self::Slice, Self::Plan) | (Self::Instruction, Self::Slice) | (Self::Task, Self::Plan)
+        )
+    }
+
     pub(crate) fn allows(self, status: Status) -> bool {
         match self {
             Self::Plan | Self::Slice => {

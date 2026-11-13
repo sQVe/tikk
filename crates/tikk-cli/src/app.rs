@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use clap::error::ErrorKind;
@@ -14,7 +14,9 @@ use crate::command::{Cli, Command, PrCommand};
 use crate::output::{Exit, Failure, Output, Response};
 use crate::ready::ready_output;
 use crate::ticket_row::written_output;
-use crate::{audit, claim, edit, init, ls, needs, new, pr, question, show, store_error, sync};
+use crate::{
+    audit, claim, completion, edit, init, ls, needs, new, pr, question, show, store_error, sync,
+};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -73,6 +75,7 @@ impl Environment {
 
 pub(crate) fn run(arguments: Vec<OsString>, environment: Environment) -> Response {
     let asks_for_json = asks_for_json(&arguments);
+    let program = arguments.first().cloned().unwrap_or_default();
     let cli = match Cli::try_parse_from(arguments) {
         Ok(cli) => cli,
         Err(error) => return usage_response(asks_for_json, &error),
@@ -93,14 +96,19 @@ pub(crate) fn run(arguments: Vec<OsString>, environment: Environment) -> Respons
         return usage_response(cli.json, &error);
     };
 
-    match run_command(command, environment) {
+    match run_command(command, &program, environment) {
         Ok(output) => Response::success(cli.json, &output),
         Err(error) => Response::failure(cli.json, &store_error::failure(&error)),
     }
 }
 
-fn run_command(command: Command, environment: Environment) -> Result<Output, StoreError> {
-    let store = tikk_core::store_path(environment.tikk_home, environment.home)?;
+fn run_command(
+    command: Command,
+    program: &OsStr,
+    environment: Environment,
+) -> Result<Output, StoreError> {
+    // Each command that uses the store unwraps the path, so `tikk completions` runs without one.
+    let store = tikk_core::store_path(environment.tikk_home, environment.home);
     // Only the commands that act for the caller parse the identity, so a bad value stops no other.
     let caller = Identity::from_environment(
         environment.agent,
@@ -112,53 +120,53 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
         Command::Init {
             machine,
             remote: None,
-        } => init::run(&store, machine, &environment.effects),
+        } => init::run(&store?, machine, &environment.effects),
         Command::Init {
             machine,
             remote: Some(remote),
         } => init::run_remote(
-            &store,
+            &store?,
             &init::RemoteLocation::resolve(&remote, &environment.working_directory)?,
             machine,
             &environment.remote_init_effects,
         ),
-        Command::Sync => sync::run(&tikk_core::open(&store)?, &environment.sync_effects),
+        Command::Sync => sync::run(&tikk_core::open(&store?)?, &environment.sync_effects),
         Command::New(arguments) => new::run(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             arguments,
             environment.working_directory,
             caller?,
             &environment.ticket_effects,
         ),
         Command::Show { id } => {
-            show::run(&tikk_core::open(&store)?, &id, &environment.query_effects)
+            show::run(&tikk_core::open(&store?)?, &id, &environment.query_effects)
         }
         Command::Ls(arguments) => ls::run(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             arguments,
             &environment.query_effects,
         ),
         Command::Write { id, file, hash } => tikk_core::write_ticket(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             tikk_core::TicketWrite { id, file, hash },
             &environment.write_effects,
         )
         .map(|written| written_output(&written)),
         Command::Edit { id } => edit::run(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             environment.editor.as_deref(),
             &environment.edit_effects,
         ),
         Command::Done { id } => tikk_core::mark_done(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &caller?,
             &environment.write_effects,
         )
         .map(|done| written_output(&done)),
         Command::Cancel { id, reason } => tikk_core::cancel_ticket(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &reason,
             &caller?,
@@ -166,47 +174,47 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
         )
         .map(|canceled| written_output(&canceled)),
         Command::Block { id, blocker } => tikk_core::block_ticket(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &blocker,
             &environment.write_effects,
         )
         .map(|blocked| written_output(&blocked)),
         Command::Unblock { id, blocker } => tikk_core::unblock_ticket(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &blocker,
             &environment.write_effects,
         )
         .map(|unblocked| written_output(&unblocked)),
         Command::Move { id, new_parent } => tikk_core::move_ticket(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             new_parent.parent.as_ref(),
             &environment.write_effects,
         )
         .map(|moved| written_output(&moved)),
         Command::Rank { id, place } => tikk_core::rank_ticket(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &place.place(),
             &environment.write_effects,
         )
         .map(|ranked| written_output(&ranked)),
         Command::Claim { id } => claim::run_claim(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &caller?,
             &environment.claim_effects,
         ),
         Command::Release { id } => claim::run_release(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &caller?,
             &environment.claim_effects,
         ),
         Command::Ready(arguments) => tikk_core::ready_slices(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             ReadyScope {
                 parent: arguments.parent,
                 project: arguments.project,
@@ -216,7 +224,7 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
         )
         .map(|queue| ready_output(&queue)),
         Command::Audit(arguments) => audit::run(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &AuditRequest {
                 slice: arguments.id,
                 hash: arguments.hash,
@@ -229,24 +237,24 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &environment.audit_effects,
         ),
         Command::Ask { id, text } => question::run_ask(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &text,
             &caller?,
             &environment.ask_effects,
         ),
         Command::Answer { id, item, text } => question::run_answer(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &item,
             &text,
             &environment.answer_effects,
         ),
-        Command::Needs => needs::run(&tikk_core::open(&store)?, &environment.attention_effects),
+        Command::Needs => needs::run(&tikk_core::open(&store?)?, &environment.attention_effects),
         Command::Pr {
             command: PrCommand::Link { id, url },
         } => pr::run_link(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             &id,
             &url,
             &caller?,
@@ -255,10 +263,15 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
         Command::Pr {
             command: PrCommand::Refresh { id },
         } => pr::run_refresh(
-            &tikk_core::open(&store)?,
+            &tikk_core::open(&store?)?,
             id.as_ref(),
             &environment.pr_effects,
         ),
+        Command::Completions { shell } => Ok(completion::script_output(
+            shell,
+            program,
+            &environment.working_directory,
+        )),
     }
 }
 

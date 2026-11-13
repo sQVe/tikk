@@ -73,14 +73,18 @@ fn anchors_itself(place: &RankPlace, id: &TicketId) -> bool {
     }
 }
 
+/// Returns whether the two tickets share a parent and a project, so a rank can order one against the
+/// other. A ticket is its own sibling.
+pub fn are_siblings(ticket: &StoredTicket, other: &StoredTicket) -> bool {
+    other.document.fields.parent() == ticket.document.fields.parent()
+        && other.id.project() == ticket.id.project()
+}
+
 fn sorted_siblings<'a>(scan: &'a TicketScan, ticket: &StoredTicket) -> Vec<&'a StoredTicket> {
-    let parent = ticket.document.fields.parent();
     let mut siblings: Vec<&StoredTicket> = scan
         .tickets
         .iter()
-        .filter(|other| {
-            other.document.fields.parent() == parent && other.id.project() == ticket.id.project()
-        })
+        .filter(|other| are_siblings(ticket, other))
         .collect();
 
     siblings.sort_by(|left, right| list_order(left, right));

@@ -89,6 +89,17 @@ pub fn list_tickets(
     })
 }
 
+/// Reads the tickets that parse, without the store lock, for a caller that must never wait or
+/// write, such as shell completion. It may see a ticket set that a concurrent write is changing.
+/// Files that do not parse are left out.
+pub fn read_tickets_unlocked(store: &Store) -> Result<Vec<StoredTicket>, StoreError> {
+    let mut tickets = read_tickets(store.root())?.tickets;
+
+    sort_tickets(&mut tickets);
+
+    Ok(tickets)
+}
+
 pub fn show_ticket(
     store: &Store,
     id: &TicketId,

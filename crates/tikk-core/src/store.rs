@@ -80,9 +80,10 @@ pub use ticket_edit::{EditEffects, edit_ticket};
 pub use ticket_files::{StoredTicket, UnreadableTicket};
 pub use ticket_link_checks::{WaitLink, WaitStep};
 pub use ticket_queries::{
-    QueryEffects, ShownTicket, TicketFilter, TicketListing, list_tickets, show_ticket,
+    QueryEffects, ShownTicket, TicketFilter, TicketListing, list_tickets, read_tickets_unlocked,
+    show_ticket,
 };
-pub use ticket_rank::{RankPlace, rank_ticket};
+pub use ticket_rank::{RankPlace, are_siblings, rank_ticket};
 pub use ticket_relations::{block_ticket, move_ticket, unblock_ticket};
 pub use ticket_status::{cancel_ticket, mark_done};
 pub use ticket_write::{TicketWrite, WriteEffects, write_ticket};
