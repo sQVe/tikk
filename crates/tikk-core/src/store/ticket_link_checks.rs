@@ -85,8 +85,14 @@ fn check_links_with(
 }
 
 fn refuse_cycle(id: &TicketId, fields: &TicketFields, scan: &TicketScan) -> Result<(), StoreError> {
+    let waits: HashMap<&TicketId, &TicketFields> = scan
+        .tickets
+        .iter()
+        .map(|ticket| (&ticket.id, &ticket.document.fields))
+        .collect();
+
     for (field, link, target) in wait_edges(fields) {
-        if let Some(path) = find_wait_path(target, id, fields, scan) {
+        if let Some(path) = find_wait_path(target, id, &waits) {
             let mut steps = vec![WaitStep {
                 waiter: id.clone(),
                 link,
@@ -114,22 +120,14 @@ fn wait_edges(fields: &TicketFields) -> impl Iterator<Item = (&'static str, Wait
     parent.into_iter().chain(blockers)
 }
 
-fn find_wait_path(
-    start: &TicketId,
+fn find_wait_path<'a>(
+    start: &'a TicketId,
     goal: &TicketId,
-    fields: &TicketFields,
-    scan: &TicketScan,
+    waits: &HashMap<&'a TicketId, &'a TicketFields>,
 ) -> Option<Vec<WaitStep>> {
-    let mut waits: HashMap<&TicketId, &TicketFields> = scan
-        .tickets
-        .iter()
-        .map(|ticket| (&ticket.id, &ticket.document.fields))
-        .collect();
     let mut reached_from: HashMap<&TicketId, (&TicketId, WaitLink)> = HashMap::new();
     let mut queue = VecDeque::from([start]);
     let mut seen = HashSet::from([start]);
-
-    waits.insert(goal, fields);
 
     while let Some(ticket) = queue.pop_front() {
         if ticket == goal {
