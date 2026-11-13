@@ -4,8 +4,8 @@ use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Writers wait at most five seconds for the store lock, so the network steps run outside it, and
-/// each gives up after this long.
+// Writers wait at most five seconds for the store lock, so the network steps run outside it, and
+// each gives up after this long.
 pub(crate) const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 const NETWORK_POLL: Duration = Duration::from_millis(20);
 
@@ -21,8 +21,8 @@ pub(crate) enum RunFailure {
     Failed(String),
 }
 
-/// Runs the command with no standard input. Output goes to files, not pipes, so a full pipe never
-/// blocks the wait. Only the child is stopped at the timeout; a program it started may outlive it.
+// Runs the command with no standard input. Output goes to files, not pipes, so a full pipe never
+// blocks the wait. Only the child is stopped at the timeout; a program it started may outlive it.
 pub(crate) fn run_within(command: &mut Command, timeout: Duration) -> Result<Finished, RunFailure> {
     let program = command.get_program().to_string_lossy().into_owned();
     let mut stdout = capture()?;
@@ -68,8 +68,8 @@ fn wait_within(
     }
 }
 
-/// Kills and reaps the child. A failure to stop it replaces the reason, since the child may still
-/// run.
+// Kills and reaps the child. A failure to stop it replaces the reason, since the child may still
+// run.
 fn stop(child: &mut Child, program: &str, reason: RunFailure) -> RunFailure {
     if let Err(error) = child.kill() {
         return RunFailure::Failed(format!("could not stop {program}: {error}"));

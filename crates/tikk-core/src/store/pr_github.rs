@@ -12,7 +12,6 @@ const VIEW_FIELDS: &str = "number,state,baseRefName,headRefOid,mergeCommit";
 
 pub(crate) type RunGh = fn(&[&str]) -> Result<Vec<u8>, String>;
 
-/// A PR that `gh` could not read, with the reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrFailure {
     pub slice: TicketId,
@@ -72,8 +71,6 @@ pub(crate) fn run_gh(arguments: &[&str]) -> Result<Vec<u8>, String> {
     run_program("gh", arguments, NETWORK_TIMEOUT)
 }
 
-/// Reads the PR's state, then, for a merged PR, whether its work is in the trunk branch: a PR
-/// merged into trunk is, and one merged into another branch is once trunk holds its merge commit.
 pub(crate) fn read_pull_request(
     run_gh: RunGh,
     pull_request: &PullRequest,
@@ -195,7 +192,6 @@ fn run_program(program: &str, arguments: &[&str], timeout: Duration) -> Result<V
     Ok(finished.stdout)
 }
 
-/// A branch name may hold `/` and other characters that change the meaning of an API path.
 fn encode_path_segment(text: &str) -> String {
     let mut encoded = String::new();
 

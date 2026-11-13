@@ -50,7 +50,6 @@ pub struct ReadySlice {
     pub stack_parent: Option<StackParent>,
 }
 
-/// A blocker slice whose PR is open, so the ready slice can start on top of that PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StackParent {
     pub slice: TicketId,
@@ -215,8 +214,6 @@ fn is_open_or_draft_slice(ticket: &StoredTicket) -> bool {
     fields.kind() == Kind::Slice && matches!(fields.status(), Status::Open | Status::Draft)
 }
 
-// A slice's own blocker that is a slice with an open PR does not hold it. The cleared blocker with
-// the smallest ID is the stack parent.
 fn blocking_holds(
     slice: &StoredTicket,
     lookups: &TicketIndex<'_>,

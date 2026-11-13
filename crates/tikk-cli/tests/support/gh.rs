@@ -3,9 +3,6 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use tempfile::{Builder, TempDir};
 
-/// Answers `gh pr view`, `gh repo view`, and `gh api` from files under `responses/`, keyed by the
-/// repository and number or the API path. A `.fail` file makes the call print its text on
-/// standard error and exit with 1. Every call is logged first, one line each.
 const SCRIPT: &str = r#"#!/bin/sh
 root=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "$*" >> "$root/calls.log"

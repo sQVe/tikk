@@ -149,7 +149,6 @@ impl Home {
         finish(command.output().expect("start the tikk binary"))
     }
 
-    /// Runs tikk with the fake `gh` first on `PATH`, as the agent when one is given.
     pub(crate) fn tikk_with_gh(&self, gh: &FakeGh, agent: Option<&str>, arguments: &[&str]) -> Run {
         let mut search = vec![gh.bin()];
 

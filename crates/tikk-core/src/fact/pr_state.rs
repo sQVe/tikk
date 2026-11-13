@@ -6,7 +6,6 @@ use crate::ticket::TicketId;
 
 const URL_START: &str = "https://github.com/";
 
-/// A GitHub PR, named by its repository `owner/name` and its number.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PullRequest {
     repository: String,
@@ -20,8 +19,6 @@ pub enum PrState {
     Merged,
 }
 
-/// What `gh` showed of a PR at one time. `in_trunk` is true once the PR's work is in the trunk
-/// branch of its repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrObservation {
     pub pull_request: PullRequest,
@@ -32,7 +29,6 @@ pub struct PrObservation {
     pub in_trunk: bool,
 }
 
-/// The state tikk shows for a slice's PR, and the time of the newest `pr` fact of that PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShownPr {
     pub observation: PrObservation,
@@ -50,7 +46,6 @@ impl PullRequest {
         })
     }
 
-    /// Reads `https://github.com/<owner>/<name>/pull/<number>`.
     pub fn from_url(url: &str) -> Option<Self> {
         let path = url.strip_prefix(URL_START)?;
         let mut parts = path.split('/');
@@ -115,8 +110,6 @@ fn is_name(text: &str) -> bool {
     !text.is_empty() && text.chars().all(allowed)
 }
 
-// A ticket's PR is the one its newest `pr` fact names. Among that PR's facts, one that saw it in
-// trunk wins, then one with a merge commit, then the newest, so a later read never hides a merge.
 pub(crate) fn current_prs<'a>(
     facts: impl IntoIterator<Item = &'a FactLine>,
 ) -> HashMap<TicketId, ShownPr> {

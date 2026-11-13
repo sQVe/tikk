@@ -17,9 +17,6 @@ pub struct RefreshedPr {
     pub pr: ShownPr,
 }
 
-/// Reads through `gh` the PR of the named slice, or every linked PR not yet seen in trunk, and
-/// appends a `pr` fact for each one read. When `gh` fails for some, the others are still
-/// appended, and the error names each failed PR.
 pub fn refresh_prs(
     store: &Store,
     slice: Option<&TicketId>,
@@ -84,8 +81,6 @@ fn refresh_targets(
     Ok(targets)
 }
 
-// A slice whose ticket is gone, broken, or shared gets no fact, and one linked to another PR
-// since the read keeps that link.
 fn append_observed(
     root: &Path,
     observed: Vec<(TicketId, PrObservation)>,
@@ -206,7 +201,6 @@ mod tests {
         append_fact(root, &fact, append_line).expect("append the PR fact");
     }
 
-    // Another process links PR 8 while gh reads PR 7.
     fn relinking_gh(arguments: &[&str]) -> Result<Vec<u8>, String> {
         let root = ROOT
             .with(|root| root.borrow().clone())
@@ -265,7 +259,6 @@ mod tests {
             ..observation(7)
         };
         link_ticket(directory.path(), "personal-kkkk", in_trunk);
-        // Invalid data: `pr link` takes only slices, so this fact is written by hand.
         link_ticket(directory.path(), "personal-pppp", observation(8));
 
         let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
