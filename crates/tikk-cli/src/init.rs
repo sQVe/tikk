@@ -34,7 +34,7 @@ impl RemoteLocation {
         let local_path = working_directory.join(remote);
         let names_no_local_folder = !local_path.exists();
 
-        if is_url(remote) || Path::new(remote).is_absolute() || names_no_local_folder {
+        if is_url(remote) || names_no_local_folder {
             return Ok(Self(remote.to_owned()));
         }
 
