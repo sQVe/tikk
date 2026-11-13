@@ -6,11 +6,11 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::fact::Timestamp;
+use crate::store::git;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::sync_commit::commit_plan;
 use crate::store::sync_merge::merge_fetched;
 use crate::store::sync_read::{self, SyncPlan, read_plan, settle_deadline};
-use crate::store::system;
 use crate::store::ticket_files::io_error;
 use crate::store::{Store, StoreError};
 
@@ -31,9 +31,9 @@ pub struct SyncEffects {
 impl SyncEffects {
     pub fn system() -> Self {
         Self {
-            run_git: system::run_store_git,
-            run_network_git: system::run_network_git,
-            read_origin: system::read_store_origin,
+            run_git: git::run_store_git,
+            run_network_git: git::run_network_git,
+            read_origin: git::read_store_origin,
             read_entry: sync_read::read_entry,
             lock_store: store_lock::lock_store,
             now: SystemTime::now,

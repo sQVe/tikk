@@ -1,5 +1,6 @@
 mod claim_lease;
 mod fact_files;
+mod git;
 mod identity;
 mod machine;
 mod project_choice;
@@ -221,7 +222,7 @@ pub struct StoreEffects {
 impl StoreEffects {
     pub fn system() -> Self {
         Self {
-            run_git: system::run_git,
+            run_git: git::run_git,
             read_host_name: system::read_host_name,
         }
     }

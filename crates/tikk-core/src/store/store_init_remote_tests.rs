@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 use super::{RemoteInitEffects, init_from_remote};
-use crate::store::system::run_store_git;
+use crate::store::git::run_store_git;
 use crate::store::{MachineName, StoreEffects, StoreError, init};
 
 struct Setup {

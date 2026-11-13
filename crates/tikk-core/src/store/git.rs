@@ -1,0 +1,551 @@
+use std::fs::File;
+use std::io::{Read as _, Seek as _, SeekFrom};
+use std::path::Path;
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::store::StoreError;
+
+/// Writers wait at most five seconds for the store lock, so the network steps run outside it, and
+/// each gives up after this long.
+const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
+const NETWORK_POLL: Duration = Duration::from_millis(20);
+
+const STORE_SETTINGS: &[&str] = &[
+    "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "commit.gpgSign=false",
+    "-c",
+    "tag.gpgSign=false",
+    "-c",
+    "merge.autoStash=false",
+    "-c",
+    "merge.ff=true",
+];
+const IDENTITY: &[(&str, &str)] = &[
+    ("GIT_AUTHOR_NAME", "tikk"),
+    ("GIT_AUTHOR_EMAIL", "tikk@localhost"),
+    ("GIT_COMMITTER_NAME", "tikk"),
+    ("GIT_COMMITTER_EMAIL", "tikk@localhost"),
+];
+
+/// Git reads these before `-C`. A tikk started from a Git hook would otherwise write to the
+/// hook's repository.
+const REPOSITORY_ENVIRONMENT: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_COMMON_DIR",
+];
+const CONFIG_ENVIRONMENT: &[&str] = &["GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"];
+
+/// The environment and settings of one kind of Git call.
+#[derive(Clone, Copy)]
+enum GitPolicy {
+    /// `init` in the store: the user's config applies, and Git never finds a parent repository.
+    StoreInit,
+    /// The project's `origin`: Git may find the repository in a parent folder, and reads only its
+    /// config.
+    ProjectLookup,
+    /// A local step of sync or `init --remote`.
+    StoreStep,
+    /// A step that reaches the remote. It keeps the global and system config, so the user's
+    /// credential helper reaches a private remote.
+    NetworkStep,
+}
+
+impl GitPolicy {
+    fn has_store_settings(self) -> bool {
+        matches!(self, Self::StoreStep | Self::NetworkStep)
+    }
+
+    fn reads_only_repository_config(self) -> bool {
+        matches!(self, Self::ProjectLookup | Self::StoreStep)
+    }
+
+    fn drops_config_environment(self) -> bool {
+        !matches!(self, Self::StoreInit)
+    }
+
+    // Git stops looking for a repository at the store's parent, so it never finds another one.
+    fn stops_at_parent(self) -> bool {
+        !matches!(self, Self::ProjectLookup)
+    }
+}
+
+pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+    run_git_with(GitPolicy::StoreInit, "git", directory, arguments)
+}
+
+pub(crate) fn run_store_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+    run_git_with(GitPolicy::StoreStep, "git", directory, arguments)
+}
+
+pub(crate) fn run_network_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+    run_git_within("git", directory, arguments, NETWORK_TIMEOUT)
+}
+
+pub(crate) fn read_origin_url(directory: &Path) -> Result<Option<String>, StoreError> {
+    read_origin_with(GitPolicy::ProjectLookup, "git", directory)
+}
+
+pub(crate) fn read_store_origin(root: &Path) -> Result<Option<String>, StoreError> {
+    read_origin_with(GitPolicy::StoreStep, "git", root)
+}
+
+fn run_git_with(
+    policy: GitPolicy,
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Vec<u8>, StoreError> {
+    let output = run_command(policy, program, directory, arguments)?;
+
+    if !output.status.success() {
+        return Err(git_error(arguments, stderr_message(&output.stderr)));
+    }
+
+    Ok(output.stdout)
+}
+
+/// Git exits with 1 when the key is missing.
+fn read_origin_with(
+    policy: GitPolicy,
+    program: &str,
+    directory: &Path,
+) -> Result<Option<String>, StoreError> {
+    let arguments = ["config", "--get", "remote.origin.url"];
+    let output = run_command(policy, program, directory, &arguments)?;
+
+    match output.status.code() {
+        Some(0) => String::from_utf8(output.stdout)
+            .map(|url| Some(url.trim().to_owned()))
+            .map_err(|_| git_error(&arguments, "Git printed text that is not UTF-8".to_owned())),
+        Some(1) => Ok(None),
+        _ => Err(git_error(&arguments, stderr_message(&output.stderr))),
+    }
+}
+
+fn run_command(
+    policy: GitPolicy,
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Output, StoreError> {
+    git_command(policy, program, directory, arguments)
+        .output()
+        .map_err(|error| git_error(arguments, error.to_string()))
+}
+
+fn git_error(arguments: &[&str], message: String) -> StoreError {
+    StoreError::Git {
+        arguments: arguments.join(" "),
+        message,
+    }
+}
+
+fn stderr_message(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr).trim().to_owned()
+}
+
+fn git_command(policy: GitPolicy, program: &str, directory: &Path, arguments: &[&str]) -> Command {
+    let mut command = Command::new(program);
+
+    command.arg("-C").arg(directory);
+
+    if policy.has_store_settings() {
+        command
+            .args(STORE_SETTINGS)
+            .stdin(Stdio::null())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .envs(IDENTITY.iter().copied());
+    }
+
+    command.args(arguments);
+
+    for name in REPOSITORY_ENVIRONMENT {
+        command.env_remove(name);
+    }
+
+    // A global or system `origin`, or one passed in the environment, belongs to no repository.
+    if policy.reads_only_repository_config() {
+        command
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+    }
+
+    if policy.drops_config_environment() {
+        for name in CONFIG_ENVIRONMENT {
+            command.env_remove(name);
+        }
+    }
+
+    if policy.stops_at_parent()
+        && let Some(parent) = directory.parent()
+    {
+        command.env("GIT_CEILING_DIRECTORIES", parent);
+    }
+
+    command
+}
+
+/// Output goes to files, not pipes, so a full pipe never blocks the wait. Only the Git child is
+/// stopped at the timeout; a program it started may outlive it.
+fn run_git_within(
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+) -> Result<Vec<u8>, StoreError> {
+    let failed = |message: String| git_error(arguments, message);
+    let capture = || {
+        tempfile::tempfile().map_err(|error| failed(format!("could not capture output: {error}")))
+    };
+    let mut stdout = capture()?;
+    let mut stderr = capture()?;
+    let mut command = git_command(GitPolicy::NetworkStep, program, directory, arguments);
+
+    command
+        .stdout(clone_capture(&stdout).map_err(failed)?)
+        .stderr(clone_capture(&stderr).map_err(failed)?);
+
+    let child = command.spawn().map_err(|error| failed(error.to_string()))?;
+    let status = wait_within(child, timeout).map_err(|failure| match failure {
+        WaitFailure::TimedOut => StoreError::GitTimeout {
+            arguments: arguments.join(" "),
+            timeout,
+        },
+        WaitFailure::Failed(message) => failed(message),
+    })?;
+
+    if !status.success() {
+        let message = read_capture(&mut stderr).map_err(failed)?;
+
+        return Err(failed(stderr_message(&message)));
+    }
+
+    read_capture(&mut stdout).map_err(failed)
+}
+
+enum WaitFailure {
+    TimedOut,
+    Failed(String),
+}
+
+fn wait_within(mut child: Child, timeout: Duration) -> Result<ExitStatus, WaitFailure> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => thread::sleep(NETWORK_POLL),
+            Ok(None) => return Err(stop(&mut child, WaitFailure::TimedOut)),
+            Err(error) => {
+                return Err(stop(
+                    &mut child,
+                    WaitFailure::Failed(format!("could not wait for Git: {error}")),
+                ));
+            }
+        }
+    }
+}
+
+/// Kills and reaps the child. A failure to stop it replaces the reason, since Git may still run.
+fn stop(child: &mut Child, reason: WaitFailure) -> WaitFailure {
+    if let Err(error) = child.kill() {
+        return WaitFailure::Failed(format!("could not stop Git: {error}"));
+    }
+
+    match child.wait() {
+        Ok(_) => reason,
+        Err(error) => WaitFailure::Failed(format!("could not reap Git: {error}")),
+    }
+}
+
+fn clone_capture(file: &File) -> Result<File, String> {
+    file.try_clone()
+        .map_err(|error| format!("could not capture output: {error}"))
+}
+
+fn read_capture(file: &mut File) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+
+    file.seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_to_end(&mut bytes))
+        .map_err(|error| format!("could not read the output: {error}"))?;
+
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+    use std::process::Command;
+
+    use super::{
+        GitPolicy, git_command, read_origin_url, read_origin_with, read_store_origin, run_git,
+        run_git_with, run_git_within, run_store_git,
+    };
+    use crate::store::StoreError;
+
+    fn fake_git(folder: &Path, body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let path = folder.join("fake-git");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write the script");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("make the script executable");
+
+        path.to_str().expect("a UTF-8 path").to_owned()
+    }
+
+    fn seen_by_git(command: &mut Command) -> String {
+        let output = command.output().expect("start the script");
+
+        String::from_utf8(output.stdout).expect("the script prints UTF-8")
+    }
+
+    #[test]
+    fn local_steps_drop_the_global_config_and_network_steps_keep_it() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let program = fake_git(
+            directory.path(),
+            "echo \"$*|${GIT_CONFIG_GLOBAL-unset}|${GIT_CONFIG_NOSYSTEM-unset}|$GIT_TERMINAL_PROMPT\"",
+        );
+        let settings = "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgSign=false -c tag.gpgSign=false -c merge.autoStash=false -c merge.ff=true";
+
+        let local = seen_by_git(&mut git_command(
+            GitPolicy::StoreStep,
+            &program,
+            directory.path(),
+            &["merge"],
+        ));
+        let network = seen_by_git(&mut git_command(
+            GitPolicy::NetworkStep,
+            &program,
+            directory.path(),
+            &["fetch"],
+        ));
+
+        let folder = directory.path().display();
+        assert_eq!(
+            local,
+            format!("-C {folder} {settings} merge|/dev/null|1|0\n")
+        );
+        assert_eq!(
+            network,
+            format!("-C {folder} {settings} fetch|unset|unset|0\n")
+        );
+    }
+
+    #[test]
+    fn each_git_policy_passes_its_own_settings_and_environment() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let program = fake_git(
+            directory.path(),
+            "echo \"$*|${GIT_CEILING_DIRECTORIES-unset}|${GIT_CONFIG_GLOBAL-unset}|${GIT_CONFIG_NOSYSTEM-unset}|${GIT_TERMINAL_PROMPT-unset}|${GIT_OPTIONAL_LOCKS-unset}|${GIT_AUTHOR_NAME-unset}|$(cat)\"",
+        );
+        let folder = directory.path().display();
+        let parent = directory.path().parent().expect("a parent").display();
+        let settings = "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgSign=false -c tag.gpgSign=false -c merge.autoStash=false -c merge.ff=true";
+
+        let init = run_git_with(
+            GitPolicy::StoreInit,
+            &program,
+            directory.path(),
+            &["status"],
+        )
+        .expect("the script runs");
+        let lookup = read_origin_with(GitPolicy::ProjectLookup, &program, directory.path())
+            .expect("the script runs");
+        let local = seen_by_git(&mut git_command(
+            GitPolicy::StoreStep,
+            &program,
+            directory.path(),
+            &["merge"],
+        ));
+        let network = seen_by_git(&mut git_command(
+            GitPolicy::NetworkStep,
+            &program,
+            directory.path(),
+            &["fetch"],
+        ));
+
+        assert_eq!(
+            String::from_utf8(init).expect("UTF-8"),
+            format!("-C {folder} status|{parent}|unset|unset|unset|unset|unset|\n")
+        );
+        assert_eq!(
+            lookup,
+            Some(format!(
+                "-C {folder} config --get remote.origin.url|unset|/dev/null|1|unset|unset|unset|"
+            ))
+        );
+        assert_eq!(
+            local,
+            format!("-C {folder} {settings} merge|{parent}|/dev/null|1|0|0|tikk|\n")
+        );
+        assert_eq!(
+            network,
+            format!("-C {folder} {settings} fetch|{parent}|unset|unset|0|0|tikk|\n")
+        );
+    }
+
+    #[test]
+    fn a_network_step_that_runs_too_long_is_stopped_with_a_timeout() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let program = fake_git(directory.path(), "sleep 10");
+        let started = std::time::Instant::now();
+
+        let error = run_git_within(
+            &program,
+            directory.path(),
+            &["fetch", "origin"],
+            std::time::Duration::from_millis(100),
+        )
+        .expect_err("the step runs too long");
+
+        assert!(
+            matches!(&error, StoreError::GitTimeout { arguments, .. } if arguments == "fetch origin"),
+            "{error:?}"
+        );
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn a_network_step_returns_its_output_or_its_error_text() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let timeout = std::time::Duration::from_secs(10);
+        let passing = fake_git(directory.path(), "echo fetched; echo noise >&2");
+
+        let output = run_git_within(&passing, directory.path(), &["fetch"], timeout);
+
+        assert_eq!(output.expect("the step passes"), b"fetched\n");
+        let failing = fake_git(directory.path(), "echo rejected >&2; exit 1");
+        let error = run_git_within(&failing, directory.path(), &["push"], timeout)
+            .expect_err("the step fails");
+        assert!(
+            matches!(&error, StoreError::Git { message, .. } if message == "rejected"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_network_step_reports_a_git_that_cannot_start() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+
+        let error = run_git_within(
+            "tikk-test-no-such-program",
+            directory.path(),
+            &["fetch"],
+            std::time::Duration::from_secs(1),
+        )
+        .expect_err("the program does not exist");
+
+        assert!(matches!(error, StoreError::Git { .. }), "{error:?}");
+    }
+
+    #[test]
+    fn read_store_origin_reads_only_the_store_itself() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let parent = directory.path();
+        run_store_git(parent, &["init", "--quiet"]).expect("init the parent repository");
+        run_store_git(parent, &["remote", "add", "origin", "/elsewhere"]).expect("add origin");
+        let store = parent.join("store");
+        run_store_git(parent, &["init", "--quiet", "store"]).expect("init the store");
+
+        let none = read_store_origin(&store).expect("Git runs");
+        run_store_git(&store, &["remote", "add", "origin", "/remote"]).expect("add origin");
+        let some = read_store_origin(&store).expect("Git runs");
+
+        assert_eq!(none, None);
+        assert_eq!(some.as_deref(), Some("/remote"));
+    }
+
+    #[test]
+    fn a_git_that_exits_nonzero_gives_a_git_error() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+
+        let error = run_git_with(GitPolicy::StoreInit, "false", directory.path(), &["status"])
+            .expect_err("the program fails");
+
+        assert!(
+            matches!(&error, StoreError::Git { arguments, .. } if arguments == "status"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn run_git_never_reaches_a_parent_repository() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let parent = directory.path();
+        run_git(parent, &["init", "--quiet"]).expect("init the parent repository");
+        let child = parent.join("child");
+        std::fs::create_dir(&child).expect("create the child folder");
+
+        let result = run_git(Path::new(&child), &["rev-parse", "--git-dir"]);
+
+        assert!(matches!(result, Err(StoreError::Git { .. })), "{result:?}");
+    }
+
+    #[test]
+    fn read_origin_url_finds_the_repository_above_the_directory() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let repository = directory.path();
+        run_git(repository, &["init", "--quiet"]).expect("init a repository");
+        run_git(
+            repository,
+            &["remote", "add", "origin", "git@github.com:owner/Tikk.git"],
+        )
+        .expect("add origin");
+        let child = repository.join("src/deep");
+        std::fs::create_dir_all(&child).expect("create a child folder");
+
+        let url = read_origin_url(&child).expect("Git runs");
+
+        assert_eq!(url.as_deref(), Some("git@github.com:owner/Tikk.git"));
+    }
+
+    #[test]
+    fn read_origin_url_is_none_without_an_origin() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        run_git(directory.path(), &["init", "--quiet"]).expect("init a repository");
+
+        let url = read_origin_url(directory.path()).expect("Git runs");
+
+        assert_eq!(url, None);
+    }
+
+    #[test]
+    fn read_origin_url_reports_a_git_that_cannot_start() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+
+        let error = read_origin_with(
+            GitPolicy::ProjectLookup,
+            "tikk-test-no-such-program",
+            directory.path(),
+        )
+        .expect_err("the program does not exist");
+
+        assert!(
+            matches!(&error, StoreError::Git { arguments, .. } if arguments == "config --get remote.origin.url"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn read_origin_url_reports_a_directory_git_cannot_enter() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+
+        let error = read_origin_url(&directory.path().join("missing"))
+            .expect_err("Git cannot change to a missing folder");
+
+        assert!(matches!(error, StoreError::Git { .. }), "{error:?}");
+    }
+}

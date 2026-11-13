@@ -5,7 +5,9 @@ use crate::store::store_init::{
     create_staging, ensure_empty, fill_new_store, publish, resolve_store_link, write_file,
 };
 use crate::store::ticket_files::exists;
-use crate::store::{InitOutcome, MachineName, StoreEffects, StoreError, has_config, init, system};
+use crate::store::{
+    InitOutcome, MachineName, StoreEffects, StoreError, git, has_config, init, system,
+};
 
 const FACTS_FOLDER: &str = "facts";
 
@@ -19,8 +21,8 @@ pub struct RemoteInitEffects {
 impl RemoteInitEffects {
     pub fn system() -> Self {
         Self {
-            run_git: system::run_store_git,
-            run_network_git: system::run_network_git,
+            run_git: git::run_store_git,
+            run_network_git: git::run_network_git,
             read_host_name: system::read_host_name,
         }
     }

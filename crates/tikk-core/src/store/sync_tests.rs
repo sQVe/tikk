@@ -6,8 +6,8 @@ use std::time::{Duration, SystemTime};
 use tempfile::TempDir;
 
 use super::{PendingFile, PendingReason, SyncEffects, SyncOutcome, SyncStep, sync_store};
+use crate::store::git::{read_store_origin, run_store_git};
 use crate::store::sync_read::read_entry;
-use crate::store::system::{read_store_origin, run_store_git};
 use crate::store::{FileEntry, MachineName, RemoteInitEffects, StoreError, init_from_remote, open};
 
 const TICKET: &str = "tickets/personal/personal-abcd-renew.md";
