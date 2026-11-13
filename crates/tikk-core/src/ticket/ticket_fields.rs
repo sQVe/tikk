@@ -259,7 +259,7 @@ fn parse_criteria(raw: Vec<RawCriterion>) -> Result<Vec<Criterion>, TicketError>
 mod tests {
     use super::TicketFields;
     use crate::ticket::ticket_document::{RawCriterion, RawFrontMatter};
-    use crate::ticket::{Kind, Status, TicketError, TicketId};
+    use crate::ticket::{Kind, Status, TicketDocument, TicketError, TicketId};
 
     fn raw(kind: &str) -> RawFrontMatter {
         RawFrontMatter {
@@ -480,5 +480,44 @@ mod tests {
         assert_eq!(fields.status(), Status::Open);
         assert_eq!(fields.parent(), Some(&parent));
         assert_eq!(fields.title(), "Add files");
+    }
+
+    #[test]
+    fn each_setter_changes_its_field_and_keeps_the_others() {
+        let fields_of = |front: &str| {
+            let text = format!(
+                "---\nkind: slice\ntitle: S\nstatus: canceled\nreason: R\n{front}criteria:\n  - id: c1\n    check: c\n    expected: e\n---\n"
+            );
+
+            TicketDocument::parse(&text)
+                .expect("the document is valid")
+                .fields
+        };
+        let id = |text: &str| TicketId::parse(text).expect("a valid ID");
+        let all = fields_of(
+            "parent: personal-pppp\nrank: 2\nblockedBy: [personal-bbbb]\ndiscoveredFrom: personal-dddd\nrelated: [personal-rrrr]\n",
+        );
+        let cases = [
+            (
+                "parent",
+                all.with_parent(Some(id("personal-qqqq")))
+                    .expect("a slice keeps a parent"),
+                "parent: personal-qqqq\nrank: 2\nblockedBy: [personal-bbbb]\ndiscoveredFrom: personal-dddd\nrelated: [personal-rrrr]\n",
+            ),
+            (
+                "rank",
+                all.with_rank(None),
+                "parent: personal-pppp\nblockedBy: [personal-bbbb]\ndiscoveredFrom: personal-dddd\nrelated: [personal-rrrr]\n",
+            ),
+            (
+                "blockedBy",
+                all.with_blocked_by(vec![id("personal-cccc")]),
+                "parent: personal-pppp\nrank: 2\nblockedBy: [personal-cccc]\ndiscoveredFrom: personal-dddd\nrelated: [personal-rrrr]\n",
+            ),
+        ];
+
+        for (name, changed, front) in cases {
+            assert_eq!(changed, fields_of(front), "case {name}");
+        }
     }
 }

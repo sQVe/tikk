@@ -81,8 +81,11 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
+    use tempfile::TempDir;
+
     use super::{block_ticket, move_ticket, unblock_ticket};
     use crate::store::store_lock::{LockAccess, StoreLock};
+    use crate::store::ticket_file_write::replace_ticket_file;
     use crate::store::ticket_write::WriteEffects;
     use crate::store::{Store, StoreError};
     use crate::ticket::TicketId;
@@ -92,6 +95,48 @@ mod tests {
 
     thread_local! {
         static LOCKED_WITH: Cell<Option<LockAccess>> = const { Cell::new(None) };
+        static WRITES: Cell<usize> = const { Cell::new(0) };
+    }
+
+    const RANKED: &str = "---\nkind: task\ntitle: A\nparent: personal-pppp\nrank: 4\nblockedBy: [personal-bbbb, personal-cccc]\n---\n";
+
+    fn count_write(path: &Path, text: &str, hash: &str) -> Result<(), StoreError> {
+        WRITES.with(|writes| writes.set(writes.get() + 1));
+
+        replace_ticket_file(path, text, hash)
+    }
+
+    fn counting_effects() -> WriteEffects {
+        WriteEffects {
+            replace_file: count_write,
+            ..WriteEffects::system()
+        }
+    }
+
+    /// The task A under the plan P, ranked 4 and blocked by B and C, beside the plan Q.
+    fn store_with_ranked_task() -> (TempDir, Store, PathBuf) {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let folder = directory.path().join("tickets/personal");
+        let path = folder.join("personal-aaaa-a.md");
+        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
+        fs::create_dir_all(&folder).expect("create the project folder");
+        fs::write(&path, RANKED).expect("write the task");
+
+        for (name, text) in [
+            ("personal-pppp-p.md", "---\nkind: plan\ntitle: P\n---\n"),
+            ("personal-qqqq-q.md", "---\nkind: plan\ntitle: Q\n---\n"),
+            ("personal-bbbb-b.md", "---\nkind: task\ntitle: B\n---\n"),
+            ("personal-cccc-c.md", "---\nkind: task\ntitle: C\n---\n"),
+            ("personal-dddd-d.md", "---\nkind: task\ntitle: D\n---\n"),
+        ] {
+            fs::write(folder.join(name), text).expect("write a ticket");
+        }
+
+        let store = Store {
+            root: directory.path().to_path_buf(),
+        };
+
+        (directory, store, path)
     }
 
     fn busy_lock(_: &Path, access: LockAccess) -> Result<StoreLock, StoreError> {
@@ -142,5 +187,74 @@ mod tests {
         }
         assert_eq!(LOCKED_WITH.with(Cell::get), Some(LockAccess::Exclusive));
         assert_eq!(fs::read_to_string(&path).expect("read the task"), TASK);
+    }
+
+    #[test]
+    fn an_edge_that_exists_a_missing_edge_and_the_same_parent_write_nothing() {
+        let (_directory, store, path) = store_with_ranked_task();
+        let task = id("personal-aaaa");
+        let effects = counting_effects();
+
+        let results = [
+            (
+                "block B again",
+                block_ticket(&store, &task, &id("personal-bbbb"), &effects),
+            ),
+            (
+                "unblock D",
+                unblock_ticket(&store, &task, &id("personal-dddd"), &effects),
+            ),
+            (
+                "move under P",
+                move_ticket(&store, &task, Some(&id("personal-pppp")), &effects),
+            ),
+        ];
+
+        for (name, result) in results {
+            let ticket = result.unwrap_or_else(|error| panic!("case {name}: {error:?}"));
+
+            assert_eq!(ticket.text, RANKED, "case {name}");
+        }
+        assert_eq!(WRITES.with(Cell::get), 0);
+        assert_eq!(fs::read_to_string(&path).expect("read the task"), RANKED);
+    }
+
+    #[test]
+    fn unblock_removes_only_the_named_blocker() {
+        let (_directory, store, _path) = store_with_ranked_task();
+
+        let unblocked = unblock_ticket(
+            &store,
+            &id("personal-aaaa"),
+            &id("personal-bbbb"),
+            &counting_effects(),
+        )
+        .expect("B blocks A");
+
+        assert_eq!(
+            unblocked.document.fields.blocked_by(),
+            [id("personal-cccc")]
+        );
+        assert_eq!(unblocked.document.fields.rank(), Some(4));
+    }
+
+    #[test]
+    fn move_to_a_new_parent_clears_the_rank() {
+        let (_directory, store, path) = store_with_ranked_task();
+
+        let moved = move_ticket(
+            &store,
+            &id("personal-aaaa"),
+            Some(&id("personal-qqqq")),
+            &counting_effects(),
+        )
+        .expect("a task can sit under another plan");
+
+        assert_eq!(moved.document.fields.parent(), Some(&id("personal-qqqq")));
+        assert_eq!(moved.document.fields.rank(), None);
+        assert_eq!(
+            fs::read_to_string(&path).expect("read the task"),
+            moved.text
+        );
     }
 }

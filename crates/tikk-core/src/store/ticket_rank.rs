@@ -107,7 +107,7 @@ fn place_index(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::fs;
     use std::path::{Path, PathBuf};
 
@@ -123,6 +123,69 @@ mod tests {
     thread_local! {
         static WRITES: Cell<usize> = const { Cell::new(0) };
         static LOCKED_WITH: Cell<Option<LockAccess>> = const { Cell::new(None) };
+        static WRITTEN: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn record_write(path: &Path, text: &str, hash: &str) -> Result<(), StoreError> {
+        let name = path
+            .file_name()
+            .expect("a ticket path has a file name")
+            .to_string_lossy()
+            .into_owned();
+
+        WRITTEN.with(|written| written.borrow_mut().push(name));
+
+        replace_ticket_file(path, text, hash)
+    }
+
+    fn recording_effects() -> WriteEffects {
+        WRITTEN.with(|written| written.borrow_mut().clear());
+
+        WriteEffects {
+            replace_file: record_write,
+            ..WriteEffects::system()
+        }
+    }
+
+    fn written_files() -> Vec<String> {
+        let mut names = WRITTEN.with(|written| written.borrow().clone());
+
+        names.sort();
+
+        names
+    }
+
+    const PLAN: &str = "---\nkind: plan\ntitle: P\n---\n";
+
+    fn task(title: &str, rank: i64) -> String {
+        format!("---\nkind: task\ntitle: {title}\nparent: personal-pppp\nrank: {rank}\n---\n")
+    }
+
+    /// A plan with the tasks A, B, and C ranked 1, 2, and 3 under it.
+    fn ranked_siblings() -> (TempDir, Store) {
+        let (a, b, c) = (task("A", 1), task("B", 2), task("C", 3));
+
+        store_with(&[
+            ("personal-pppp-p.md", PLAN),
+            ("personal-aaaa-a.md", &a),
+            ("personal-bbbb-b.md", &b),
+            ("personal-cccc-c.md", &c),
+        ])
+    }
+
+    fn id(text: &str) -> TicketId {
+        TicketId::parse(text).expect("a valid ID")
+    }
+
+    fn sibling_ranks(directory: &TempDir) -> Vec<Option<String>> {
+        [
+            "personal-aaaa-a.md",
+            "personal-bbbb-b.md",
+            "personal-cccc-c.md",
+        ]
+        .iter()
+        .map(|name| rank_of(directory, name))
+        .collect()
     }
 
     fn busy_lock(_: &Path, access: LockAccess) -> Result<StoreLock, StoreError> {
@@ -233,5 +296,185 @@ mod tests {
         );
         assert_eq!(LOCKED_WITH.with(Cell::get), Some(LockAccess::Exclusive));
         assert_eq!(rank_of(&directory, "personal-aaaa-a.md"), None);
+    }
+
+    #[test]
+    fn rank_places_the_ticket_and_writes_only_the_files_whose_rank_changed() {
+        let a = "personal-aaaa-a.md";
+        let b = "personal-bbbb-b.md";
+        let c = "personal-cccc-c.md";
+        let cases = [
+            (
+                "C first",
+                "personal-cccc",
+                RankPlace::First,
+                ["2", "3", "1"],
+                1,
+                vec![a, b, c],
+            ),
+            (
+                "A last",
+                "personal-aaaa",
+                RankPlace::Last,
+                ["3", "1", "2"],
+                3,
+                vec![a, b, c],
+            ),
+            (
+                "A before C",
+                "personal-aaaa",
+                RankPlace::Before(id("personal-cccc")),
+                ["2", "1", "3"],
+                2,
+                vec![a, b],
+            ),
+            (
+                "C before A",
+                "personal-cccc",
+                RankPlace::Before(id("personal-aaaa")),
+                ["2", "3", "1"],
+                1,
+                vec![a, b, c],
+            ),
+            (
+                "C after A",
+                "personal-cccc",
+                RankPlace::After(id("personal-aaaa")),
+                ["1", "3", "2"],
+                2,
+                vec![b, c],
+            ),
+            (
+                "A after B",
+                "personal-aaaa",
+                RankPlace::After(id("personal-bbbb")),
+                ["2", "1", "3"],
+                2,
+                vec![a, b],
+            ),
+            (
+                "A after C",
+                "personal-aaaa",
+                RankPlace::After(id("personal-cccc")),
+                ["3", "1", "2"],
+                3,
+                vec![a, b, c],
+            ),
+            (
+                "B before itself",
+                "personal-bbbb",
+                RankPlace::Before(id("personal-bbbb")),
+                ["1", "2", "3"],
+                2,
+                vec![],
+            ),
+            (
+                "B after itself",
+                "personal-bbbb",
+                RankPlace::After(id("personal-bbbb")),
+                ["1", "2", "3"],
+                2,
+                vec![],
+            ),
+            (
+                "A first",
+                "personal-aaaa",
+                RankPlace::First,
+                ["1", "2", "3"],
+                1,
+                vec![],
+            ),
+        ];
+
+        for (name, ticket, place, ranks, rank, written) in cases {
+            let (directory, store) = ranked_siblings();
+
+            let ranked = rank_ticket(&store, &id(ticket), &place, &recording_effects())
+                .unwrap_or_else(|error| panic!("case {name}: {error:?}"));
+
+            assert_eq!(
+                sibling_ranks(&directory),
+                ranks.map(|rank| Some(rank.to_owned())),
+                "case {name}"
+            );
+            assert_eq!(ranked.id, id(ticket), "case {name}");
+            assert_eq!(ranked.document.fields.rank(), Some(rank), "case {name}");
+            assert_eq!(written_files(), written, "case {name}");
+        }
+    }
+
+    #[test]
+    fn rank_refuses_an_anchor_with_another_parent_and_names_it() {
+        let (directory, store) = ranked_siblings();
+        let before = sibling_ranks(&directory);
+
+        let result = rank_ticket(
+            &store,
+            &id("personal-aaaa"),
+            &RankPlace::Before(id("personal-pppp")),
+            &recording_effects(),
+        );
+
+        assert!(
+            matches!(
+                &result,
+                Err(StoreError::NotSibling { id, anchor })
+                    if id == "personal-aaaa" && anchor == "personal-pppp"
+            ),
+            "{result:?}"
+        );
+        assert_eq!(sibling_ranks(&directory), before);
+        assert_eq!(written_files(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn rank_of_a_loose_ticket_orders_only_the_loose_tickets_of_its_project() {
+        let (a, b, c) = (task("A", 1), task("B", 2), task("C", 3));
+        let (directory, store) = store_with(&[
+            ("personal-pppp-p.md", PLAN),
+            ("personal-aaaa-a.md", &a),
+            ("personal-bbbb-b.md", &b),
+            ("personal-cccc-c.md", &c),
+            ("personal-dddd-d.md", "---\nkind: task\ntitle: D\n---\n"),
+        ]);
+        let other = directory.path().join("tickets/tikk/tikk-eeee-e.md");
+        let other_text = "---\nkind: task\ntitle: E\n---\n";
+        fs::create_dir_all(other.parent().expect("a ticket has a folder"))
+            .expect("create the other project folder");
+        fs::write(&other, other_text).expect("write the other project's ticket");
+
+        let ranked = rank_ticket(
+            &store,
+            &id("personal-dddd"),
+            &RankPlace::Last,
+            &recording_effects(),
+        )
+        .expect("a loose task can be ranked");
+
+        assert_eq!(ranked.document.fields.rank(), Some(2));
+        assert_eq!(
+            rank_of(&directory, "personal-pppp-p.md").as_deref(),
+            Some("1")
+        );
+        assert_eq!(
+            written_files(),
+            ["personal-dddd-d.md", "personal-pppp-p.md"]
+        );
+
+        let across = rank_ticket(
+            &store,
+            &id("personal-dddd"),
+            &RankPlace::Before(id("tikk-eeee")),
+            &recording_effects(),
+        );
+
+        assert!(
+            matches!(&across, Err(StoreError::NotSibling { anchor, .. }) if anchor == "tikk-eeee"),
+            "{across:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(&other).expect("read the other ticket"),
+            other_text
+        );
     }
 }
