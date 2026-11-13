@@ -174,8 +174,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{ClaimEffects, claim_slice, release_slice};
-    use crate::fact::{AgentName, ClaimState, Timestamp};
+    use crate::fact::{AgentName, ClaimState, Timestamp, current_claims};
     use crate::store::claim_lease::LeaseEffects;
+    use crate::store::fact_files::read_facts;
     use crate::store::identity::Identity;
     use crate::store::ticket_queries::{QueryEffects, show_ticket};
     use crate::store::ticket_status::mark_done;
@@ -346,6 +347,35 @@ mod tests {
             );
         }
         assert!(!directory.path().join("facts").exists());
+    }
+
+    #[test]
+    fn a_claim_after_an_unterminated_fragment_starts_its_own_line_and_replays() {
+        let (directory, store) = store_with_slice();
+        let file = directory.path().join("facts/test/1970-01.jsonl");
+        fs::create_dir_all(file.parent().expect("a fact file has a folder"))
+            .expect("create the machine folder");
+        let fragment = "{\"v\":1,\"kind\":\"cla";
+        fs::write(&file, fragment).expect("leave a fragment as a crash would");
+        set_clock(0);
+
+        let claim = claim_slice(
+            &store,
+            &id("personal-kkkk"),
+            &agent("manager"),
+            &claim_effects(),
+        )
+        .expect("the slice is free");
+
+        let facts = read_facts(directory.path()).expect("the facts are read");
+        let text = fs::read_to_string(&file).expect("read the fact file");
+        assert!(text.starts_with(&format!("{fragment}\n")), "{text}");
+        assert_eq!(
+            current_claims(&facts.facts).get(&id("personal-kkkk")),
+            Some(&claim)
+        );
+        assert_eq!(facts.errors.len(), 1, "{:?}", facts.errors);
+        assert_eq!(facts.errors[0].line, 1);
     }
 
     #[test]

@@ -1,5 +1,5 @@
-use std::fs::{self, OpenOptions};
-use std::io::Write as _;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 
 use crate::fact::{FactLine, Timestamp, parse_fact_line, write_fact_line};
@@ -37,13 +37,33 @@ pub(crate) fn append_line(path: &Path, line: &str) -> Result<(), StoreError> {
     }
 
     let mut file = OpenOptions::new()
+        .read(true)
         .append(true)
         .create(true)
         .open(path)
         .map_err(|source| io_error("open", path, source))?;
+    // A crash can leave a line without its newline. The new line must not join that fragment.
+    let text = if ends_in_fragment(&mut file).map_err(|source| io_error("read", path, source))? {
+        format!("\n{line}")
+    } else {
+        line.to_owned()
+    };
 
-    file.write_all(line.as_bytes())
+    file.write_all(text.as_bytes())
         .map_err(|source| io_error("append to", path, source))
+}
+
+fn ends_in_fragment(file: &mut File) -> io::Result<bool> {
+    if file.metadata()?.len() == 0 {
+        return Ok(false);
+    }
+
+    let mut last = [0];
+
+    file.seek(SeekFrom::End(-1))?;
+    file.read_exact(&mut last)?;
+
+    Ok(last[0] != b'\n')
 }
 
 pub(crate) fn append_fact(
