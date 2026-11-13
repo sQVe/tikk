@@ -49,6 +49,9 @@ both.
   A missing store has the code `notInitialized`.
 - `tikk --help` and `tikk --version` exit with 0. `tikk --version --json` prints
   `{"version":"<version>"}`.
+- `tikk completions <shell> --json` prints `{"script":"<script>"}`. The shell's callback with
+  `COMPLETE` set prints candidates in the shell's own format, not JSON. See [ADR
+  0034](./0034-shell-completion-calls-back-into-tikk.md).
 
 ### Desktop and CLI parity
 
