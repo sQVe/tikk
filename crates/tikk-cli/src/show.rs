@@ -1,6 +1,7 @@
 use serde_json::{Value, json};
 use tikk_core::{QueryEffects, ShownTicket, Store, StoreError, TicketId};
 
+use crate::claim::{claim_json, claim_text};
 use crate::output::Output;
 use crate::ticket_row::{row_json, row_text};
 
@@ -21,6 +22,10 @@ fn shown_json(shown: &ShownTicket) -> Value {
     let ticket = &shown.ticket;
     let fields = &ticket.document.fields;
     let children: Vec<Value> = shown.children.iter().map(row_json).collect();
+    let claim = shown
+        .claim
+        .as_ref()
+        .map(|shown| claim_json(&shown.claim, shown.state));
 
     json!({
         "id": ticket.id.to_string(),
@@ -41,6 +46,7 @@ fn shown_json(shown: &ShownTicket) -> Value {
         "document": ticket.text,
         "children": children,
         "files": shown.files,
+        "claim": claim,
     })
 }
 
@@ -60,6 +66,10 @@ fn shown_text(shown: &ShownTicket) -> String {
             .collect();
 
         lines.push(format!("blockedBy: {}", blockers.join(", ")));
+    }
+
+    if let Some(claim) = &shown.claim {
+        lines.push(format!("claim: {}", claim_text(&claim.claim, claim.state)));
     }
 
     lines.extend(

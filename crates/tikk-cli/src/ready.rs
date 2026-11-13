@@ -1,0 +1,121 @@
+use serde_json::{Value, json};
+use tikk_core::{ClaimState, Hold, ReadyQueue, SkippedSlice};
+
+use crate::claim::{claim_json, claim_text};
+use crate::output::Output;
+use crate::ticket_row::{row_json, row_text};
+
+pub(crate) fn ready_output(queue: &ReadyQueue) -> Output {
+    Output {
+        json: queue_json(queue),
+        text: queue_text(queue),
+    }
+}
+
+fn queue_json(queue: &ReadyQueue) -> Value {
+    let candidates: Vec<Value> = queue.candidates.iter().map(row_json).collect();
+    let skipped: Vec<Value> = queue.skipped.iter().map(skipped_json).collect();
+    let ticket_errors = queue
+        .errors
+        .iter()
+        .map(|error| json!({ "path": error.path.to_string_lossy(), "message": error.message }));
+    let fact_errors = queue.fact_errors.iter().map(|error| {
+        json!({
+            "path": error.path.to_string_lossy(),
+            "line": error.line,
+            "message": error.message,
+        })
+    });
+    let errors: Vec<Value> = ticket_errors.chain(fact_errors).collect();
+
+    json!({ "candidates": candidates, "skipped": skipped, "errors": errors })
+}
+
+fn skipped_json(skipped: &SkippedSlice) -> Value {
+    let mut row = row_json(&skipped.ticket);
+    let holds: Vec<Value> = skipped.holds.iter().map(hold_json).collect();
+
+    row["holds"] = json!(holds);
+
+    row
+}
+
+fn hold_json(hold: &Hold) -> Value {
+    match hold {
+        Hold::Draft => json!({ "reason": "draft" }),
+        Hold::BlockedBy {
+            blocker,
+            via,
+            state,
+        } => json!({
+            "reason": "blockedBy",
+            "blocker": blocker,
+            "via": via,
+            "state": state.as_str(),
+        }),
+        Hold::Parent { parent, state } => json!({
+            "reason": "parent",
+            "parent": parent,
+            "state": state.as_str(),
+        }),
+        Hold::Claimed(claim) => json!({
+            "reason": "claimed",
+            "claim": claim_json(claim, ClaimState::Claimed),
+        }),
+    }
+}
+
+fn queue_text(queue: &ReadyQueue) -> String {
+    let mut lines: Vec<String> = queue.candidates.iter().map(row_text).collect();
+
+    for skipped in &queue.skipped {
+        lines.push(format!("skipped: {}", row_text(&skipped.ticket)));
+        lines.extend(
+            skipped
+                .holds
+                .iter()
+                .map(|hold| format!("  {}", hold_text(hold))),
+        );
+    }
+
+    lines.extend(
+        queue
+            .errors
+            .iter()
+            .map(|error| format!("error: {}: {}", error.path.display(), error.message)),
+    );
+    lines.extend(queue.fact_errors.iter().map(|error| {
+        format!(
+            "error: {}:{}: {}",
+            error.path.display(),
+            error.line,
+            error.message
+        )
+    }));
+
+    if lines.is_empty() {
+        return "No slices.".to_owned();
+    }
+
+    lines.join("\n")
+}
+
+fn hold_text(hold: &Hold) -> String {
+    match hold {
+        Hold::Draft => "draft".to_owned(),
+        Hold::BlockedBy {
+            blocker,
+            via: Some(plan),
+            state,
+        } => format!("blocked by {blocker} through {plan} ({})", state.as_str()),
+        Hold::BlockedBy {
+            blocker,
+            via: None,
+            state,
+        } => format!("blocked by {blocker} ({})", state.as_str()),
+        Hold::Parent { parent, state } => {
+            format!("its plan {parent} is {}", state.as_str())
+        }
+        Hold::Claimed(claim) => claim_text(claim, ClaimState::Claimed),
+    }
+}

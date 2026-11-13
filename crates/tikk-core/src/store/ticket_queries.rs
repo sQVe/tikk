@@ -2,7 +2,10 @@ use std::cmp::Ordering;
 use std::fs;
 use std::path::Path;
 
+use crate::fact::Timestamp;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
+use crate::store::system;
+use crate::store::ticket_claim::{ShownClaim, shown_claim};
 use crate::store::ticket_files::{
     StoredTicket, TICKETS_FOLDER, TicketScan, UnreadableTicket, exists, io_error, read_tickets,
     sorted_entries,
@@ -13,12 +16,14 @@ use crate::ticket::{Kind, ProjectName, Status, TicketId};
 #[derive(Clone, Copy)]
 pub struct QueryEffects {
     pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
+    pub now: fn() -> Timestamp,
 }
 
 impl QueryEffects {
     pub fn system() -> Self {
         Self {
             lock_store: store_lock::lock_store,
+            now: system::now,
         }
     }
 }
@@ -43,6 +48,8 @@ pub struct ShownTicket {
     pub ticket: StoredTicket,
     pub children: Vec<StoredTicket>,
     pub files: Vec<String>,
+    /// The slice's claim, live or stale. Other kinds have none.
+    pub claim: Option<ShownClaim>,
 }
 
 /// Lists the tickets that match the filter, ranked ones first, then by ID. Every file that
@@ -85,6 +92,7 @@ pub fn show_ticket(
     let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
     let scan = read_tickets(store.root())?;
     let ticket = find_ticket(&scan, id)?.clone();
+    let claim = shown_claim(store.root(), &ticket, (effects.now)())?;
     let mut children: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -97,6 +105,7 @@ pub fn show_ticket(
         ticket,
         children,
         files: folder_files(&folder)?,
+        claim,
     })
 }
 
@@ -359,6 +368,7 @@ mod tests {
         let (_directory, store) = store_with_tickets();
         let effects = QueryEffects {
             lock_store: busy_lock,
+            ..QueryEffects::system()
         };
 
         let listed = list_tickets(&store, &TicketFilter::default(), &effects);

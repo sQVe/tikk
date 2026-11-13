@@ -1,14 +1,19 @@
-use crate::store::ticket_files::StoredTicket;
-use crate::store::ticket_write::{WriteEffects, change_ticket};
+use crate::store::claim_lease::{instruction_slice, write_for_slice};
+use crate::store::identity::Identity;
+use crate::store::store_lock::LockAccess;
+use crate::store::ticket_files::{StoredTicket, read_tickets};
+use crate::store::ticket_queries::find_ticket;
+use crate::store::ticket_write::{WriteEffects, change_scanned};
 use crate::store::{Store, StoreError};
-use crate::ticket::{Status, TicketId};
+use crate::ticket::{Status, TicketFields, TicketId};
 
 pub fn mark_done(
     store: &Store,
     id: &TicketId,
+    caller: &Identity,
     effects: &WriteEffects,
 ) -> Result<StoredTicket, StoreError> {
-    change_ticket(store, id, effects, |fields, _scan| {
+    change_status(store, id, caller, effects, |fields| {
         let kind = fields.kind();
 
         if !kind.allows(Status::Done) {
@@ -19,7 +24,7 @@ pub fn mark_done(
             });
         }
 
-        Ok(Some(fields.with_status(Status::Done, None)?))
+        Ok(fields.with_status(Status::Done, None)?)
     })
 }
 
@@ -27,10 +32,28 @@ pub fn cancel_ticket(
     store: &Store,
     id: &TicketId,
     reason: &str,
+    caller: &Identity,
     effects: &WriteEffects,
 ) -> Result<StoredTicket, StoreError> {
-    change_ticket(store, id, effects, |fields, _scan| {
-        Ok(Some(fields.with_status(Status::Canceled, Some(reason))?))
+    change_status(store, id, caller, effects, |fields| {
+        Ok(fields.with_status(Status::Canceled, Some(reason))?)
+    })
+}
+
+// An instruction's status is part of its slice's claimed work.
+fn change_status(
+    store: &Store,
+    id: &TicketId,
+    caller: &Identity,
+    effects: &WriteEffects,
+    change: impl FnOnce(&TicketFields) -> Result<TicketFields, StoreError>,
+) -> Result<StoredTicket, StoreError> {
+    let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
+    let scan = read_tickets(store.root())?;
+    let slice = instruction_slice(&find_ticket(&scan, id)?.document.fields);
+
+    write_for_slice(store.root(), slice, caller, &effects.lease, || {
+        change_scanned(&scan, id, effects, |fields, _scan| change(fields).map(Some))
     })
 }
 
@@ -43,6 +66,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{cancel_ticket, mark_done};
+    use crate::store::identity::Identity;
     use crate::store::store_lock::{LockAccess, StoreLock};
     use crate::store::ticket_write::WriteEffects;
     use crate::store::{Store, StoreError};
@@ -88,8 +112,13 @@ mod tests {
     fn mark_done_refuses_a_plan_and_names_its_kind() {
         let (directory, store) = store_with(&[("personal-abcd-plan.md", PLAN)]);
 
-        let error = mark_done(&store, &id("personal-abcd"), &WriteEffects::system())
-            .expect_err("a plan is never done by hand");
+        let error = mark_done(
+            &store,
+            &id("personal-abcd"),
+            &Identity::default(),
+            &WriteEffects::system(),
+        )
+        .expect_err("a plan is never done by hand");
 
         assert!(
             matches!(&error, StoreError::WrongKind { id, kind: Kind::Plan, .. } if id == "personal-abcd"),
@@ -112,6 +141,7 @@ mod tests {
             &store,
             &id("personal-abcd"),
             "Sold the domain",
+            &Identity::default(),
             &WriteEffects::system(),
         )
         .expect("a task can be canceled");
@@ -133,8 +163,10 @@ mod tests {
             ..WriteEffects::system()
         };
 
-        let done = mark_done(&store, &id("personal-abcd"), &effects);
-        let canceled = cancel_ticket(&store, &id("personal-abcd"), "Gone", &effects);
+        let person = Identity::default();
+
+        let done = mark_done(&store, &id("personal-abcd"), &person, &effects);
+        let canceled = cancel_ticket(&store, &id("personal-abcd"), "Gone", &person, &effects);
 
         for (name, result) in [("done", done), ("cancel", canceled)] {
             assert!(

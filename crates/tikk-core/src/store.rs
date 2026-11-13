@@ -1,7 +1,13 @@
+mod claim_lease;
+mod fact_files;
+mod identity;
 mod machine;
+mod project_choice;
+mod ready;
 mod store_init;
 mod store_lock;
 mod system;
+mod ticket_claim;
 mod ticket_create;
 mod ticket_edit;
 mod ticket_file_write;
@@ -22,9 +28,16 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+pub use claim_lease::LeaseEffects;
+pub use fact_files::UnreadableFact;
+pub use identity::Identity;
 pub use machine::MachineName;
+pub use ready::{
+    BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, SkippedSlice, ready_slices,
+};
 pub use store_init::{InitOutcome, init};
 pub use store_lock::{LockAccess, StoreLock};
+pub use ticket_claim::{ClaimEffects, ShownClaim, claim_slice, release_slice};
 pub use ticket_create::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
 pub use ticket_edit::{EditEffects, edit_ticket};
 pub use ticket_files::{StoredTicket, UnreadableTicket};
@@ -97,6 +110,16 @@ pub enum StoreError {
     NoEditor,
     #[error("The editor failed: {message}")]
     EditorFailed { message: String },
+    #[error("TIKK_AGENT is not set. Set it to the agent's name, such as `TIKK_AGENT=manager`.")]
+    NoAgent,
+    #[error("{variable} is not valid Unicode.")]
+    NotUnicode { variable: &'static str },
+    #[error("{id} is claimed by {agent} until {lease_end}.")]
+    Claimed {
+        id: String,
+        agent: String,
+        lease_end: String,
+    },
     #[error("Could not {action} {}: {source}", path.display())]
     Io {
         action: &'static str,
