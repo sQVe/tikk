@@ -111,6 +111,39 @@ fn init_refuses_a_folder_with_other_files() {
     assert!(!home.store().join(".git").exists());
 }
 
+#[test]
+fn init_through_a_symlink_to_an_empty_folder_creates_the_store_in_the_target() {
+    let home = Home::new();
+    let link = home.work().join("store-link");
+    std::os::unix::fs::symlink(home.store(), &link).expect("link to the store folder");
+
+    let run = home.tikk_with_environment(
+        &home.work(),
+        &[("TIKK_HOME", &link)],
+        &["init", "--json", "--machine", "test"],
+    );
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(true));
+    assert!(home.store().join(".git").is_dir());
+    assert!(home.store().join("tikk.json").is_file());
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .expect("read the link")
+            .file_type()
+            .is_symlink()
+    );
+    for folder in [home.work(), home.store().join("..")] {
+        let staging: Vec<_> = std::fs::read_dir(&folder)
+            .expect("list a folder")
+            .map(|entry| entry.expect("read an entry").file_name())
+            .filter(|name| name.to_string_lossy().contains("tikk-init"))
+            .collect();
+
+        assert_eq!(staging, Vec::<std::ffi::OsString>::new(), "{folder:?}");
+    }
+}
+
 fn parent_git(parent: &std::path::Path, arguments: &[&str]) -> String {
     let output = std::process::Command::new("git")
         .arg("-C")

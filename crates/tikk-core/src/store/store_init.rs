@@ -31,11 +31,27 @@ pub struct InitOutcome {
     pub created: bool,
 }
 
+// The staging folder is renamed onto the store path, and a rename cannot replace a symlink with a
+// folder, so a link to an existing folder is replaced by that folder's path. A link to a missing
+// target stays as given.
+fn resolve_store_link(root: &Path) -> PathBuf {
+    let is_link =
+        fs::symlink_metadata(root).is_ok_and(|metadata| metadata.file_type().is_symlink());
+
+    if !is_link {
+        return root.to_path_buf();
+    }
+
+    fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf())
+}
+
 pub fn init(
     root: &Path,
     machine: Option<MachineName>,
     effects: &StoreEffects,
 ) -> Result<InitOutcome, StoreError> {
+    let root = &resolve_store_link(root);
+
     if has_config(root)? {
         // A tikk.json without the store's own repository is not a store, so Git never runs there.
         ensure_own_repository(root, effects)?;
