@@ -338,7 +338,7 @@ mod tests {
 
     use std::path::{Path, PathBuf};
 
-    use super::{QueryEffects, TicketFilter, list_tickets, show_ticket};
+    use super::{QueryEffects, TicketFilter, list_tickets, read_tickets_unlocked, show_ticket};
     use crate::store::store_lock::{LockAccess, StoreLock};
     use crate::store::{Store, StoreError};
     use crate::ticket::{Kind, ProjectName, Status, TicketId};
@@ -394,6 +394,30 @@ mod tests {
             .iter()
             .map(|ticket| ticket.id.to_string())
             .collect()
+    }
+
+    #[test]
+    fn read_tickets_unlocked_returns_the_tickets_and_creates_no_lock_file() {
+        let (_directory, store) = store_with_tickets();
+
+        let mut ids: Vec<String> = read_tickets_unlocked(&store)
+            .expect("the read runs")
+            .iter()
+            .map(|ticket| ticket.id.to_string())
+            .collect();
+
+        ids.sort();
+        assert_eq!(
+            ids,
+            [
+                "personal-3333",
+                "personal-4444",
+                "personal-6666",
+                "personal-7777",
+                "tikk-8888"
+            ]
+        );
+        assert!(!store.root().join(".git/tikk.lock").exists());
     }
 
     #[test]

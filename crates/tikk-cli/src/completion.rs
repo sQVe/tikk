@@ -231,11 +231,12 @@ fn subject(words: &[OsString], command: &str) -> Option<TicketId> {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
+    use std::ffi::{OsStr, OsString};
+    use std::path::Path;
 
     use tikk_core::TicketId;
 
-    use super::{callback_words, subject};
+    use super::{callback_program, callback_words, subject};
 
     fn words(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()
@@ -279,5 +280,24 @@ mod tests {
             callback_words(arguments.into_iter()),
             words(&["tikk", "show", ""])
         );
+    }
+
+    #[test]
+    fn a_bare_program_name_stays_bare_and_a_path_joins_the_working_directory() {
+        let working_directory = Path::new("/work");
+        let cases = [
+            ("tikk", "tikk"),
+            ("bin/tikk", "/work/bin/tikk"),
+            ("./tikk", "/work/./tikk"),
+            ("/usr/bin/tikk", "/usr/bin/tikk"),
+        ];
+
+        for (program, expected) in cases {
+            assert_eq!(
+                callback_program(OsStr::new(program), working_directory),
+                expected,
+                "case {program}"
+            );
+        }
     }
 }
