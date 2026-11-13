@@ -144,24 +144,11 @@ fn append_release(
     Ok(Some(current))
 }
 
-// The caller holds the store lock.
-pub(crate) fn shown_claim(
-    root: &Path,
-    ticket: &StoredTicket,
-    now: Timestamp,
-) -> Result<Option<ShownClaim>, StoreError> {
-    if ticket.document.fields.kind() != Kind::Slice {
-        return Ok(None);
-    }
-
-    let facts = read_facts(root)?;
-
-    Ok(current_claims(&facts.facts)
-        .remove(&ticket.id)
-        .map(|claim| ShownClaim {
-            state: claim.state(now),
-            claim,
-        }))
+pub(crate) fn shown_claim(facts: &[FactLine], id: &TicketId, now: Timestamp) -> Option<ShownClaim> {
+    current_claims(facts).remove(id).map(|claim| ShownClaim {
+        state: claim.state(now),
+        claim,
+    })
 }
 
 fn check_claimable(ticket: &StoredTicket, scan: &TicketScan) -> Result<(), StoreError> {

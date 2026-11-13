@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use tikk_core::{Kind, MachineName, ProjectName, RankPlace, Status, StoreError, TicketId};
+use tikk_core::{
+    Kind, MachineName, ProjectName, PullRequest, RankPlace, Status, StoreError, TicketId,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -116,6 +118,30 @@ pub(crate) enum Command {
     },
     /// List the slices that can start, in rank order, and what holds each of the others.
     Ready(ReadyArguments),
+    /// Record the PR of a slice, and read the state of linked PRs. Only these commands run `gh`.
+    Pr {
+        #[command(subcommand)]
+        command: PrCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum PrCommand {
+    /// Read the PR through `gh` and record it as the slice's PR. By the claim holder, it renews
+    /// the lease.
+    Link {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        /// The PR, as `https://github.com/<owner>/<name>/pull/<number>`.
+        #[arg(value_name = "URL", value_parser = parse_pr_url)]
+        url: PullRequest,
+    },
+    /// Read through `gh` every linked PR not yet seen in trunk, or the PR of the given slice, and
+    /// record each state.
+    Refresh {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: Option<TicketId>,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -219,6 +245,12 @@ pub(crate) struct ReadyArguments {
 
 fn parse_machine(name: &str) -> Result<MachineName, StoreError> {
     MachineName::parse(name)
+}
+
+fn parse_pr_url(url: &str) -> Result<PullRequest, String> {
+    PullRequest::from_url(url).ok_or_else(|| {
+        format!("`{url}` is not a PR URL; use https://github.com/<owner>/<name>/pull/<number>")
+    })
 }
 
 #[cfg(test)]

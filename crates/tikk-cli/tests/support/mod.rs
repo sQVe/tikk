@@ -3,11 +3,20 @@
     reason = "each test file uses a different part of the shared helper"
 )]
 
+mod gh;
+
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde_json::Value;
 use tempfile::{Builder, TempDir};
+
+#[allow(
+    unused_imports,
+    reason = "each test file uses a different part of the shared helper"
+)]
+pub(crate) use gh::{FakeGh, TRUNK, pr_view_call};
 
 /// Git reads these before `-C`, so a test started from a Git hook would reach the tikk repository.
 const REPOSITORY_ENVIRONMENT: &[&str] = &[
@@ -136,6 +145,38 @@ impl Home {
         let mut command = self.command(arguments);
 
         command.env("TIKK_AGENT", agent);
+
+        finish(command.output().expect("start the tikk binary"))
+    }
+
+    /// Runs tikk with the fake `gh` first on `PATH`, as the agent when one is given.
+    pub(crate) fn tikk_with_gh(&self, gh: &FakeGh, agent: Option<&str>, arguments: &[&str]) -> Run {
+        let mut search = vec![gh.bin()];
+
+        search.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+
+        self.tikk_on_path(
+            std::env::join_paths(search).expect("a valid PATH"),
+            agent,
+            arguments,
+        )
+    }
+
+    pub(crate) fn tikk_on_path(
+        &self,
+        path: OsString,
+        agent: Option<&str>,
+        arguments: &[&str],
+    ) -> Run {
+        let mut command = self.command(arguments);
+
+        command.env("PATH", path);
+
+        if let Some(agent) = agent {
+            command.env("TIKK_AGENT", agent);
+        }
 
         finish(command.output().expect("start the tikk binary"))
     }

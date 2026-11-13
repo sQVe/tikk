@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::fact::{AgentName, Claim, FactError, Timestamp};
+use crate::fact::{AgentName, Claim, FactError, PrObservation, PrState, PullRequest, Timestamp};
 use crate::ticket::TicketId;
 
 const VERSION: u32 = 1;
@@ -16,6 +16,7 @@ pub(crate) struct FactLine {
 pub(crate) enum FactEvent {
     Claim(Claim),
     Release { agent: Option<AgentName> },
+    Pr(PrObservation),
 }
 
 // Fields beyond these are ignored, so a later version may add some.
@@ -30,6 +31,13 @@ struct RawFact {
     session: Option<String>,
     session_log: Option<String>,
     lease_end: Option<String>,
+    repository: Option<String>,
+    number: Option<u64>,
+    state: Option<String>,
+    base: Option<String>,
+    head: Option<String>,
+    merge_commit: Option<String>,
+    in_trunk: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -54,6 +62,22 @@ struct ReleaseText<'a> {
     agent: Option<&'a str>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PrText<'a> {
+    v: u32,
+    kind: &'static str,
+    ticket: String,
+    at: String,
+    repository: &'a str,
+    number: u64,
+    state: &'static str,
+    base: &'a str,
+    head: &'a str,
+    merge_commit: Option<&'a str>,
+    in_trunk: bool,
+}
+
 pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
     let raw: RawFact = serde_json::from_str(text)
         .map_err(|error| FactError::new(format!("the line is not a fact: {error}")))?;
@@ -72,9 +96,10 @@ pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
         "release" => FactEvent::Release {
             agent: raw.agent.as_deref().and_then(AgentName::parse),
         },
+        "pr" => FactEvent::Pr(parse_pr(raw)?),
         other => {
             return Err(FactError::new(format!(
-                "`{other}` is not a fact kind; use claim or release"
+                "`{other}` is not a fact kind; use claim, release, or pr"
             )));
         }
     };
@@ -103,6 +128,19 @@ pub(crate) fn write_fact_line(fact: &FactLine) -> String {
             at,
             agent: agent.as_ref().map(AgentName::as_str),
         }),
+        FactEvent::Pr(observation) => serde_json::to_string(&PrText {
+            v: VERSION,
+            kind: "pr",
+            ticket,
+            at,
+            repository: observation.pull_request.repository(),
+            number: observation.pull_request.number(),
+            state: observation.state.as_str(),
+            base: &observation.base,
+            head: &observation.head,
+            merge_commit: observation.merge_commit.as_deref(),
+            in_trunk: observation.in_trunk,
+        }),
     };
 
     format!("{}\n", text.expect("a fact serializes to JSON"))
@@ -127,10 +165,36 @@ fn parse_claim(raw: RawFact) -> Result<Claim, FactError> {
     })
 }
 
+fn parse_pr(raw: RawFact) -> Result<PrObservation, FactError> {
+    let missing = |field: &str| FactError::new(format!("a pr fact needs `{field}`"));
+    let repository = raw.repository.ok_or_else(|| missing("repository"))?;
+    let number = raw.number.ok_or_else(|| missing("number"))?;
+    let pull_request = PullRequest::new(&repository, number).ok_or_else(|| {
+        FactError::new(format!(
+            "`{repository}` and {number} name no PR; use an `owner/name` and a number above 0"
+        ))
+    })?;
+    let state = raw.state.ok_or_else(|| missing("state"))?;
+    let state = PrState::parse(&state).ok_or_else(|| {
+        FactError::new(format!(
+            "`{state}` is not a PR state; use open, closed, or merged"
+        ))
+    })?;
+
+    Ok(PrObservation {
+        pull_request,
+        state,
+        base: raw.base.ok_or_else(|| missing("base"))?,
+        head: raw.head.ok_or_else(|| missing("head"))?,
+        merge_commit: raw.merge_commit,
+        in_trunk: raw.in_trunk.ok_or_else(|| missing("inTrunk"))?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{FactEvent, FactLine, parse_fact_line, write_fact_line};
-    use crate::fact::{AgentName, Claim, Timestamp};
+    use crate::fact::{AgentName, Claim, PrObservation, PrState, PullRequest, Timestamp};
     use crate::ticket::TicketId;
 
     fn at(text: &str) -> Timestamp {
@@ -178,6 +242,73 @@ mod tests {
             "{\"v\":1,\"kind\":\"release\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00.000Z\",\"agent\":null}\n"
         );
         assert_eq!(parse_fact_line(text.trim_end()), Ok(fact));
+    }
+
+    #[test]
+    fn a_pr_line_has_its_fields_in_order_and_parses_back() {
+        let fact = FactLine {
+            ticket: slice(),
+            at: at("2026-11-13T01:00:00Z"),
+            event: FactEvent::Pr(PrObservation {
+                pull_request: PullRequest::new("owner/app", 7).expect("a valid PR"),
+                state: PrState::Merged,
+                base: "main".to_owned(),
+                head: "abc".to_owned(),
+                merge_commit: Some("def".to_owned()),
+                in_trunk: true,
+            }),
+        };
+
+        let text = write_fact_line(&fact);
+
+        assert_eq!(
+            text,
+            "{\"v\":1,\"kind\":\"pr\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00.000Z\",\"repository\":\"owner/app\",\"number\":7,\"state\":\"merged\",\"base\":\"main\",\"head\":\"abc\",\"mergeCommit\":\"def\",\"inTrunk\":true}\n"
+        );
+        assert_eq!(parse_fact_line(text.trim_end()), Ok(fact));
+    }
+
+    #[test]
+    fn parse_names_what_is_wrong_with_a_pr_line() {
+        let start =
+            "{\"v\":1,\"kind\":\"pr\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00Z\"";
+        let whole = "\"repository\":\"owner/app\",\"number\":7,\"state\":\"open\",\"base\":\"main\",\"head\":\"abc\",\"mergeCommit\":null,\"inTrunk\":false";
+        let cases = [
+            ("\"repository\":\"owner/app\",", "`repository`"),
+            ("\"number\":7,", "`number`"),
+            ("\"state\":\"open\",", "`state`"),
+            ("\"base\":\"main\",", "`base`"),
+            ("\"head\":\"abc\",", "`head`"),
+            (",\"inTrunk\":false", "`inTrunk`"),
+        ];
+
+        assert!(parse_fact_line(&format!("{start},{whole}}}")).is_ok());
+        for (field, expected) in cases {
+            let text = format!("{start},{}}}", whole.replace(field, ""));
+
+            let error = parse_fact_line(&text).expect_err("the line is refused");
+
+            assert!(
+                error.to_string().contains(expected),
+                "case {field}: {error}"
+            );
+        }
+
+        let wrong = [
+            (whole.replace("owner/app", "owner"), "name no PR"),
+            (whole.replace("\"number\":7", "\"number\":0"), "name no PR"),
+            (whole.replace("\"open\"", "\"OPEN\""), "not a PR state"),
+        ];
+
+        for (fields, expected) in wrong {
+            let error =
+                parse_fact_line(&format!("{start},{fields}}}")).expect_err("the line is refused");
+
+            assert!(
+                error.to_string().contains(expected),
+                "case {fields}: {error}"
+            );
+        }
     }
 
     #[test]

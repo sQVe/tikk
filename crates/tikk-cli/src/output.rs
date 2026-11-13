@@ -29,6 +29,7 @@ pub(crate) struct Failure {
     pub(crate) message: String,
     pub(crate) field: Option<String>,
     pub(crate) files: Option<Vec<String>>,
+    pub(crate) pull_requests: Option<Value>,
     pub(crate) exit: Exit,
 }
 
@@ -64,6 +65,10 @@ impl Response {
 
             if let Some(files) = &failure.files {
                 error["files"] = json!(files);
+            }
+
+            if let Some(pull_requests) = &failure.pull_requests {
+                error["pullRequests"] = pull_requests.clone();
             }
 
             format!("{}\n", json!({ "error": error }))
@@ -156,6 +161,7 @@ mod tests {
             message: "No store.".to_owned(),
             field: None,
             files: None,
+            pull_requests: None,
             exit: Exit::Refused,
         };
 
@@ -179,6 +185,7 @@ mod tests {
             message: "No store.".to_owned(),
             field: None,
             files: None,
+            pull_requests: None,
             exit: Exit::Refused,
         };
 
@@ -195,6 +202,7 @@ mod tests {
             message: "Sync stopped.".to_owned(),
             field: None,
             files: Some(vec!["tickets/personal/personal-abcd-a.md".to_owned()]),
+            pull_requests: None,
             exit: Exit::Refused,
         };
 
@@ -215,6 +223,7 @@ mod tests {
             message: "`parent` is wrong.".to_owned(),
             field: Some("parent".to_owned()),
             files: None,
+            pull_requests: None,
             exit: Exit::Refused,
         };
 

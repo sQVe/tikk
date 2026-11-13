@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use support::{Home, Remote, parse_json};
+use support::{FakeGh, Home, Remote, parse_json};
 
 #[test]
 fn trouble() {
@@ -260,6 +260,45 @@ fn trouble() {
         renamed_claim.stderr
     );
 
+    let gh = FakeGh::new();
+    let url = "https://github.com/owner/app/pull/12";
+    gh.open_pr("owner/app", 12, "1111111111111111111111111111111111111111");
+    let link = home.tikk_with_gh(&gh, None, &["pr", "link", &slice, url, "--json"]);
+    assert_eq!(link.exit_code, 0, "step 7, pr link: {}", link.stderr);
+    gh.fail_pr("owner/app", 12, "HTTP 502: Bad Gateway");
+
+    let refresh = home.tikk_with_gh(&gh, None, &["pr", "refresh", "--json"]);
+
+    assert_eq!(
+        refresh.exit_code, 1,
+        "step 7, pr refresh: {}",
+        refresh.stdout
+    );
+    let gh_error = parse_json(&refresh.stderr)["error"].clone();
+    assert_eq!(gh_error["code"], json!("ghError"), "step 7, pr refresh");
+    assert_eq!(
+        gh_error["pullRequests"][0]["url"],
+        json!(url),
+        "step 7, the error names the PR: {gh_error}"
+    );
+    assert!(
+        gh_error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(url)),
+        "step 7, the message names the PR: {gh_error}"
+    );
+    let ready_after = home.tikk_with_gh(&gh, None, &["ready", "--parent", &plan, "--json"]);
+    assert_eq!(
+        ready_after.exit_code, 0,
+        "step 7, ready: {}",
+        ready_after.stderr
+    );
+
+    assert_eq!(
+        home.show_json(&slice)["pr"]["state"],
+        json!("open"),
+        "end state, the slice keeps its last recorded PR state"
+    );
     assert_eq!(
         std::fs::read_to_string(&path).expect("read the broken file"),
         broken_text,
