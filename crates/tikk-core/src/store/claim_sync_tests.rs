@@ -4,13 +4,14 @@ use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 
-use crate::fact::AgentName;
+use crate::fact::{AgentName, FactEvent};
+use crate::store::fact_files::read_facts;
 use crate::store::git::run_store_git;
 use crate::store::id_clash::IdClash;
 use crate::store::identity::Identity;
 use crate::store::sync::{FileEntry, FileKind, SyncEffects, SyncStep};
 use crate::store::sync_read::read_entry;
-use crate::store::ticket_claim::{ClaimEffects, claim_slice};
+use crate::store::ticket_claim::{ClaimEffects, claim_slice, release_slice};
 use crate::store::{
     MachineName, RemoteInitEffects, Store, StoreEffects, StoreError, init, init_from_remote,
 };
@@ -463,4 +464,77 @@ fn a_claim_whose_ticket_scan_fails_is_refused_before_the_merge_and_changes_nothi
         "{result:?}"
     );
     assert_eq!(store_state(&desktop), before, "no merge, fact, or commit");
+}
+
+thread_local! {
+    static NETWORK: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn recorded_network(_: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+    NETWORK.with_borrow_mut(|calls| calls.push(arguments.join(" ")));
+
+    Ok(Vec::new())
+}
+
+fn git_with_a_failing_commit(root: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+    match arguments {
+        ["commit", ..] => Err(StoreError::Git {
+            arguments: arguments.join(" "),
+            message: "commit failed".to_owned(),
+        }),
+        _ => run_store_git(root, arguments),
+    }
+}
+
+#[test]
+fn a_claim_and_a_release_whose_commit_fails_keep_their_fact_save_the_problem_and_push_nothing() {
+    let (directory, store) = store_with_slice();
+    let head = git_text(directory.path(), &["rev-parse", "HEAD"]);
+    let effects = ClaimEffects {
+        sync: SyncEffects {
+            read_origin: origin,
+            run_network_git: recorded_network,
+            run_git: git_with_a_failing_commit,
+            ..SyncEffects::system()
+        },
+        ..ClaimEffects::system()
+    };
+    NETWORK.set(Vec::new());
+
+    let claimed = claim_slice(&store, &slice(), &manager(), &effects).expect("the claim works");
+    let saved = saved_result(&directory);
+    let released =
+        release_slice(&store, &slice(), &manager(), &effects).expect("the release works");
+
+    for (name, sync) in [("claim", &claimed.sync), ("release", &released.sync)] {
+        assert!(!sync.committed && !sync.pushed, "{name}: {sync:?}");
+        assert_eq!(sync.problems.len(), 1, "{name}: {sync:?}");
+        assert_eq!(sync.problems[0].step, SyncStep::Commit, "{name}");
+    }
+    assert_eq!(saved["problems"][0]["step"], serde_json::json!("commit"));
+    assert_eq!(
+        saved_result(&directory)["problems"][0]["step"],
+        serde_json::json!("commit")
+    );
+    assert_eq!(
+        NETWORK.take(),
+        ["fetch --quiet --no-tags --prune origin"; 2],
+        "nothing is pushed"
+    );
+    let facts = read_facts(directory.path())
+        .expect("the facts are read")
+        .facts;
+    let kinds: Vec<&str> = facts
+        .iter()
+        .map(|fact| match fact.event {
+            FactEvent::Claim(_) => "claim",
+            FactEvent::Release { .. } => "release",
+        })
+        .collect();
+    assert_eq!(kinds, ["claim", "release"], "both facts stay");
+    assert_eq!(git_text(directory.path(), &["rev-parse", "HEAD"]), head);
+    assert_eq!(
+        git_text(directory.path(), &["diff", "--cached", "--name-only"]),
+        ""
+    );
 }
