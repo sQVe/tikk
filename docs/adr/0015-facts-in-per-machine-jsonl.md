@@ -25,6 +25,12 @@ the same state. File path and line number break timestamp ties deterministically
 establish which observation happened later in real time. Machine clocks can disagree, so timestamp
 order is not a guarantee of real-time order.
 
+A `pr` fact records what `gh` showed of a slice's PR: `repository` as `owner/name`, `number`,
+`state` (`open`, `closed`, or `merged`), `base` (the branch name), `head` (the head commit),
+`mergeCommit` (null until the merge), and `inTrunk`, true once the PR's work is in the trunk branch.
+Each read appends a new line, even when nothing changed, so the time of the newest line shows when
+tikk last checked the PR.
+
 Evidence records carry the code state they saw: repository, head, base, and a change hash. Large
 logs and screenshots are stored by content hash. Secrets and raw session dumps never enter the
 store.

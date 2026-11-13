@@ -39,8 +39,8 @@ names it ([ADR 0012](./0012-one-git-store-with-one-lock.md)).
   in the same hold of the lock. The write and the fact append are not one transaction: when the
   append fails, the command reports the error, and its write stays.
 - When `TIKK_AGENT` is set and another agent holds a live claim on the slice, `claim`, `release`,
-  and `new`, `done`, and `cancel` on the slice's instructions refuse with the code `claimed`. The
-  refusal writes nothing. A person, with no `TIKK_AGENT`, is never refused.
+  `pr link`, and `new`, `done`, and `cancel` on the slice's instructions refuse with the code
+  `claimed`. The refusal writes nothing, and a refused `pr link` runs no `gh`. A person, with no `TIKK_AGENT`, is never refused.
 - `release` ends a claim. An agent ends its own claim or a stale one. A person ends any claim, so
   the user can free the slice of a dead manager. Claims and releases are facts
   ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
@@ -70,8 +70,14 @@ names it ([ADR 0012](./0012-one-git-store-with-one-lock.md)).
 - A slice whose own ID is in two files is skipped with the hold `idShared`, and tikk reads no claim
   for it ([ADR 0019](./0019-ids-and-file-names.md)).
 - The stacking exception: a slice's own `blockedBy` may name a slice whose PR is open. That blocker
-  counts as cleared for the slice, and the ready slice names that PR as its stack parent. A task or
-  plan blocker never clears this way.
+  counts as cleared for the slice, and the ready slice names that PR as its `stackParent`: the
+  blocker slice, the PR's repository, number, and head, and its `prCheckedAt`. The PR state is the
+  one [ADR 0023](./0023-derived-slice-done.md) selects from the `pr` facts. Nothing else clears this
+  way: a blocker that is a task, a plan, or an instruction stays a hold, even when that blocker
+  waits on a slice with an open PR, and so does a slice that its plan's `blockedBy` names. When
+  several of a slice's own blockers have open PRs, all of them clear, and `stackParent` names the
+  PR of the blocker with the smallest ticket ID, so the answer does not depend on file order.
+- `ready` reads PR states only from the `pr` facts, and never runs `gh`.
 - `ready` weighs order, `blockedBy` edges, claims, and merge state, so Tau asks tikk what comes next
   instead of working out the order itself.
 
@@ -122,3 +128,8 @@ blocks the items it skipped.
 
 Mark a claim in the ticket's front matter. Rejected because agent writes to a file conflict across
 machines ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
+
+### Every open-PR blocker as a stack parent
+
+List each cleared blocker's PR as a stack parent. Rejected because a branch starts from one base, so
+the manager needs one answer. The smallest ticket ID gives the same answer on every machine.
