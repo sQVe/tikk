@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 
 use crate::fact::{
@@ -257,12 +259,22 @@ fn parse_audit(raw: RawFact) -> Result<Audit, FactError> {
             "`{repository}` is not a repository; use `owner/name`"
         ))
     })?;
-    let verdicts = raw
+    let verdicts: Vec<AuditVerdict> = raw
         .verdicts
         .ok_or_else(|| missing("verdicts"))?
         .into_iter()
         .map(parse_verdict)
         .collect::<Result<_, _>>()?;
+    let mut seen = HashSet::new();
+
+    for verdict in &verdicts {
+        if !seen.insert(verdict.criterion.as_str()) {
+            return Err(FactError::new(format!(
+                "the criterion `{}` has two verdicts",
+                verdict.criterion
+            )));
+        }
+    }
 
     Ok(Audit {
         repository,
@@ -431,6 +443,10 @@ mod tests {
             (
                 whole.replace("\"evidence\":\"x\"", "\"evidence\":\" \""),
                 "`s1` has no evidence",
+            ),
+            (
+                whole.replace(&format!("[{verdict}]"), &format!("[{verdict},{verdict}]")),
+                "`s1` has two verdicts",
             ),
         ];
 

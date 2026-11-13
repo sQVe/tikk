@@ -363,7 +363,8 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   `{"reason":"blockedBy",...,"state":"mergedUnverified"}`.
 - Append a line that does not parse, such as `{"v":1,"kind":"audit"`, to a fact file. While it is
   there, a slice that was `done` reads `mergedUnverified` in `show`, `ls`, and `ready`, its plan
-  reads `open`, and `ready --json` lists the line in `errors`. Replace a ticket file of the store
+  reads `open`, a plan whose only members are done tasks reads `open`, and `ready --json` lists
+  the line in `errors`. An audit line with two verdicts for one criterion is such a line. Replace a ticket file of the store
   with `---\nkind: [\n---\n`. While it is there, no plan reads `done`; an open plan reads `open`,
   slices keep their derived state, and `ls --json` lists the file in `errors`.
 - With the fake `gh` answering an open PR with a new `headRefOid`,

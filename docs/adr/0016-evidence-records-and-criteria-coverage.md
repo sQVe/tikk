@@ -27,10 +27,11 @@ status comes from triage facts. Criteria coverage is a query.
   status. The newest fact wins in the ordering defined by [ADR
   0015](./0015-facts-in-per-machine-jsonl.md).
 - An `audit` record carries the repository, the PR head it saw, and the hash of the ticket file it
-  audited, not a base or a change hash. It holds a verdict per criterion. Each verdict holds the
+  audited, not a base or a change hash. It holds one verdict per criterion. Each verdict holds the
   criterion ID, the criterion's `check` and `expected` text at audit time, a verdict of `met`,
-  `not-met`, `not-run`, or `deferred`, and non-empty evidence. An audit that leaves out a criterion
-  is recorded, and it does not count ([ADR 0023](./0023-derived-slice-done.md)).
+  `not-met`, `not-run`, or `deferred`, and non-empty evidence. A stored audit line with blank
+  evidence or with two verdicts for one criterion does not parse. An audit that leaves out a
+  criterion is recorded, and it does not count ([ADR 0023](./0023-derived-slice-done.md)).
 - A `qa` record is one QA run on a slice. It holds a run ID, scenarios, artifacts, and gaps. Each
   scenario has a name, the criteria it covers, what was observed, and a verdict of `pass`, `fail`,
   or `blocked`. The run ID is the first 12 hex characters of a SHA-256 of the fact without `run`.
