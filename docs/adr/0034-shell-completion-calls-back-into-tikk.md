@@ -40,14 +40,17 @@ source of commands, flags, and candidates.
 
 - When `COMPLETE` names a shell, tikk answers the shell before it parses the command and exits
   with 0. A shell name that `clap_complete` does not know is an error.
-- Each argument that takes a ticket ID offers the IDs of the store, with each ticket's title as
-  the description. bash shows the IDs only, because its stock completion has no descriptions. zsh
-  and fish show the titles.
-- A blocker accepts every kind, so it offers every ID. `move --parent` offers the tickets whose
-  kind the subject's kind can sit under, and `rank --before` and `--after` offer the subject's
-  siblings. These use the same rules as the commands. A candidate hook gets no parsed arguments,
-  so tikk finds the subject in the words that the shell passes. Without a subject, or with an
-  unknown one, every ID is offered.
+- Each argument whose value parser yields a ticket ID offers the IDs of the store, with each
+  ticket's title as the description. tikk finds these arguments in the clap tree, so a new ID
+  argument completes with no second list. bash shows the IDs only, because its stock completion
+  has no descriptions. zsh and fish show the titles.
+- A blocker accepts every kind, so it offers every ID. `move --parent` and `new --parent` offer
+  the tickets whose kind the subject's kind can sit under; the subject of `new` is its kind.
+  `ls --parent` and `ready --parent` offer the kinds that can hold children. `rank --before` and
+  `--after` offer the subject's siblings. These use the same rules as the commands. A candidate
+  hook gets no parsed arguments, so tikk parses the words that the shell passes with the same
+  clap tree, ignoring errors, and takes the command's first positional argument as the subject.
+  Without a subject, or with an unknown one, every ID is offered.
 - The callback reads the ticket files without the store lock, without facts, and without a sync,
   Git, or `gh`. It writes nothing. A file that does not parse is left out. A store that is missing
   or cannot be read gives no candidate and no error output, because a prompt has no place for one.

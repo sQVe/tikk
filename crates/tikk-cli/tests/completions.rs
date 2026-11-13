@@ -82,6 +82,31 @@ fn the_parent_of_a_moved_instruction_completes_to_slices_only() {
 }
 
 #[test]
+fn new_ls_and_ready_parents_complete_to_the_kinds_that_can_hold_the_ticket() {
+    let home = Home::initialized();
+    let (plan, slice) = home.plan_and_slice();
+    let instruction = home.new_ticket(&["instruction", "Write the lock", "--parent", &slice]);
+    let task = home.new_ticket(&["task", "Renew the domain"]);
+    let cases: [(&[&str], Vec<String>); 5] = [
+        (
+            &["new", "instruction", "Write", "--parent", ""],
+            sorted(&[&slice]),
+        ),
+        (&["new", "task", "Renew", "--parent", ""], sorted(&[&plan])),
+        (
+            &["new", "--parent", ""],
+            sorted(&[&plan, &slice, &instruction, &task]),
+        ),
+        (&["ls", "--parent", ""], sorted(&[&plan, &slice])),
+        (&["ready", "--parent", ""], sorted(&[&plan, &slice])),
+    ];
+
+    for (words, expected) in cases {
+        assert_eq!(ids(&home.complete(words)), expected, "case {words:?}");
+    }
+}
+
+#[test]
 fn a_rank_anchor_completes_to_the_subject_siblings_only() {
     let home = Home::initialized();
     let (plan, slice) = home.plan_and_slice();
@@ -112,7 +137,7 @@ fn an_unknown_subject_offers_every_id() {
 fn every_ticket_id_argument_completes_to_the_ids_and_an_item_does_not() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);
-    let with_ids: [&[&str]; 20] = [
+    let with_ids: [&[&str]; 21] = [
         &["show", ""],
         &["edit", ""],
         &["write", ""],
@@ -133,6 +158,7 @@ fn every_ticket_id_argument_completes_to_the_ids_and_an_item_does_not() {
         &["pr", "link", ""],
         &["pr", "refresh", ""],
         &["audit", ""],
+        &["new", "--parent", ""],
     ];
     let without_ids: [&[&str]; 2] = [&["answer", &id, ""], &["ls", "--search", ""]];
 

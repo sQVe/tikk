@@ -428,7 +428,9 @@ every other check.
   loose task, `COMPLETE=fish target/debug/tikk -- tikk block <task> ""` prints every ID with a tab
   and its title, then the flags. `COMPLETE=fish target/debug/tikk -- tikk move <instruction>
   --parent ""` prints only the two slices, and `COMPLETE=fish target/debug/tikk -- tikk rank <A>
-  --before ""` prints only B. `COMPLETE=bash _CLAP_COMPLETE_INDEX=3 target/debug/tikk -- tikk block
+  --before ""` prints only B. `COMPLETE=fish target/debug/tikk -- tikk new instruction T --parent
+  ""` prints only the two slices, and `tikk ls --parent ""` and `tikk ready --parent ""` print
+  the plan and the two slices. `COMPLETE=bash _CLAP_COMPLETE_INDEX=3 target/debug/tikk -- tikk block
   <task> ""` prints the IDs without titles, then the flags. After `rm "$TIKK_HOME/.git/tikk.lock"`,
   a completion creates no lock file and changes no file. A `TIKK_HOME` with no store prints only
   the flags, nothing on standard error, and exits with 0. `COMPLETE=tcsh` exits with 2 and names
