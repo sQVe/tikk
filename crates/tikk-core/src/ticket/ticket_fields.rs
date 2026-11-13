@@ -108,6 +108,31 @@ impl TicketFields {
         Ok(fields)
     }
 
+    pub(crate) fn with_parent(&self, parent: Option<TicketId>) -> Result<Self, TicketError> {
+        let fields = Self {
+            parent,
+            ..self.clone()
+        };
+
+        fields.check_rules()?;
+
+        Ok(fields)
+    }
+
+    pub(crate) fn with_rank(&self, rank: Option<i64>) -> Self {
+        Self {
+            rank,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn with_blocked_by(&self, blocked_by: Vec<TicketId>) -> Self {
+        Self {
+            blocked_by,
+            ..self.clone()
+        }
+    }
+
     pub fn kind(&self) -> Kind {
         self.kind
     }

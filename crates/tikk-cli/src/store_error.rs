@@ -23,12 +23,15 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::Locked { .. } => ("locked", Exit::Refused),
         StoreError::ChangedOnDisk { .. } => ("changedOnDisk", Exit::Refused),
         StoreError::WrongKind { .. } => ("wrongKind", Exit::Refused),
+        StoreError::Cycle { .. } => ("cycle", Exit::Refused),
+        StoreError::NotSibling { .. } => ("notSibling", Exit::Refused),
         StoreError::NoEditor => ("noEditor", Exit::Refused),
         StoreError::EditorFailed { .. } => ("editorFailed", Exit::Refused),
         StoreError::Io { .. } => ("ioFailed", Exit::Refused),
     };
     let field = match error {
         StoreError::Ticket(TicketError::Invalid { field, .. }) => Some(field.clone()),
+        StoreError::Cycle { field, .. } => Some((*field).to_owned()),
         _ => None,
     };
 
@@ -244,6 +247,22 @@ mod tests {
                 "wrongKind",
                 Exit::Refused,
             ),
+            (
+                StoreError::Cycle {
+                    field: "blockedBy",
+                    steps: Vec::new(),
+                },
+                "cycle",
+                Exit::Refused,
+            ),
+            (
+                StoreError::NotSibling {
+                    id: "personal-abcd".to_owned(),
+                    anchor: "personal-efgh".to_owned(),
+                },
+                "notSibling",
+                Exit::Refused,
+            ),
             (StoreError::NoEditor, "noEditor", Exit::Refused),
             (
                 StoreError::EditorFailed {
@@ -271,16 +290,21 @@ mod tests {
     }
 
     #[test]
-    fn only_a_validation_error_names_a_field() {
+    fn only_a_validation_error_and_a_cycle_name_a_field() {
         let invalid = StoreError::Ticket(TicketError::Invalid {
             field: "criteria[0].id".to_owned(),
             problem: "is required".to_owned(),
         });
+        let cycle = StoreError::Cycle {
+            field: "parent",
+            steps: Vec::new(),
+        };
         let not_found = StoreError::NotFound {
             id: "personal-abcd".to_owned(),
         };
 
         assert_eq!(failure(&invalid).field.as_deref(), Some("criteria[0].id"));
+        assert_eq!(failure(&cycle).field.as_deref(), Some("parent"));
         assert_eq!(failure(&not_found).field, None);
     }
 }
