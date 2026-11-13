@@ -67,6 +67,10 @@ enum RawCompareStatus {
     Diverged,
 }
 
+// Accepted PR URLs all name github.com. Naming the host in every call keeps `GH_HOST`, which gh
+// uses when a call names no host, from sending a read to another GitHub server.
+const HOST: &str = "github.com";
+
 pub(crate) fn run_gh(arguments: &[&str]) -> Result<Vec<u8>, String> {
     run_program("gh", arguments, NETWORK_TIMEOUT)
 }
@@ -76,6 +80,7 @@ pub(crate) fn read_pull_request(
     pull_request: &PullRequest,
 ) -> Result<PrObservation, String> {
     let number = pull_request.number().to_string();
+    let repository = format!("{HOST}/{}", pull_request.repository());
     let raw: RawPullRequest = read_json(
         run_gh,
         &[
@@ -83,7 +88,7 @@ pub(crate) fn read_pull_request(
             "view",
             &number,
             "--repo",
-            pull_request.repository(),
+            &repository,
             "--json",
             VIEW_FIELDS,
         ],
@@ -132,9 +137,16 @@ fn observation(pull_request: &PullRequest, raw: RawPullRequest) -> Result<PrObse
 
 fn merged_into_trunk(run_gh: RunGh, observation: &PrObservation) -> Result<bool, String> {
     let repository = observation.pull_request.repository();
+    let hosted_repository = format!("{HOST}/{repository}");
     let raw: RawRepository = read_json(
         run_gh,
-        &["repo", "view", repository, "--json", "defaultBranchRef"],
+        &[
+            "repo",
+            "view",
+            &hosted_repository,
+            "--json",
+            "defaultBranchRef",
+        ],
     )?;
     let trunk = raw.default_branch_ref.name;
 
@@ -149,7 +161,7 @@ fn merged_into_trunk(run_gh: RunGh, observation: &PrObservation) -> Result<bool,
         "repos/{repository}/compare/{}...{merge_commit}",
         encode_path_segment(&trunk)
     );
-    let comparison: RawComparison = read_json(run_gh, &["api", &path])?;
+    let comparison: RawComparison = read_json(run_gh, &["api", "--hostname", HOST, &path])?;
 
     Ok(match comparison.status {
         RawCompareStatus::Behind | RawCompareStatus::Identical => true,
@@ -223,9 +235,8 @@ mod tests {
         static CALLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
     }
 
-    const VIEW: &str =
-        "pr view 7 --repo owner/app --json number,state,baseRefName,headRefOid,mergeCommit";
-    const REPOSITORY: &str = "repo view owner/app --json defaultBranchRef";
+    const VIEW: &str = "pr view 7 --repo github.com/owner/app --json number,state,baseRefName,headRefOid,mergeCommit";
+    const REPOSITORY: &str = "repo view github.com/owner/app --json defaultBranchRef";
     const TRUNK: &str = "{\"defaultBranchRef\":{\"name\":\"main\"}}";
 
     fn fake_gh(arguments: &[&str]) -> Result<Vec<u8>, String> {
@@ -312,7 +323,7 @@ mod tests {
 
     #[test]
     fn a_pr_merged_into_another_branch_is_in_trunk_once_trunk_holds_its_merge_commit() {
-        let compare = "api repos/owner/app/compare/main...merge";
+        let compare = "api --hostname github.com repos/owner/app/compare/main...merge";
         let cases = [
             ("ahead", false),
             ("diverged", false),
@@ -378,7 +389,7 @@ mod tests {
                     (VIEW, view("MERGED", "feature", Some("merge"))),
                     (REPOSITORY, "{}".to_owned()),
                 ],
-                "repo view owner/app",
+                "repo view github.com/owner/app",
                 "cannot read",
             ),
         ];

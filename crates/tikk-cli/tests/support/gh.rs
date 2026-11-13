@@ -7,9 +7,9 @@ const SCRIPT: &str = r#"#!/bin/sh
 root=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "$*" >> "$root/calls.log"
 case "$1 $2" in
-  "pr view") key="pr/$5/$3" ;;
-  "repo view") key="repo/$3" ;;
-  "api "*) key="api/$2" ;;
+  "pr view") key="pr/${5#github.com/}/$3" ;;
+  "repo view") key="repo/${3#github.com/}" ;;
+  "api --hostname") key="api/$4" ;;
   *) echo "fake gh: unexpected call: $*" >&2; exit 2 ;;
 esac
 if [ -f "$root/responses/$key.fail" ]; then
@@ -144,6 +144,6 @@ fn remove_if_present(path: &Path) {
 
 pub(crate) fn pr_view_call(repository: &str, number: u64) -> String {
     format!(
-        "pr view {number} --repo {repository} --json number,state,baseRefName,headRefOid,mergeCommit"
+        "pr view {number} --repo github.com/{repository} --json number,state,baseRefName,headRefOid,mergeCommit"
     )
 }

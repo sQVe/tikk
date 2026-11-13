@@ -167,8 +167,9 @@ fn a_pr_merged_into_another_branch_is_in_trunk_only_once_trunk_holds_its_merge_c
     assert_eq!(in_trunk.exit_code, 0, "refresh: {}", in_trunk.stderr);
     assert_eq!(home.show_json(&slice)["pr"]["inTrunk"], json!(true));
     assert!(
-        gh.calls()
-            .contains(&format!("api repos/{REPOSITORY}/compare/main...{MERGE}")),
+        gh.calls().contains(&format!(
+            "api --hostname github.com repos/{REPOSITORY}/compare/main...{MERGE}"
+        )),
         "{:?}",
         gh.calls()
     );

@@ -114,10 +114,11 @@ path that names a folder from the working directory and saves it as an absolute 
 other relative name, such as an `insteadOf` alias, stays as given. Without
 `--machine`, it also starts `uname -n`. `tikk pr link` and `tikk pr refresh` start `gh` with
 `GH_PROMPT_DISABLED=1` and no standard input, and stop it after 30 seconds. They run
-`gh pr view <number> --repo <owner/name> --json number,state,baseRefName,headRefOid,mergeCommit`,
-and for a merged PR also `gh repo view <owner/name> --json defaultBranchRef`, then, when the PR
-merged into a branch other than trunk and has a merge commit,
-`gh api repos/<owner/name>/compare/<trunk>...<merge commit>`. No other command starts `gh`. All
+`gh pr view <number> --repo github.com/<owner/name> --json number,state,baseRefName,headRefOid,mergeCommit`,
+and for a merged PR also `gh repo view github.com/<owner/name> --json defaultBranchRef`, then, when
+the PR merged into a branch other than trunk and has a merge commit,
+`gh api --hostname github.com repos/<owner/name>/compare/<trunk>...<merge commit>`. Each call names
+`github.com`, so `GH_HOST` cannot send it to another server. No other command starts `gh`. All
 run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
 and its arguments. It runs the program with no shell, with those arguments and then the ticket file
 path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
@@ -292,7 +293,7 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   the repository is `{"defaultBranchRef":{"name":"main"}}`.
 - `target/debug/tikk pr link <slice> https://github.com/owner/app/pull/7 --json` exits with 0,
   prints `{"id":<slice>,"pr":{"base":"main","head":"abc123","inTrunk":false,"mergeCommit":null,"number":7,"prCheckedAt":...,"repository":"owner/app","state":"open","url":"https://github.com/owner/app/pull/7"}}`,
-  logs one `pr view 7 --repo owner/app --json number,state,baseRefName,headRefOid,mergeCommit`
+  logs one `pr view 7 --repo github.com/owner/app --json number,state,baseRefName,headRefOid,mergeCommit`
   call, and appends a `{"v":1,"kind":"pr",...}` line with those fields to the fact file. Without
   `--json`, it prints `<slice>  <url> open at abc123, checked <time>`. A URL that is not
   `https://github.com/<owner>/<name>/pull/<number>` exits with 2 and `invalidArguments`, and a plan
@@ -313,7 +314,7 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
 - `target/debug/tikk pr refresh --json` reads every linked PR not yet in trunk and prints
   `{"refreshed":[{"id":<slice>,"pr":{...}}]}`. A PR answered as `"state":"MERGED"` with
   `"baseRefName":"feature"` and `"mergeCommit":{"oid":"def456"}` logs a `repo view` and an
-  `api repos/owner/app/compare/main...def456` call, and has `"inTrunk":false` while the compare
+  `api --hostname github.com repos/owner/app/compare/main...def456` call, and has `"inTrunk":false` while the compare
   answer is `{"status":"ahead"}` and `"inTrunk":true` after it is `{"status":"behind"}`. The next
   `tikk pr refresh --json` prints `{"refreshed":[]}` and logs no call. `tikk pr refresh <slice>`
   reads that slice's PR even when it is in trunk, and a slice with no PR exits with 1 and
