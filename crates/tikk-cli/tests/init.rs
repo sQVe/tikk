@@ -293,3 +293,93 @@ fn a_second_init_on_a_store_path_that_is_not_utf8_reports_the_store_exists() {
     assert_eq!(second.exit_code, 0, "second: {}", second.stderr);
     assert_eq!(parse_json(&second.stdout)["created"], json!(false));
 }
+
+fn host_machine_name() -> String {
+    let uname = std::process::Command::new("uname")
+        .arg("-n")
+        .output()
+        .expect("start uname");
+    let host_name = String::from_utf8(uname.stdout).expect("uname prints UTF-8");
+
+    host_name
+        .trim()
+        .split('.')
+        .next()
+        .expect("split yields a first label")
+        .to_lowercase()
+}
+
+#[test]
+fn init_remote_on_a_remote_with_this_host_machine_folder_asks_for_machine() {
+    let remote = support::Remote::new();
+    let laptop = Home::on_remote(&remote, &host_machine_name());
+    laptop.append_machine_fact_line(
+        &host_machine_name(),
+        "2026-11.jsonl",
+        "{\"v\":1,\"kind\":\"release\",\"ticket\":\"personal-abcd\",\"at\":\"2026-11-13T01:00:00Z\",\"agent\":null}",
+    );
+    assert_eq!(laptop.sync_json()["pushed"], json!(true));
+    let desktop = Home::new();
+
+    let refused = desktop.tikk(&["init", "--remote", &remote.url(), "--json"]);
+    let chosen = desktop.tikk(&[
+        "init",
+        "--remote",
+        &remote.url(),
+        "--machine",
+        "desktop",
+        "--json",
+    ]);
+
+    assert_eq!(refused.exit_code, 1, "{}", refused.stderr);
+    assert_eq!(refused.stdout, "");
+    let error = &parse_json(&refused.stderr)["error"];
+    assert_eq!(error["code"], json!("machineInUse"));
+    assert!(
+        error["message"].as_str().is_some_and(|message| message
+            .contains(&format!("facts/{}/", host_machine_name()))
+            && message.contains("--machine")),
+        "{error}"
+    );
+    assert_eq!(chosen.exit_code, 0, "{}", chosen.stderr);
+    assert_eq!(parse_json(&chosen.stdout)["created"], json!(true));
+    assert_eq!(
+        std::fs::read_to_string(desktop.store().join(".git/tikk-machine"))
+            .expect("read the machine file"),
+        "desktop\n"
+    );
+    assert_eq!(desktop.fact_lines(), laptop.fact_lines());
+}
+
+#[test]
+fn init_remote_on_an_existing_store_reports_it_and_adds_no_remote() {
+    let remote = support::Remote::new();
+    let home = Home::initialized();
+
+    let run = home.tikk(&["init", "--remote", &remote.url(), "--json"]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(false));
+    assert_eq!(home.git(&["remote"]), "");
+    assert_eq!(remote.git(&["for-each-ref"]), "");
+}
+
+#[test]
+fn init_remote_on_a_remote_without_main_exits_with_1() {
+    let remote = support::Remote::new();
+    let other = Home::initialized();
+    support::run_git(
+        &other.store(),
+        &["push", "--quiet", &remote.url(), "main:work"],
+    );
+    let home = Home::new();
+
+    let run = home.tikk(&["init", "--remote", &remote.url(), "--json"]);
+
+    assert_eq!(run.exit_code, 1, "{}", run.stderr);
+    assert_eq!(
+        parse_json(&run.stderr)["error"]["code"],
+        json!("remoteWithoutMain")
+    );
+    assert!(!home.store().join("tikk.json").exists());
+}

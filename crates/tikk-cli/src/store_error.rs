@@ -31,6 +31,25 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::NotUnicode { .. } => ("invalidArguments", Exit::WrongUsage),
         StoreError::Claimed { .. } => ("claimed", Exit::Refused),
         StoreError::Io { .. } => ("ioFailed", Exit::Refused),
+        StoreError::GitTimeout { .. } => ("gitTimeout", Exit::Refused),
+        StoreError::Conflict { .. } => ("conflict", Exit::Refused),
+        StoreError::ConflictsUnreadable { .. } => ("conflictsUnreadable", Exit::Refused),
+        StoreError::MergeAbortFailed { .. } => ("mergeAbortFailed", Exit::Refused),
+        StoreError::MergeBlocked { .. } => ("mergeBlocked", Exit::Refused),
+        StoreError::MergeInProgress { .. } => ("mergeInProgress", Exit::Refused),
+        StoreError::StagedChanges { .. } => ("stagedChanges", Exit::Refused),
+        StoreError::NotOnMain { .. } => ("notOnMain", Exit::Refused),
+        StoreError::FactRewritten { .. } => ("factRewritten", Exit::Refused),
+        StoreError::RemoteWithoutMain { .. } => ("remoteWithoutMain", Exit::Refused),
+        StoreError::RemoteNotAStore { .. } => ("remoteNotAStore", Exit::Refused),
+        StoreError::MachineInUse { .. } => ("machineInUse", Exit::Refused),
+        // It keeps the code of the sync error, so a caller still branches on it.
+        StoreError::ResultNotSaved { error: inner, .. } => {
+            return Failure {
+                message: error.to_string(),
+                ..failure(inner)
+            };
+        }
     };
     let field = match error {
         StoreError::Ticket(TicketError::Invalid { field, .. }) => Some(field.clone()),
@@ -38,10 +57,21 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         _ => None,
     };
 
+    let files = match error {
+        StoreError::Conflict { files, .. } => Some(
+            files
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+        ),
+        _ => None,
+    };
+
     Failure {
         code,
         message: error.to_string(),
         field,
+        files,
         exit,
     }
 }
@@ -300,6 +330,90 @@ mod tests {
                 "ioFailed",
                 Exit::Refused,
             ),
+            (
+                StoreError::GitTimeout {
+                    arguments: "fetch".to_owned(),
+                    timeout: std::time::Duration::from_secs(30),
+                },
+                "gitTimeout",
+                Exit::Refused,
+            ),
+            (conflict(), "conflict", Exit::Refused),
+            (
+                StoreError::ConflictsUnreadable {
+                    merge: Box::new(git_failure("merge")),
+                    read: Box::new(git_failure("diff")),
+                },
+                "conflictsUnreadable",
+                Exit::Refused,
+            ),
+            (
+                StoreError::MergeAbortFailed {
+                    store: PathBuf::from("/tmp/store"),
+                    cause: Box::new(conflict()),
+                    abort: Box::new(git_failure("merge --abort")),
+                },
+                "mergeAbortFailed",
+                Exit::Refused,
+            ),
+            (
+                StoreError::MergeBlocked {
+                    message: "would be overwritten".to_owned(),
+                },
+                "mergeBlocked",
+                Exit::Refused,
+            ),
+            (
+                StoreError::MergeInProgress {
+                    store: PathBuf::from("/tmp/store"),
+                },
+                "mergeInProgress",
+                Exit::Refused,
+            ),
+            (
+                StoreError::StagedChanges {
+                    store: PathBuf::from("/tmp/store"),
+                    paths: vec![PathBuf::from("notes.txt")],
+                },
+                "stagedChanges",
+                Exit::Refused,
+            ),
+            (
+                StoreError::NotOnMain {
+                    store: PathBuf::from("/tmp/store"),
+                    branch: "refs/heads/work".to_owned(),
+                },
+                "notOnMain",
+                Exit::Refused,
+            ),
+            (
+                StoreError::FactRewritten {
+                    path: PathBuf::from("/tmp/store/facts/laptop/2026-11.jsonl"),
+                },
+                "factRewritten",
+                Exit::Refused,
+            ),
+            (
+                StoreError::RemoteWithoutMain {
+                    url: "/tmp/remote.git".to_owned(),
+                },
+                "remoteWithoutMain",
+                Exit::Refused,
+            ),
+            (
+                StoreError::RemoteNotAStore {
+                    url: "/tmp/remote.git".to_owned(),
+                },
+                "remoteNotAStore",
+                Exit::Refused,
+            ),
+            (
+                StoreError::MachineInUse {
+                    machine: "laptop".to_owned(),
+                },
+                "machineInUse",
+                Exit::Refused,
+            ),
         ];
 
         for (error, code, exit) in cases {
@@ -307,6 +421,48 @@ mod tests {
 
             assert_eq!((mapped.code, mapped.exit), (code, exit), "case {error:?}");
         }
+    }
+
+    fn git_failure(arguments: &str) -> StoreError {
+        StoreError::Git {
+            arguments: arguments.to_owned(),
+            message: "failed".to_owned(),
+        }
+    }
+
+    fn conflict() -> StoreError {
+        StoreError::Conflict {
+            store: PathBuf::from("/tmp/store"),
+            files: vec![PathBuf::from("tickets/personal/personal-abcd-a.md")],
+        }
+    }
+
+    #[test]
+    fn only_a_conflict_lists_files() {
+        assert_eq!(
+            failure(&conflict()).files,
+            Some(vec!["tickets/personal/personal-abcd-a.md".to_owned()])
+        );
+        assert_eq!(failure(&git_failure("merge")).files, None);
+    }
+
+    #[test]
+    fn an_unsaved_result_keeps_the_code_and_files_of_the_sync_error() {
+        let error = StoreError::ResultNotSaved {
+            error: Box::new(conflict()),
+            save: Box::new(StoreError::Io {
+                action: "replace",
+                path: PathBuf::from("/tmp/store/.git/tikk-sync.json"),
+                source: std::io::Error::other("disk full"),
+            }),
+        };
+
+        let mapped = failure(&error);
+
+        assert_eq!((mapped.code, mapped.exit), ("conflict", Exit::Refused));
+        assert_eq!(mapped.files, failure(&conflict()).files);
+        assert_eq!(mapped.message, error.to_string());
+        assert!(mapped.message.contains("disk full"), "{}", mapped.message);
     }
 
     #[test]

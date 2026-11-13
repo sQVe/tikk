@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use serde_json::json;
-use tikk_core::{MachineName, StoreEffects, StoreError};
+use tikk_core::{InitOutcome, MachineName, RemoteInitEffects, StoreEffects, StoreError};
 
 use crate::output::Output;
 
@@ -10,7 +10,19 @@ pub(crate) fn run(
     machine: Option<MachineName>,
     effects: &StoreEffects,
 ) -> Result<Output, StoreError> {
-    let outcome = tikk_core::init(store, machine, effects)?;
+    tikk_core::init(store, machine, effects).map(|outcome| init_output(&outcome))
+}
+
+pub(crate) fn run_remote(
+    store: &Path,
+    url: &str,
+    machine: Option<MachineName>,
+    effects: &RemoteInitEffects,
+) -> Result<Output, StoreError> {
+    tikk_core::init_from_remote(store, url, machine, effects).map(|outcome| init_output(&outcome))
+}
+
+fn init_output(outcome: &InitOutcome) -> Output {
     let path = outcome.store.to_string_lossy();
     let text = if outcome.created {
         format!("Created the tikk store at {path}.")
@@ -18,8 +30,8 @@ pub(crate) fn run(
         format!("The tikk store already exists at {path}.")
     };
 
-    Ok(Output {
+    Output {
         json: json!({ "store": path, "created": outcome.created }),
         text,
-    })
+    }
 }

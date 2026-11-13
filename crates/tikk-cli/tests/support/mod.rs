@@ -75,6 +75,16 @@ impl Home {
         home
     }
 
+    /// A store made with `tikk init --remote` on the remote, as the machine.
+    pub(crate) fn on_remote(remote: &Remote, machine: &str) -> Self {
+        let home = Self::new();
+        let run = home.tikk(&["init", "--remote", &remote.url(), "--machine", machine]);
+
+        assert_eq!(run.exit_code, 0, "init --remote: {}", run.stderr);
+
+        home
+    }
+
     pub(crate) fn store(&self) -> PathBuf {
         self.directory.path().join("store")
     }
@@ -179,9 +189,13 @@ impl Home {
     }
 
     pub(crate) fn append_fact_line(&self, file: &str, line: &str) {
+        self.append_machine_fact_line("test", file, line);
+    }
+
+    pub(crate) fn append_machine_fact_line(&self, machine: &str, file: &str, line: &str) {
         use std::io::Write as _;
 
-        let folder = self.store().join("facts/test");
+        let folder = self.store().join("facts").join(machine);
         std::fs::create_dir_all(&folder).expect("create the machine folder");
         let mut opened = std::fs::OpenOptions::new()
             .append(true)
@@ -190,6 +204,32 @@ impl Home {
             .expect("open the fact file");
 
         writeln!(opened, "{line}").expect("append the fact line");
+    }
+
+    pub(crate) fn sync_json(&self) -> Value {
+        let run = self.tikk(&["sync", "--json"]);
+
+        assert_eq!(run.exit_code, 0, "sync: {}", run.stderr);
+
+        parse_json(&run.stdout)
+    }
+
+    /// The IDs that `tikk ls --json` lists, sorted.
+    pub(crate) fn listed_ids(&self) -> Vec<String> {
+        let run = self.tikk(&["ls", "--json"]);
+
+        assert_eq!(run.exit_code, 0, "ls: {}", run.stderr);
+
+        let mut ids: Vec<String> = parse_json(&run.stdout)["tickets"]
+            .as_array()
+            .expect("ls lists tickets")
+            .iter()
+            .map(|ticket| ticket["id"].as_str().expect("a row has an ID").to_owned())
+            .collect();
+
+        ids.sort();
+
+        ids
     }
 
     pub(crate) fn show_json(&self, id: &str) -> Value {
@@ -258,6 +298,100 @@ impl Home {
 
     pub(crate) fn git(&self, arguments: &[&str]) -> String {
         run_git(&self.store(), arguments)
+    }
+
+    /// Moves the change time of every store file outside `.git` a minute back, so `tikk sync`
+    /// counts each one as settled and does not wait.
+    pub(crate) fn settle_files(&self) {
+        settle_folder(&self.store());
+    }
+
+    /// Each file of the store outside `.git`, relative to the store, with its bytes.
+    pub(crate) fn store_files(&self) -> Vec<(PathBuf, Vec<u8>)> {
+        let mut files = Vec::new();
+
+        collect_files(&self.store(), &self.store(), &mut files);
+        files.sort();
+
+        files
+    }
+}
+
+fn settle_folder(folder: &Path) {
+    let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
+
+    for entry in std::fs::read_dir(folder).expect("list a store folder") {
+        let path = entry.expect("read a store entry").path();
+
+        if path.ends_with(".git") {
+            continue;
+        }
+
+        if path.is_dir() {
+            settle_folder(&path);
+            continue;
+        }
+
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|file| file.set_modified(past))
+            .expect("move the change time back");
+    }
+}
+
+fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) {
+    for entry in std::fs::read_dir(folder).expect("list a store folder") {
+        let path = entry.expect("read a store entry").path();
+
+        if path.ends_with(".git") {
+            continue;
+        }
+
+        if path.is_dir() {
+            collect_files(root, &path, files);
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root)
+            .expect("inside the store")
+            .to_owned();
+
+        files.push((relative, std::fs::read(&path).expect("read a store file")));
+    }
+}
+
+/// A bare Git repository that stands in for the private remote of the store.
+pub(crate) struct Remote {
+    directory: TempDir,
+}
+
+impl Remote {
+    pub(crate) fn new() -> Self {
+        let directory = Builder::new()
+            .prefix("tikk-cli-remote-")
+            .tempdir()
+            .expect("create a temporary directory");
+
+        run_git(
+            directory.path(),
+            &["init", "--quiet", "--bare", "--initial-branch=main"],
+        );
+
+        Self { directory }
+    }
+
+    pub(crate) fn path(&self) -> &Path {
+        self.directory.path()
+    }
+
+    pub(crate) fn url(&self) -> String {
+        self.path().to_str().expect("a UTF-8 path").to_owned()
+    }
+
+    pub(crate) fn git(&self, arguments: &[&str]) -> String {
+        run_git(self.path(), arguments)
     }
 }
 

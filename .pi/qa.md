@@ -2,8 +2,8 @@
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
 `tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `block`, `unblock`,
-`move`, `rank`, `claim`, `release`, `ready`, `--help`, and `--version`, and `tikk-desktop` is a
-stub. A mock scene of the UI
+`move`, `rank`, `claim`, `release`, `ready`, `sync`, `--help`, and `--version`, and `tikk-desktop`
+is a stub. A mock scene of the UI
 opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
 folder under `/tmp`.
 
@@ -41,11 +41,12 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
 A journey is one user's path through several commands. Each journey file lists its steps, and its
 test runs them against the built binary.
 
-| Journey                                                     | Goal                                                                      | Run it when the change touches                                                     | Test                                                    |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                    | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
-| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, `ready`, `claim`, `done`, ticket validation             | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
-| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
+| Journey                                                     | Goal                                                                      | Run it when the change touches                                                             | Test                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                            | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, `ready`, `claim`, `done`, ticket validation                     | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, `sync`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
+| [two-machines](qa/journeys/two-machines.md)                 | See the same tickets on both machines.                                    | `tikk init --remote`, `sync`, Git calls of sync                                            | `crates/tikk-cli/tests/journey_two_machines.rs`         |
 
 ## Before a launch
 
@@ -103,8 +104,11 @@ Never:
 
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
 `--parent` and `--project`, and `tikk ready` without them, start
-`git config --get remote.origin.url` in the working directory. All
-run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
+`git config --get remote.origin.url` in the working directory. `tikk sync` and
+`tikk init --remote` start `git` in the store with no hook, no signing, no terminal prompt, and no
+global or system Git config, as the author `tikk <tikk@localhost>`. Their network steps (`fetch`,
+`push`, `ls-remote`, and `clone`) stop after 30 seconds. `tikk init --remote` without `--machine`
+also starts `uname -n`. All run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
 and its arguments. It runs the program with no shell, with those arguments and then the ticket file
 path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
 `noEditor`.
@@ -235,6 +239,30 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   of the project that `tikk new` would choose, such as `tikk` from the worktree root, and
   `--project <p>` lists another project's. `--parent` with `--project` exits with 2. Without
   `--json`, it prints the candidate rows, then `skipped: <row>` with each hold indented below it.
+- `target/debug/tikk init --remote <remote> --machine laptop --json`, with an empty local bare
+  remote made by `git init --bare --initial-branch=main /tmp/tikk-qa-remote.git`, exits with 0,
+  prints `{"created":true,"store":"<TIKK_HOME>"}`, and pushes the first commit
+  (`git -C /tmp/tikk-qa-remote.git log --oneline main`). The same command with another
+  `TIKK_HOME` and `--machine desktop` clones the store. Without `--machine`, on a remote whose
+  `main` holds `facts/<first label of uname -n>/`, it exits with 1 and `machineInUse`, the message
+  names the folder and `--machine`, and `TIKK_HOME` stays absent. On a `TIKK_HOME` that holds a
+  store, it prints `"created":false` and adds no remote.
+- `target/debug/tikk sync --json` exits with 0 and prints
+  `{"committed":...,"committedPaths":[...],"fetched":...,"merged":...,"pending":[...],"problems":[...],"pushed":...}`.
+  Right after `tikk new`, it waits about two seconds, then commits the new ticket file and pushes.
+  Then `tikk sync` with the other store's `TIKK_HOME` prints `"merged":true`, and `tikk ls` there
+  lists the ticket. A ticket file that holds only `kind: [` is in `pending` with
+  `"reason":"unparsed"` and stays out of the commit. Without `--json`, it prints
+  `committed: <count>  fetched: yes  merged: no  pushed: yes`, then a line per pending file and
+  per problem.
+- `target/debug/tikk sync --json` on a store made with `tikk init`, with no `origin`, exits with 0,
+  commits, and prints `"fetched":false` with `{"step":"fetch",...}` under `problems`.
+- When both stores change one ticket file and each runs `target/debug/tikk sync --json`, the second
+  exits with 1, prints nothing on standard output, and prints
+  `{"error":{"code":"conflict","files":["tickets/<project>/<file>"],...}}` on standard error. Its
+  `git -C "$TIKK_HOME" status` shows no merge in progress, and the file keeps its local text.
+- After each `tikk sync`, `$TIKK_HOME/.git/tikk-sync.json` holds the last result with its `at`
+  time, or `error` and `conflict` after a conflict.
 - The store lock is the file `$TIKK_HOME/.git/tikk.lock`. While another process holds it, such as
   `flock $TIKK_HOME/.git/tikk.lock sleep 7`, `target/debug/tikk show <id> --json` waits five
   seconds, then exits with 1 and `locked`.

@@ -126,6 +126,17 @@ fn read_ticket(
     path: &Path,
     project: &ProjectName,
 ) -> Result<Result<StoredTicket, UnreadableTicket>, StoreError> {
+    let bytes = fs::read(path).map_err(|source| io_error("read", path, source))?;
+
+    Ok(parse_ticket(path, project, &bytes))
+}
+
+/// Parses the bytes of the ticket file at `path`, in the folder of `project`.
+pub(crate) fn parse_ticket(
+    path: &Path,
+    project: &ProjectName,
+    bytes: &[u8],
+) -> Result<StoredTicket, UnreadableTicket> {
     let file_name = path.file_name().unwrap_or_default().to_string_lossy();
     let id = TicketId::from_file_name(project, &file_name);
     let unreadable = |message: String| UnreadableTicket {
@@ -134,24 +145,23 @@ fn read_ticket(
         message,
     };
     let Some(ticket_id) = id.clone() else {
-        return Ok(Err(unreadable(format!(
+        return Err(unreadable(format!(
             "the file name does not start with an ID of the project {project}"
-        ))));
+        )));
     };
-    let bytes = fs::read(path).map_err(|source| io_error("read", path, source))?;
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return Ok(Err(unreadable("the file is not UTF-8".to_owned())));
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return Err(unreadable("the file is not UTF-8".to_owned()));
     };
 
-    Ok(TicketDocument::parse(text)
+    TicketDocument::parse(text)
         .map(|document| StoredTicket {
             id: ticket_id,
             path: path.to_path_buf(),
-            hash: sha256_hex(&bytes),
+            hash: sha256_hex(bytes),
             text: text.to_owned(),
             document,
         })
-        .map_err(|error| unreadable(error.to_string())))
+        .map_err(|error| unreadable(error.to_string()))
 }
 
 #[cfg(test)]
