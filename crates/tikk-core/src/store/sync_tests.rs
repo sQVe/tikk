@@ -177,6 +177,18 @@ fn fake_entry(path: &Path) -> Result<Option<FileEntry>, StoreError> {
     })
 }
 
+/// The preflight also reads `MERGE_HEAD`. Only the read after a failed merge finds the file.
+fn entry_failing_on_merge_head(path: &Path) -> Result<Option<FileEntry>, StoreError> {
+    if path.ends_with(".git/MERGE_HEAD") && path.exists() {
+        return Err(StoreError::Git {
+            arguments: "read MERGE_HEAD".to_owned(),
+            message: "injected".to_owned(),
+        });
+    }
+
+    fake_entry(path)
+}
+
 fn fake_origin(root: &Path) -> Result<Option<String>, StoreError> {
     count_read()?;
 
@@ -313,6 +325,40 @@ fn a_failed_read_of_the_conflicts_still_aborts_the_merge_and_reports_both_errors
         matches!(&error, StoreError::ConflictsUnreadable { merge, read }
             if matches!(**merge, StoreError::Git { ref arguments, .. } if arguments.starts_with("merge"))
                 && matches!(**read, StoreError::Git { ref arguments, .. } if arguments.starts_with("diff"))),
+        "{error:?}"
+    );
+    assert!(!desktop.join(".git/MERGE_HEAD").exists());
+    assert_eq!(
+        fs::read_to_string(desktop.join(TICKET)).expect("read the ticket"),
+        local
+    );
+    assert!(NETWORK.with_borrow(|calls| !calls.iter().any(|call| call.starts_with("push"))));
+}
+
+#[test]
+fn a_failed_read_of_merge_head_still_aborts_the_merge_and_reports_both_errors() {
+    let machines = Machines::new();
+    let (laptop, desktop) = (machines.laptop(), machines.desktop());
+    CLOCK.set(later());
+    write(&laptop, TICKET, TICKET_TEXT);
+    sync(&laptop, &effects()).expect("the laptop syncs");
+    sync(&desktop, &effects()).expect("the desktop syncs");
+    write(&laptop, TICKET, "---\nkind: task\ntitle: One year\n---\n");
+    sync(&laptop, &effects()).expect("the laptop pushes its edit");
+    let local = "---\nkind: task\ntitle: Two years\n---\n";
+    write(&desktop, TICKET, local);
+    NETWORK.set(Vec::new());
+    let failing = SyncEffects {
+        read_entry: entry_failing_on_merge_head,
+        ..effects()
+    };
+
+    let error = sync(&desktop, &failing).expect_err("MERGE_HEAD cannot be read");
+
+    assert!(
+        matches!(&error, StoreError::ConflictsUnreadable { merge, read }
+            if matches!(**merge, StoreError::Git { ref arguments, .. } if arguments.starts_with("merge"))
+                && matches!(**read, StoreError::Git { ref arguments, .. } if arguments == "read MERGE_HEAD")),
         "{error:?}"
     );
     assert!(!desktop.join(".git/MERGE_HEAD").exists());
