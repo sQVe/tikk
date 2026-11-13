@@ -272,6 +272,11 @@ fn a_second_init_on_a_store_path_that_is_not_utf8_reports_the_store_exists() {
 
     let home = Home::new();
     let store = home.work().join(std::ffi::OsStr::from_bytes(b"store-\xff"));
+
+    if !support::create_folder_unless_name_refused(&store) {
+        return;
+    }
+
     let init = || {
         let mut command = home.command(&["init", "--json", "--machine", "test"]);
 

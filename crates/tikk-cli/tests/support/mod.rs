@@ -18,6 +18,29 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
+/// The `EILSEQ` code on macOS, where APFS refuses a file name that is not UTF-8.
+const ILLEGAL_BYTE_SEQUENCE: i32 = 92;
+
+/// Creates the folder and returns true, or returns false when the file system refuses the name
+/// because it is not UTF-8. Any other error fails the test.
+#[expect(
+    clippy::print_stderr,
+    reason = "a test that returns early names the reason in its output"
+)]
+pub(crate) fn create_folder_unless_name_refused(path: &Path) -> bool {
+    let Err(error) = std::fs::create_dir(path) else {
+        return true;
+    };
+
+    if error.raw_os_error() == Some(ILLEGAL_BYTE_SEQUENCE) {
+        eprintln!("skipped: the file system refuses the name {path:?}: {error}");
+
+        return false;
+    }
+
+    panic!("create {path:?}: {error}");
+}
+
 pub(crate) struct Run {
     pub(crate) exit_code: i32,
     pub(crate) stdout: String,

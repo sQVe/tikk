@@ -617,6 +617,10 @@ fn join_another_init_accepts_a_store_and_returns_the_error_otherwise() {
 }
 
 #[test]
+#[expect(
+    clippy::print_stderr,
+    reason = "a test that returns early names the reason in its output"
+)]
 fn init_accepts_a_store_path_that_is_not_utf8() {
     use std::os::unix::ffi::OsStrExt as _;
 
@@ -624,6 +628,15 @@ fn init_accepts_a_store_path_that_is_not_utf8() {
     let root = directory
         .path()
         .join(std::ffi::OsStr::from_bytes(b"store-\xff"));
+
+    // APFS on macOS refuses a name that is not UTF-8 with EILSEQ, code 92.
+    if let Err(error) = fs::create_dir(&root) {
+        assert_eq!(error.raw_os_error(), Some(92), "create {root:?}: {error}");
+        eprintln!("skipped: the file system refuses the name {root:?}: {error}");
+
+        return;
+    }
+
     init(&root, None, &effects_with_host(laptop_host)).expect("first init succeeds");
 
     let second = init(&root, None, &effects_with_host(laptop_host)).expect("the store exists");
