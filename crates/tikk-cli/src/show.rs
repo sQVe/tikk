@@ -3,6 +3,7 @@ use tikk_core::{QueryEffects, ShownTicket, Store, StoreError, TicketId};
 
 use crate::claim::{claim_json, claim_text};
 use crate::output::Output;
+use crate::pr::{pr_json, pr_text};
 use crate::ticket_row::{row_json, row_text};
 
 pub(crate) fn run(
@@ -47,6 +48,7 @@ fn shown_json(shown: &ShownTicket) -> Value {
         "children": children,
         "files": shown.files,
         "claim": claim,
+        "pr": shown.pr.as_ref().map(pr_json),
     })
 }
 
@@ -70,6 +72,10 @@ fn shown_text(shown: &ShownTicket) -> String {
 
     if let Some(claim) = &shown.claim {
         lines.push(format!("claim: {}", claim_text(&claim.claim, claim.state)));
+    }
+
+    if let Some(pr) = &shown.pr {
+        lines.push(format!("pr: {}", pr_text(pr)));
     }
 
     lines.extend(

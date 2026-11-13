@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::fact::Timestamp;
+use crate::fact::{ShownPr, Timestamp, current_prs};
+use crate::store::fact_files::read_facts;
 use crate::store::id_clash::{IdClash, id_clashes};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
@@ -52,6 +53,7 @@ pub struct ShownTicket {
     pub children: Vec<StoredTicket>,
     pub files: Vec<String>,
     pub claim: Option<ShownClaim>,
+    pub pr: Option<ShownPr>,
 }
 
 pub fn list_tickets(
@@ -94,7 +96,14 @@ pub fn show_ticket(
     let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
     let scan = read_tickets(store.root())?;
     let ticket = find_ticket(&scan, id)?.clone();
-    let claim = shown_claim(store.root(), &ticket, (effects.now)())?;
+    let (claim, pr) = if ticket.document.fields.kind() == Kind::Slice {
+        let facts = read_facts(store.root())?.facts;
+        let pr = current_prs(&facts).remove(id);
+
+        (shown_claim(&facts, id, (effects.now)()), pr)
+    } else {
+        (None, None)
+    };
     let mut children: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -108,6 +117,7 @@ pub fn show_ticket(
         children,
         files: folder_files(&folder)?,
         claim,
+        pr,
     })
 }
 
@@ -223,7 +233,7 @@ fn classify<'a>(entries: &[TicketEntry<'a>]) -> TicketLookup<'a> {
     }
 }
 
-fn shared(id: &TicketId, paths: &[&Path]) -> StoreError {
+pub(crate) fn shared(id: &TicketId, paths: &[&Path]) -> StoreError {
     StoreError::IdShared {
         id: id.to_string(),
         paths: paths.iter().map(|path| path.to_path_buf()).collect(),

@@ -26,12 +26,20 @@ task that is not canceled, every slice that is not canceled is done, and every d
 or canceled. A draft or canceled plan keeps its stored status. A done plan clears the tickets it
 blocks.
 
-PR facts come from `tikk reconcile`. It runs on `ready` and `needs`, and after `tikk pr link`. It
-checks every linked PR that tikk has not yet seen merged into trunk, closed ones included, so a
-merge is never missed. A PR merged into another branch counts only once its work reaches trunk. A
-`pr` fact with a merge commit wins over one without, and one that saw the merge in trunk wins over
-both. Each derived state shows the age of its oldest input. Items with stale facts stay out of
-"needs you" and show as unknown.
+Only `tikk pr link` and `tikk pr refresh` run `gh`, and each read appends a `pr` fact
+([ADR 0015](./0015-facts-in-per-machine-jsonl.md)). `pr link <slice> <url>` reads the PR and makes
+it the slice's PR. `pr refresh` reads every linked PR that tikk has not yet seen in trunk, closed
+ones included, so a merge is never missed. `pr refresh <slice>` reads that slice's PR, even when it
+is in trunk. When `gh` fails for some PRs, `pr refresh` still appends the facts it read, then exits
+with 1 and the code `ghError`, and names each PR it could not read. `ready`, `show`, and `needs`
+read the `pr` facts and never use the network.
+
+A PR merged into the trunk branch is in trunk. A PR merged into another branch counts only once
+trunk holds its merge commit. A slice's PR is the one its newest `pr` fact names. Among that PR's
+facts, one that saw the PR in trunk wins, then one with a merge commit, then the newest. Each
+output that shows a PR state shows `prCheckedAt` beside it, the time of the newest `pr` fact of
+that PR, so the caller can tell how old the state is. There is no `unknown` state: a failed read
+leaves the last recorded state in place.
 
 `tikk audit <slice> --hash <hash> --repository <owner/name> --head <sha> --base <sha> --change-hash
 <hash> --verdicts-file <path>` records one verdict for each criterion of the slice. The audit
@@ -50,8 +58,8 @@ new audit runs.
 
 ### Negative
 
-- Derived done depends on fresh `gh` facts. A slice reads as open until a `gh` fact records its
-  merge.
+- Derived done depends on fresh `gh` facts. A slice reads as open until a `tikk pr refresh`
+  records its merge.
 - A slice sits as merged but unverified until an audit runs.
 
 ## Alternatives considered
@@ -65,3 +73,9 @@ show that the criteria are met.
 
 End unfinished instructions when the slice merges. Rejected because unfinished instructions never
 close silently.
+
+### Read PR states through `gh` on each query
+
+Run `gh` from `ready`, `show`, and `needs` before they answer. Rejected because each query would
+wait on the network, fail offline, and spend GitHub rate limit on every call. Two explicit commands
+keep queries local, and `prCheckedAt` shows the caller how old each state is.

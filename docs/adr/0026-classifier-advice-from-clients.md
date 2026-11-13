@@ -15,7 +15,7 @@ model choice and credentials. Tau, the first client, calls Jev from its scripts 
 
 tikk must run without Tau and offline ([ADR 0010](./0010-cli-contract-for-agents.md)). The design
 targets `ready` and `claim` in under 200 ms on a store of 2,000 tickets, apart from the Git fetch
-and PR reconcile they may run. A model call can take seconds and can fail.
+that `claim` runs. A model call can take seconds and can fail.
 
 ## Decision
 

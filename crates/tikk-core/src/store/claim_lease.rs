@@ -50,14 +50,8 @@ pub(crate) fn write_for_slice<T>(
 
     refuse_shared_id(scan, slice)?;
 
-    let facts = read_facts(root)?;
     let now = (effects.now)();
-    let claim = current_claims(&facts.facts).remove(slice);
-
-    if let Some(claim) = &claim {
-        refuse_other_holder(slice, claim, agent, now)?;
-    }
-
+    let claim = check_holder(root, slice, agent, now)?;
     let written = write()?;
 
     if let Some(claim) = claim.filter(|claim| claim.agent == *agent) {
@@ -69,6 +63,24 @@ pub(crate) fn write_for_slice<T>(
     }
 
     Ok(written)
+}
+
+// The caller holds the store lock. Returns the slice's current claim, unless another agent holds
+// it live.
+pub(crate) fn check_holder(
+    root: &Path,
+    slice: &TicketId,
+    agent: &AgentName,
+    now: Timestamp,
+) -> Result<Option<Claim>, StoreError> {
+    let facts = read_facts(root)?;
+    let claim = current_claims(&facts.facts).remove(slice);
+
+    if let Some(claim) = &claim {
+        refuse_other_holder(slice, claim, agent, now)?;
+    }
+
+    Ok(claim)
 }
 
 fn refuse_shared_id(scan: &TicketScan, slice: &TicketId) -> Result<(), StoreError> {

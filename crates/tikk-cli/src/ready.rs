@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use tikk_core::{ClaimState, Hold, ReadyQueue, SkippedSlice};
+use tikk_core::{ClaimState, Hold, ReadyQueue, ReadySlice, SkippedSlice};
 
 use crate::claim::{claim_json, claim_text};
 use crate::output::Output;
+use crate::pr::{stack_parent_json, stack_parent_text};
 use crate::ticket_row::{row_json, row_text};
 
 pub(crate) fn ready_output(queue: &ReadyQueue) -> Output {
@@ -15,7 +16,7 @@ pub(crate) fn ready_output(queue: &ReadyQueue) -> Output {
 }
 
 fn queue_json(queue: &ReadyQueue) -> Value {
-    let candidates: Vec<Value> = queue.candidates.iter().map(row_json).collect();
+    let candidates: Vec<Value> = queue.candidates.iter().map(candidate_json).collect();
     let skipped: Vec<Value> = queue.skipped.iter().map(skipped_json).collect();
     let ticket_errors = queue
         .errors
@@ -31,6 +32,17 @@ fn queue_json(queue: &ReadyQueue) -> Value {
     let errors: Vec<Value> = ticket_errors.chain(fact_errors).collect();
 
     json!({ "candidates": candidates, "skipped": skipped, "errors": errors })
+}
+
+fn candidate_json(candidate: &ReadySlice) -> Value {
+    let mut row = row_json(&candidate.ticket);
+
+    row["stackParent"] = candidate
+        .stack_parent
+        .as_ref()
+        .map_or(Value::Null, stack_parent_json);
+
+    row
 }
 
 fn skipped_json(skipped: &SkippedSlice) -> Value {
@@ -72,7 +84,17 @@ fn hold_json(hold: &Hold) -> Value {
 }
 
 fn queue_text(queue: &ReadyQueue) -> String {
-    let mut lines: Vec<String> = queue.candidates.iter().map(row_text).collect();
+    let mut lines = Vec::new();
+
+    for candidate in &queue.candidates {
+        lines.push(row_text(&candidate.ticket));
+        lines.extend(
+            candidate
+                .stack_parent
+                .as_ref()
+                .map(|parent| format!("  {}", stack_parent_text(parent))),
+        );
+    }
 
     for skipped in &queue.skipped {
         lines.push(format!("skipped: {}", row_text(&skipped.ticket)));
