@@ -408,3 +408,66 @@ fn bash_receives_the_ids_without_titles() {
     offered.sort_unstable();
     assert_eq!(offered, sorted(&[&renew, &lock]));
 }
+
+#[test]
+fn the_bash_script_of_a_program_path_with_a_space_completes_ids() {
+    let home = Home::initialized();
+    let renew = home.new_ticket(&["task", "Renew the domain"]);
+    let lock = home.new_ticket(&["task", "Lock the store"]);
+    let folder = home.work().join("with space");
+    std::fs::create_dir(&folder).expect("create a folder with a space");
+    let program = folder.join("tikk");
+    std::fs::copy(env!("CARGO_BIN_EXE_tikk"), &program).expect("copy the tikk binary");
+    let script = finish(
+        home.command_of(&program, &["completions", "bash"])
+            .output()
+            .expect("start the copied tikk"),
+    );
+    assert_eq!(script.exit_code, 0, "stderr: {}", script.stderr);
+    let path = home.document("tikk.bash", &script.stdout);
+    let driver = format!(
+        "source {path:?}\nCOMP_WORDS=(tikk block {renew} '')\nCOMP_CWORD=3\nCOMP_TYPE=9\n_clap_complete_tikk tikk '' {renew}\nprintf '%s\\n' \"${{COMPREPLY[@]}}\"\n"
+    );
+
+    let run = finish(
+        home.command_of(std::path::Path::new("bash"), &["-c", &driver])
+            .output()
+            .expect("start bash"),
+    );
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(run.stderr, "");
+    let mut offered: Vec<&str> = run
+        .stdout
+        .lines()
+        .filter(|line| !line.starts_with('-'))
+        .collect();
+    offered.sort_unstable();
+    assert_eq!(offered, sorted(&[&renew, &lock]));
+}
+
+#[test]
+fn a_program_path_that_is_not_unicode_prints_no_script_and_exits_with_1() {
+    use std::os::unix::ffi::OsStrExt as _;
+
+    let home = Home::new();
+    let folder = home.work().join(std::ffi::OsStr::from_bytes(b"tikk-\xff"));
+    if !support::create_folder_unless_name_refused(&folder) {
+        return;
+    }
+    let program = folder.join("tikk");
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_tikk"), &program).expect("link the binary");
+
+    let run = finish(
+        home.command_of(&program, &["completions", "bash", "--json"])
+            .output()
+            .expect("start the linked tikk"),
+    );
+
+    assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
+    assert_eq!(run.stdout, "");
+    assert_eq!(
+        parse_json(&run.stderr)["error"]["code"],
+        json!("programPathNotUnicode")
+    );
+}

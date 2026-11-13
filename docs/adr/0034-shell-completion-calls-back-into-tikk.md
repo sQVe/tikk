@@ -31,6 +31,12 @@ source of commands, flags, and candidates.
 - `tikk completions <bash|zsh|fish>` prints the registration script, the same text that
   `COMPLETE=<shell> tikk` prints. The script names the program by the path `tikk` was started
   with, and calls it back with `COMPLETE` set.
+- For a path that the shell must quote, such as one with a space, the bash script differs:
+  `clap_complete` wraps the quoted path in double quotes, so bash would look for a name that holds
+  the quotes. tikk prints the quoted path without the double quotes. zsh and fish quote it
+  correctly already.
+- A path that is not valid Unicode cannot be written into the script as the same path. tikk
+  prints no script, and exits with 1 and the code `programPathNotUnicode`.
 - `tikk completions <shell> --json` prints `{"script":"<the script>"}`, like every other command
   result.
 - The user loads the script when the shell starts, so the script always matches the installed

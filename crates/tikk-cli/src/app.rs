@@ -267,11 +267,9 @@ fn run_command(
             id.as_ref(),
             &environment.pr_effects,
         ),
-        Command::Completions { shell } => Ok(completion::script_output(
-            shell,
-            program,
-            &environment.working_directory,
-        )),
+        Command::Completions { shell } => {
+            completion::script_output(shell, program, &environment.working_directory)
+        }
     }
 }
 

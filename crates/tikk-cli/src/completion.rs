@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -8,7 +9,7 @@ use clap_complete::CompleteEnv;
 use clap_complete::engine::{ArgValueCandidates, CompletionCandidate};
 use clap_complete::env::{Bash, EnvCompleter, Fish, Zsh};
 use serde_json::json;
-use tikk_core::{Kind, StoredTicket, TicketId};
+use tikk_core::{Kind, StoreError, StoredTicket, TicketId};
 
 use crate::command::{Cli, Shell};
 use crate::output::Output;
@@ -21,41 +22,59 @@ pub(crate) fn complete_when_asked() {
         .complete();
 }
 
-pub(crate) fn script_output(shell: Shell, program: &OsStr, working_directory: &Path) -> Output {
+pub(crate) fn script_output(
+    shell: Shell,
+    program: &OsStr,
+    working_directory: &Path,
+) -> Result<Output, StoreError> {
     let completer: &dyn EnvCompleter = match shell {
         Shell::Bash => &Bash,
         Shell::Zsh => &Zsh,
         Shell::Fish => &Fish,
     };
+    let callback = callback_program(program, working_directory)?;
     let mut script = Vec::new();
 
     completer
-        .write_registration(
-            COMPLETE_VARIABLE,
-            "tikk",
-            "tikk",
-            &callback_program(program, working_directory),
-            &mut script,
-        )
+        .write_registration(COMPLETE_VARIABLE, "tikk", "tikk", &callback, &mut script)
         .expect("writing to memory cannot fail");
 
-    let script = String::from_utf8(script).expect("the script is built from UTF-8 strings");
+    let mut script = String::from_utf8(script).expect("the script is built from UTF-8 strings");
+
+    if matches!(shell, Shell::Bash) {
+        script = unquote_bash_callback(&script, &callback);
+    }
+
     let text = script.strip_suffix('\n').unwrap_or(&script).to_owned();
 
-    Output {
+    Ok(Output {
         json: json!({ "script": script }),
         text,
-    }
+    })
 }
 
-fn callback_program(program: &OsStr, working_directory: &Path) -> String {
+// clap_complete puts the shell-quoted path inside double quotes, so bash would look for a program
+// whose name holds the single quotes. A path that needs no quotes is left as clap_complete prints it.
+fn unquote_bash_callback(script: &str, callback: &str) -> String {
+    let Ok(Cow::Owned(quoted)) = shlex::try_quote(callback) else {
+        return script.to_owned();
+    };
+
+    script.replace(&format!("\"{quoted}\" --"), &format!("{quoted} --"))
+}
+
+fn callback_program(program: &OsStr, working_directory: &Path) -> Result<String, StoreError> {
     let mut path = PathBuf::from(program);
 
     if path.components().count() > 1 {
         path = working_directory.join(path);
     }
 
-    path.to_string_lossy().into_owned()
+    path.into_os_string()
+        .into_string()
+        .map_err(|path| StoreError::ProgramNotUnicode {
+            path: PathBuf::from(path),
+        })
 }
 
 fn callback_tree() -> clap::Command {
@@ -315,7 +334,7 @@ mod tests {
 
         for (program, expected) in cases {
             assert_eq!(
-                callback_program(OsStr::new(program), working_directory),
+                callback_program(OsStr::new(program), working_directory).expect("a Unicode path"),
                 expected,
                 "case {program}"
             );

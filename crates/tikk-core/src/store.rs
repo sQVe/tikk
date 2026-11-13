@@ -152,6 +152,8 @@ pub enum StoreError {
     NoAgent,
     #[error("{variable} is not valid Unicode.")]
     NotUnicode { variable: &'static str },
+    #[error("tikk was started as {}, which is not valid Unicode, so no completion script can name it.", path.display())]
+    ProgramNotUnicode { path: PathBuf },
     #[error("{id} is claimed by {agent} until {lease_end}.")]
     Claimed {
         id: String,

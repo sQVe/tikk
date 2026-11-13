@@ -30,6 +30,7 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::EditorFailed { .. } => ("editorFailed", Exit::Refused),
         StoreError::NoAgent => ("noTikkAgent", Exit::Refused),
         StoreError::NotUnicode { .. } => ("invalidArguments", Exit::WrongUsage),
+        StoreError::ProgramNotUnicode { .. } => ("programPathNotUnicode", Exit::Refused),
         StoreError::Claimed { .. } => ("claimed", Exit::Refused),
         StoreError::Io { .. } => ("ioFailed", Exit::Refused),
         StoreError::GitTimeout { .. } => ("gitTimeout", Exit::Refused),
@@ -334,6 +335,13 @@ mod tests {
                 },
                 "invalidArguments",
                 Exit::WrongUsage,
+            ),
+            (
+                StoreError::ProgramNotUnicode {
+                    path: PathBuf::from("/tmp/tikk"),
+                },
+                "programPathNotUnicode",
+                Exit::Refused,
             ),
             (
                 StoreError::Claimed {

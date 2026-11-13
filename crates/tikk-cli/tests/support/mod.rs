@@ -128,7 +128,11 @@ impl Home {
     }
 
     pub(crate) fn command(&self, arguments: &[&str]) -> Command {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_tikk"));
+        self.command_of(Path::new(env!("CARGO_BIN_EXE_tikk")), arguments)
+    }
+
+    pub(crate) fn command_of(&self, program: &Path, arguments: &[&str]) -> Command {
+        let mut command = Command::new(program);
 
         command
             .args(arguments)

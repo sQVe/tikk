@@ -423,7 +423,9 @@ every other check.
   standard output that `bash -n`, `zsh -n`, and `fish -n` accept. Each script is the same text that
   `COMPLETE=<shell> target/debug/tikk` prints. With `--json`, it prints `{"script":...}`. Without a
   shell, it exits with 2. `tikk completions --help` says how to load the script in bash, zsh, and
-  fish.
+  fish. Started from a copy at a path with a space, such as `/tmp/a b/tikk`, the bash script calls
+  `'/tmp/a b/tikk'` without double quotes around it. Started through a path that is not valid
+  Unicode, it prints no script and exits with 1 and `programPathNotUnicode`.
 - ID completion: in a store with a plan, slices A and B under it, an instruction under A, and a
   loose task, `COMPLETE=fish target/debug/tikk -- tikk block <task> ""` prints every ID with a tab
   and its title, then the flags. `COMPLETE=fish target/debug/tikk -- tikk move <instruction>
