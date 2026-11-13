@@ -28,6 +28,7 @@ pub(crate) struct Failure {
     pub(crate) code: &'static str,
     pub(crate) message: String,
     pub(crate) field: Option<String>,
+    pub(crate) files: Option<Vec<String>>,
     pub(crate) exit: Exit,
 }
 
@@ -59,6 +60,10 @@ impl Response {
 
             if let Some(field) = &failure.field {
                 error["field"] = json!(field);
+            }
+
+            if let Some(files) = &failure.files {
+                error["files"] = json!(files);
             }
 
             format!("{}\n", json!({ "error": error }))
@@ -150,6 +155,7 @@ mod tests {
             code: "notInitialized",
             message: "No store.".to_owned(),
             field: None,
+            files: None,
             exit: Exit::Refused,
         };
 
@@ -172,6 +178,7 @@ mod tests {
             code: "notInitialized",
             message: "No store.".to_owned(),
             field: None,
+            files: None,
             exit: Exit::Refused,
         };
 
@@ -182,11 +189,32 @@ mod tests {
     }
 
     #[test]
+    fn failure_with_files_lists_them_beside_the_code() {
+        let failure = Failure {
+            code: "conflict",
+            message: "Sync stopped.".to_owned(),
+            field: None,
+            files: Some(vec!["tickets/personal/personal-abcd-a.md".to_owned()]),
+            exit: Exit::Refused,
+        };
+
+        let response = Response::failure(true, &failure);
+
+        let printed: serde_json::Value =
+            serde_json::from_str(&response.stderr).expect("the error is one JSON value");
+        assert_eq!(
+            printed["error"]["files"],
+            json!(["tickets/personal/personal-abcd-a.md"])
+        );
+    }
+
+    #[test]
     fn failure_with_a_field_names_it_beside_the_code() {
         let failure = Failure {
             code: "invalidTicket",
             message: "`parent` is wrong.".to_owned(),
             field: Some("parent".to_owned()),
+            files: None,
             exit: Exit::Refused,
         };
 

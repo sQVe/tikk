@@ -30,7 +30,14 @@ pub(crate) enum Command {
         /// The name of this machine. The default is the host name.
         #[arg(long, value_parser = parse_machine)]
         machine: Option<MachineName>,
+        /// Clone the store from this Git remote, or create the store and push it when the remote
+        /// is empty. A store that already exists is reported and not attached to the remote.
+        #[arg(long, value_name = "URL")]
+        remote: Option<String>,
     },
+    /// Commit the settled files, merge the remote's changes, and push. Network failures are
+    /// reported in `problems`.
+    Sync,
     /// Create a ticket and print its ID. It writes the file and makes no commit.
     New(NewArguments),
     /// Show a ticket with its body, children, and folder files.

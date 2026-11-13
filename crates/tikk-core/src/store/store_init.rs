@@ -4,6 +4,8 @@ use std::io;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
+use tempfile::TempDir;
+
 use crate::store::machine::MACHINE_FILE;
 use crate::store::{CONFIG_FILE, MachineName, StoreEffects, StoreError, has_config};
 
@@ -34,7 +36,7 @@ pub struct InitOutcome {
 // The staging folder is renamed onto the store path, and a rename cannot replace a symlink with a
 // folder, so a link to an existing folder is replaced by that folder's path. A link to a missing
 // target stays as given.
-fn resolve_store_link(root: &Path) -> PathBuf {
+pub(crate) fn resolve_store_link(root: &Path) -> PathBuf {
     let is_link =
         fs::symlink_metadata(root).is_ok_and(|metadata| metadata.file_type().is_symlink());
 
@@ -108,7 +110,7 @@ fn finish(
     })
 }
 
-fn ensure_empty(root: &Path) -> Result<(), StoreError> {
+pub(crate) fn ensure_empty(root: &Path) -> Result<(), StoreError> {
     let mut entries = match fs::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -201,6 +203,14 @@ fn choose_machine(
 }
 
 fn create_store(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError> {
+    let staging = create_staging(root)?;
+
+    fill_new_store(staging.path(), effects.run_git)?;
+
+    publish(staging, root)
+}
+
+pub(crate) fn create_staging(root: &Path) -> Result<TempDir, StoreError> {
     let parent = root.parent().ok_or_else(|| StoreError::FolderNotEmpty {
         store: root.to_path_buf(),
     })?;
@@ -212,24 +222,30 @@ fn create_store(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError>
         source,
     })?;
 
-    let staging = tempfile::Builder::new()
+    tempfile::Builder::new()
         .prefix(&format!(".{name}.tikk-init-"))
         .tempdir_in(parent)
         .map_err(|source| StoreError::Io {
             action: "create",
             path: parent.to_path_buf(),
             source,
-        })?;
+        })
+}
 
-    (effects.run_git)(
-        staging.path(),
-        &["init", "--quiet", "--initial-branch=main"],
-    )?;
-    write_file(&staging.path().join(ATTRIBUTES_FILE), ATTRIBUTES)?;
-    write_file(&staging.path().join(CONFIG_FILE), CONFIG)?;
-    (effects.run_git)(staging.path(), &["add", "--", CONFIG_FILE, ATTRIBUTES_FILE])?;
-    (effects.run_git)(staging.path(), FIRST_COMMIT)?;
+pub(crate) fn fill_new_store(
+    staging: &Path,
+    run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
+) -> Result<(), StoreError> {
+    run_git(staging, &["init", "--quiet", "--initial-branch=main"])?;
+    write_file(&staging.join(ATTRIBUTES_FILE), ATTRIBUTES)?;
+    write_file(&staging.join(CONFIG_FILE), CONFIG)?;
+    run_git(staging, &["add", "--", CONFIG_FILE, ATTRIBUTES_FILE])?;
+    run_git(staging, FIRST_COMMIT)?;
 
+    Ok(())
+}
+
+pub(crate) fn publish(staging: TempDir, root: &Path) -> Result<bool, StoreError> {
     let staging = staging.keep();
     let Err(source) = fs::rename(&staging, root) else {
         return Ok(true);
@@ -255,7 +271,7 @@ fn create_store(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError>
     })
 }
 
-fn write_file(path: &Path, contents: &str) -> Result<(), StoreError> {
+pub(crate) fn write_file(path: &Path, contents: &str) -> Result<(), StoreError> {
     fs::write(path, contents).map_err(|source| StoreError::Io {
         action: "write",
         path: path.to_path_buf(),

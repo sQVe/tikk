@@ -1,5 +1,7 @@
 mod support;
 
+use std::path::Path;
+
 use serde_json::json;
 
 use support::{Home, parse_json};
@@ -292,4 +294,199 @@ fn a_second_init_on_a_store_path_that_is_not_utf8_reports_the_store_exists() {
     assert_eq!(parse_json(&first.stdout)["created"], json!(true));
     assert_eq!(second.exit_code, 0, "second: {}", second.stderr);
     assert_eq!(parse_json(&second.stdout)["created"], json!(false));
+}
+
+fn host_machine_name() -> String {
+    let uname = std::process::Command::new("uname")
+        .arg("-n")
+        .output()
+        .expect("start uname");
+    let host_name = String::from_utf8(uname.stdout).expect("uname prints UTF-8");
+
+    host_name
+        .trim()
+        .split('.')
+        .next()
+        .expect("split yields a first label")
+        .to_lowercase()
+}
+
+#[test]
+fn init_remote_on_a_remote_with_this_host_machine_folder_asks_for_machine() {
+    let remote = support::Remote::new();
+    let laptop = Home::on_remote(&remote, &host_machine_name());
+    laptop.append_machine_fact_line(
+        &host_machine_name(),
+        "2026-11.jsonl",
+        "{\"v\":1,\"kind\":\"release\",\"ticket\":\"personal-abcd\",\"at\":\"2026-11-13T01:00:00Z\",\"agent\":null}",
+    );
+    assert_eq!(laptop.sync_json()["pushed"], json!(true));
+    let desktop = Home::new();
+
+    let refused = desktop.tikk(&["init", "--remote", &remote.url(), "--json"]);
+    let chosen = desktop.tikk(&[
+        "init",
+        "--remote",
+        &remote.url(),
+        "--machine",
+        "desktop",
+        "--json",
+    ]);
+
+    assert_eq!(refused.exit_code, 1, "{}", refused.stderr);
+    assert_eq!(refused.stdout, "");
+    let error = &parse_json(&refused.stderr)["error"];
+    assert_eq!(error["code"], json!("machineInUse"));
+    assert!(
+        error["message"].as_str().is_some_and(|message| message
+            .contains(&format!("facts/{}/", host_machine_name()))
+            && message.contains("--machine")),
+        "{error}"
+    );
+    assert_eq!(chosen.exit_code, 0, "{}", chosen.stderr);
+    assert_eq!(parse_json(&chosen.stdout)["created"], json!(true));
+    assert_eq!(
+        std::fs::read_to_string(desktop.store().join(".git/tikk-machine"))
+            .expect("read the machine file"),
+        "desktop\n"
+    );
+    assert_eq!(desktop.fact_lines(), laptop.fact_lines());
+}
+
+#[test]
+fn init_remote_on_an_existing_store_reports_it_and_adds_no_remote() {
+    let remote = support::Remote::new();
+    let home = Home::initialized();
+
+    let run = home.tikk(&["init", "--remote", &remote.url(), "--json"]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(false));
+    assert_eq!(home.git(&["remote"]), "");
+    assert_eq!(remote.git(&["for-each-ref"]), "");
+}
+
+#[test]
+fn init_remote_on_a_remote_without_main_exits_with_1() {
+    let remote = support::Remote::new();
+    let other = Home::initialized();
+    support::run_git(
+        &other.store(),
+        &["push", "--quiet", &remote.url(), "main:work"],
+    );
+    let home = Home::new();
+
+    let run = home.tikk(&["init", "--remote", &remote.url(), "--json"]);
+
+    assert_eq!(run.exit_code, 1, "{}", run.stderr);
+    assert_eq!(
+        parse_json(&run.stderr)["error"]["code"],
+        json!("remoteWithoutMain")
+    );
+    assert!(!home.store().join("tikk.json").exists());
+}
+
+fn relative_to_work(remote: &support::Remote) -> String {
+    let name = remote
+        .path()
+        .file_name()
+        .expect("the remote has a name")
+        .to_str()
+        .expect("a UTF-8 name");
+
+    format!("../../{name}")
+}
+
+fn assert_origin_is(home: &Home, remote: &support::Remote) {
+    let origin = home.git(&["remote", "get-url", "origin"]);
+    let origin = Path::new(origin.trim());
+
+    assert!(origin.is_absolute(), "{}", origin.display());
+    assert_eq!(
+        origin.canonicalize().expect("origin exists"),
+        remote.path().canonicalize().expect("the remote exists")
+    );
+}
+
+#[test]
+fn init_remote_with_a_relative_path_to_an_empty_remote_uses_the_working_directory() {
+    let remote = support::Remote::new();
+    let home = Home::new();
+
+    let run = home.tikk(&[
+        "init",
+        "--remote",
+        &relative_to_work(&remote),
+        "--machine",
+        "laptop",
+        "--json",
+    ]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(true));
+    assert_origin_is(&home, &remote);
+    assert_eq!(
+        remote.git(&["rev-parse", "main"]).trim(),
+        home.git(&["rev-parse", "main"]).trim()
+    );
+}
+
+#[test]
+fn init_remote_with_a_relative_path_to_a_populated_remote_uses_the_working_directory() {
+    let remote = support::Remote::new();
+    let laptop = Home::on_remote(&remote, "laptop");
+    let desktop = Home::new();
+
+    let run = desktop.tikk(&[
+        "init",
+        "--remote",
+        &relative_to_work(&remote),
+        "--machine",
+        "desktop",
+        "--json",
+    ]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(parse_json(&run.stdout)["created"], json!(true));
+    assert_origin_is(&desktop, &remote);
+    assert_eq!(
+        desktop.git(&["rev-parse", "main"]).trim(),
+        laptop.git(&["rev-parse", "main"]).trim()
+    );
+}
+
+#[test]
+fn init_remote_with_a_colon_free_git_rewrite_alias_reaches_the_remote() {
+    let remote = support::Remote::new();
+    let home = Home::new();
+    let setup = tempfile::tempdir().expect("create a temporary directory");
+    let global_config = setup.path().join("gitconfig");
+    std::fs::write(
+        &global_config,
+        format!("[url \"{}\"]\n\tinsteadOf = alias/remote\n", remote.url()),
+    )
+    .expect("write the global Git config");
+
+    let run = home.tikk_with_environment(
+        &home.work(),
+        &[("GIT_CONFIG_GLOBAL", &global_config)],
+        &[
+            "init",
+            "--remote",
+            "alias/remote",
+            "--machine",
+            "laptop",
+            "--json",
+        ],
+    );
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(
+        home.git(&["remote", "get-url", "origin"]).trim(),
+        "alias/remote"
+    );
+    assert_eq!(
+        remote.git(&["rev-parse", "main"]).trim(),
+        home.git(&["rev-parse", "main"]).trim()
+    );
 }

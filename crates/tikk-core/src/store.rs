@@ -1,11 +1,17 @@
 mod claim_lease;
 mod fact_files;
+mod git;
 mod identity;
 mod machine;
 mod project_choice;
 mod ready;
 mod store_init;
+mod store_init_remote;
 mod store_lock;
+mod sync;
+mod sync_commit;
+mod sync_merge;
+mod sync_read;
 mod system;
 mod ticket_claim;
 mod ticket_create;
@@ -25,6 +31,7 @@ use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use thiserror::Error;
 
@@ -36,7 +43,12 @@ pub use ready::{
     BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, SkippedSlice, ready_slices,
 };
 pub use store_init::{InitOutcome, init};
+pub use store_init_remote::{RemoteInitEffects, init_from_remote};
 pub use store_lock::{LockAccess, StoreLock};
+pub use sync::{
+    FileEntry, FileKind, PendingFile, PendingReason, SyncEffects, SyncOutcome, SyncProblem,
+    SyncStep, sync_store,
+};
 pub use ticket_claim::{ClaimEffects, ShownClaim, claim_slice, release_slice};
 pub use ticket_create::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
 pub use ticket_edit::{EditEffects, edit_ticket};
@@ -126,12 +138,77 @@ pub enum StoreError {
         path: PathBuf,
         source: io::Error,
     },
+    #[error("`git {arguments}` did not finish within {} seconds, so tikk stopped it.", timeout.as_secs_f64())]
+    GitTimeout {
+        arguments: String,
+        timeout: Duration,
+    },
+    #[error(
+        "Sync stopped: {} changed both here and on the remote. tikk aborted the merge, so each file keeps the local text. To resolve it, run `git -C {} merge origin/main`, edit each listed file, then `git add` and `git commit` them.",
+        describe_paths(files),
+        store.display()
+    )]
+    Conflict { store: PathBuf, files: Vec<PathBuf> },
+    #[error(
+        "The merge stopped ({merge}), and the list of conflicting files could not be read: {read}. tikk aborted the merge."
+    )]
+    ConflictsUnreadable {
+        merge: Box<StoreError>,
+        read: Box<StoreError>,
+    },
+    #[error("{cause} Then the merge abort failed: {abort}. Run `git -C {} merge --abort`.", store.display())]
+    MergeAbortFailed {
+        store: PathBuf,
+        cause: Box<StoreError>,
+        abort: Box<StoreError>,
+    },
+    #[error(
+        "Git refused to merge the remote, so nothing was merged: {message}. Fix or wait for the files it names, then run `tikk sync` again."
+    )]
+    MergeBlocked { message: String },
+    #[error("{cause} Then unstaging the files sync staged failed: {unstage}. Run `git -C {} reset -q` before the next `tikk sync`.", store.display())]
+    UnstageFailed {
+        store: PathBuf,
+        cause: Box<StoreError>,
+        unstage: Box<StoreError>,
+    },
+    #[error("A merge is in progress in {}. Finish it with `git commit`, or stop it with `git merge --abort`, then run `tikk sync` again.", store.display())]
+    MergeInProgress { store: PathBuf },
+    #[error("The Git index of {} has staged changes that sync did not make: {}. Commit them, or unstage them with `git -C {} reset -q`, then run `tikk sync` again.", store.display(), describe_paths(paths), store.display())]
+    StagedChanges { store: PathBuf, paths: Vec<PathBuf> },
+    #[error("The store {} is on `{branch}`, not `main`. Run `git -C {} switch main`, then run `tikk sync` again.", store.display(), store.display())]
+    NotOnMain { store: PathBuf, branch: String },
+    #[error("{} lost or changed lines that are already committed. Facts are append-only: restore the committed lines, then run `tikk sync` again.", path.display())]
+    FactRewritten { path: PathBuf },
+    #[error("The remote `{url}` has branches but no `main`, so it is not a tikk store.")]
+    RemoteWithoutMain { url: String },
+    #[error(
+        "The `main` branch of the remote `{url}` holds no tikk.json of version 1, so it is not a tikk store."
+    )]
+    RemoteNotAStore { url: String },
+    #[error(
+        "The remote already has facts/{machine}/, which another machine writes. Pass --machine with a new name, or `--machine {machine}` if this is that machine."
+    )]
+    MachineInUse { machine: String },
+    #[error("{error} Then the sync result could not be saved: {save}")]
+    ResultNotSaved {
+        error: Box<StoreError>,
+        save: Box<StoreError>,
+    },
 }
 
 fn describe_cycle(steps: &[WaitStep]) -> String {
     steps
         .iter()
         .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn describe_paths(paths: &[PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -145,7 +222,7 @@ pub struct StoreEffects {
 impl StoreEffects {
     pub fn system() -> Self {
         Self {
-            run_git: system::run_git,
+            run_git: git::run_git,
             read_host_name: system::read_host_name,
         }
     }
@@ -228,6 +305,21 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{StoreError, open, store_path};
+
+    #[test]
+    fn a_conflict_names_each_file() {
+        let error = StoreError::Conflict {
+            store: PathBuf::from("/store"),
+            files: vec![PathBuf::from("tickets/a.md"), PathBuf::from("tickets/b.md")],
+        };
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("Sync stopped: tickets/a.md, tickets/b.md changed both here"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn open_reports_not_initialized_for_a_missing_store() {
