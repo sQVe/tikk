@@ -4,12 +4,16 @@ use std::path::PathBuf;
 use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
-use tikk_core::{EditEffects, QueryEffects, StoreEffects, StoreError, TicketEffects, WriteEffects};
+use tikk_core::{
+    ClaimEffects, EditEffects, Identity, QueryEffects, ReadyEffects, ReadyScope, StoreEffects,
+    StoreError, TicketEffects, WriteEffects,
+};
 
 use crate::command::{Cli, Command};
 use crate::output::{Exit, Failure, Output, Response};
+use crate::ready::ready_output;
 use crate::ticket_row::written_output;
-use crate::{edit, init, ls, new, show, store_error};
+use crate::{claim, edit, init, ls, new, show, store_error};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -18,11 +22,16 @@ pub(crate) struct Environment {
     pub(crate) home: Option<OsString>,
     pub(crate) working_directory: PathBuf,
     pub(crate) editor: Option<OsString>,
+    pub(crate) agent: Option<OsString>,
+    pub(crate) session: Option<OsString>,
+    pub(crate) session_log: Option<OsString>,
     pub(crate) effects: StoreEffects,
     pub(crate) ticket_effects: TicketEffects,
     pub(crate) query_effects: QueryEffects,
     pub(crate) write_effects: WriteEffects,
     pub(crate) edit_effects: EditEffects,
+    pub(crate) claim_effects: ClaimEffects,
+    pub(crate) ready_effects: ReadyEffects,
 }
 
 impl Environment {
@@ -33,11 +42,16 @@ impl Environment {
             // Git then reports the folder it cannot enter when it reads `origin`.
             working_directory: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             editor: std::env::var_os("EDITOR"),
+            agent: std::env::var_os("TIKK_AGENT"),
+            session: std::env::var_os("TIKK_SESSION"),
+            session_log: std::env::var_os("TIKK_SESSION_LOG"),
             effects: StoreEffects::system(),
             ticket_effects: TicketEffects::system(),
             query_effects: QueryEffects::system(),
             write_effects: WriteEffects::system(),
             edit_effects: EditEffects::system(),
+            claim_effects: ClaimEffects::system(),
+            ready_effects: ReadyEffects::system(),
         }
     }
 }
@@ -72,6 +86,12 @@ pub(crate) fn run(arguments: Vec<OsString>, environment: Environment) -> Respons
 
 fn run_command(command: Command, environment: Environment) -> Result<Output, StoreError> {
     let store = tikk_core::store_path(environment.tikk_home, environment.home)?;
+    // Only the commands that act for the caller parse the identity, so a bad value stops no other.
+    let caller = Identity::from_environment(
+        environment.agent,
+        environment.session,
+        environment.session_log,
+    );
 
     match command {
         Command::Init { machine } => init::run(&store, machine, &environment.effects),
@@ -79,6 +99,7 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &tikk_core::open(&store)?,
             arguments,
             environment.working_directory,
+            caller?,
             &environment.ticket_effects,
         ),
         Command::Show { id } => {
@@ -101,14 +122,18 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             environment.editor.as_deref(),
             &environment.edit_effects,
         ),
-        Command::Done { id } => {
-            tikk_core::mark_done(&tikk_core::open(&store)?, &id, &environment.write_effects)
-                .map(|done| written_output(&done))
-        }
+        Command::Done { id } => tikk_core::mark_done(
+            &tikk_core::open(&store)?,
+            &id,
+            &caller?,
+            &environment.write_effects,
+        )
+        .map(|done| written_output(&done)),
         Command::Cancel { id, reason } => tikk_core::cancel_ticket(
             &tikk_core::open(&store)?,
             &id,
             &reason,
+            &caller?,
             &environment.write_effects,
         )
         .map(|canceled| written_output(&canceled)),
@@ -140,6 +165,28 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &environment.write_effects,
         )
         .map(|ranked| written_output(&ranked)),
+        Command::Claim { id } => claim::run_claim(
+            &tikk_core::open(&store)?,
+            &id,
+            &caller?,
+            &environment.claim_effects,
+        ),
+        Command::Release { id } => claim::run_release(
+            &tikk_core::open(&store)?,
+            &id,
+            &caller?,
+            &environment.claim_effects,
+        ),
+        Command::Ready(arguments) => tikk_core::ready_slices(
+            &tikk_core::open(&store)?,
+            ReadyScope {
+                parent: arguments.parent,
+                project: arguments.project,
+                working_directory: environment.working_directory,
+            },
+            &environment.ready_effects,
+        )
+        .map(|queue| ready_output(&queue)),
     }
 }
 

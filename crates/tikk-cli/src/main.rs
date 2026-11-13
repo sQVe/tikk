@@ -1,10 +1,12 @@
 mod app;
+mod claim;
 mod command;
 mod edit;
 mod init;
 mod ls;
 mod new;
 mod output;
+mod ready;
 mod show;
 mod store_error;
 mod ticket_row;

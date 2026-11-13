@@ -20,8 +20,7 @@ A ticket has one of four kinds.
   `canceled`. The manager agent claims the slice.
 - `instruction`: one agent's instructions under a slice. Its status is `open`, `done`, or
   `canceled`. It has no claim of its own; it is part of the slice's claimed work.
-- `task`: a person's to-do. Its status is `open`, `done`, or `canceled`. It has no claim, log, or
-  submit.
+- `task`: a person's to-do. Its status is `open`, `done`, or `canceled`. It has no claim or log.
 
 `parent` is fixed by kind: plan above slice above instruction. A plan has no parent. A slice's
 parent must be a plan, and an instruction's parent must be a slice. A task sits under a plan or has

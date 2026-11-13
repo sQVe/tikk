@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde_json::json;
-use tikk_core::{NewTicket, NewTicketSource, Store, StoreError, TicketEffects};
+use tikk_core::{Identity, NewTicket, NewTicketSource, Store, StoreError, TicketEffects};
 
 use crate::command::NewArguments;
 use crate::output::Output;
@@ -10,6 +10,7 @@ pub(crate) fn run(
     store: &Store,
     arguments: NewArguments,
     working_directory: PathBuf,
+    caller: Identity,
     effects: &TicketEffects,
 ) -> Result<Output, StoreError> {
     let request = NewTicket {
@@ -21,6 +22,7 @@ pub(crate) fn run(
         ),
         project: arguments.project,
         working_directory,
+        caller,
     };
     let created = tikk_core::create_ticket(store, request, effects)?;
     let id = created.id.to_string();

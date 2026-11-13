@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::store::claim_lease::LeaseEffects;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_file_write::replace_ticket_file;
 use crate::store::ticket_files::{StoredTicket, TicketScan, io_error, read_tickets, sha256_hex};
@@ -13,6 +14,7 @@ use crate::ticket::{TicketDocument, TicketError, TicketFields, TicketId, write_d
 pub struct WriteEffects {
     pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
     pub replace_file: fn(&Path, &str, &str) -> Result<(), StoreError>,
+    pub lease: LeaseEffects,
 }
 
 impl WriteEffects {
@@ -20,6 +22,7 @@ impl WriteEffects {
         Self {
             lock_store: store_lock::lock_store,
             replace_file: replace_ticket_file,
+            lease: LeaseEffects::system(),
         }
     }
 }
@@ -70,8 +73,19 @@ pub(crate) fn change_ticket(
 ) -> Result<StoredTicket, StoreError> {
     let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
     let scan = read_tickets(store.root())?;
-    let current = find_ticket(&scan, id)?;
-    let Some(fields) = change(&current.document.fields, &scan)? else {
+
+    change_scanned(&scan, id, effects, change)
+}
+
+// The caller holds the exclusive lock, and the scan is from under it.
+pub(crate) fn change_scanned(
+    scan: &TicketScan,
+    id: &TicketId,
+    effects: &WriteEffects,
+    change: impl FnOnce(&TicketFields, &TicketScan) -> Result<Option<TicketFields>, StoreError>,
+) -> Result<StoredTicket, StoreError> {
+    let current = find_ticket(scan, id)?;
+    let Some(fields) = change(&current.document.fields, scan)? else {
         return Ok(current.clone());
     };
     let document = TicketDocument {

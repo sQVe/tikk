@@ -15,8 +15,8 @@ tikk serves one user and their agents. It has no ownership checks, no permission
 no assignees. Several machines belong to the same user and sync through one private repository ([ADR
 0012](./0012-one-git-store-with-one-lock.md)).
 
-Multi-user collaboration, permissions, and assignees are non-goals. A worker that takes an
-instruction holds a claim with a lease, not an assignment ([ADR
+Multi-user collaboration, permissions, and assignees are non-goals. A manager agent that takes a
+slice holds a claim with a lease, not an assignment ([ADR
 0022](./0022-claims-leases-and-ready-queue.md)).
 
 ## Consequences

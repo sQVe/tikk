@@ -1,8 +1,12 @@
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use crate::fact::Timestamp;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
+use crate::store::system;
+use crate::store::ticket_claim::{ShownClaim, shown_claim};
 use crate::store::ticket_files::{
     StoredTicket, TICKETS_FOLDER, TicketScan, UnreadableTicket, exists, io_error, read_tickets,
     sorted_entries,
@@ -13,12 +17,14 @@ use crate::ticket::{Kind, ProjectName, Status, TicketId};
 #[derive(Clone, Copy)]
 pub struct QueryEffects {
     pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
+    pub now: fn() -> Timestamp,
 }
 
 impl QueryEffects {
     pub fn system() -> Self {
         Self {
             lock_store: store_lock::lock_store,
+            now: system::now,
         }
     }
 }
@@ -43,6 +49,7 @@ pub struct ShownTicket {
     pub ticket: StoredTicket,
     pub children: Vec<StoredTicket>,
     pub files: Vec<String>,
+    pub claim: Option<ShownClaim>,
 }
 
 /// Lists the tickets that match the filter, ranked ones first, then by ID. Every file that
@@ -85,6 +92,7 @@ pub fn show_ticket(
     let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
     let scan = read_tickets(store.root())?;
     let ticket = find_ticket(&scan, id)?.clone();
+    let claim = shown_claim(store.root(), &ticket, (effects.now)())?;
     let mut children: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -97,52 +105,111 @@ pub fn show_ticket(
         ticket,
         children,
         files: folder_files(&folder)?,
+        claim,
     })
+}
+
+pub(crate) enum TicketLookup<'a> {
+    Found(&'a StoredTicket),
+    Unreadable(&'a UnreadableTicket),
+    Shared(Vec<&'a Path>),
+    Missing,
+}
+
+#[derive(Clone, Copy)]
+enum TicketEntry<'a> {
+    Parsed(&'a StoredTicket),
+    Broken(&'a UnreadableTicket),
+}
+
+pub(crate) struct TicketIndex<'a> {
+    entries: HashMap<&'a TicketId, Vec<TicketEntry<'a>>>,
+}
+
+impl<'a> TicketIndex<'a> {
+    pub(crate) fn new(scan: &'a TicketScan) -> Self {
+        let mut entries: HashMap<&TicketId, Vec<TicketEntry<'a>>> = HashMap::new();
+
+        for (id, entry) in scan_entries(scan) {
+            entries.entry(id).or_default().push(entry);
+        }
+
+        Self { entries }
+    }
+
+    pub(crate) fn look_up(&self, id: &TicketId) -> TicketLookup<'a> {
+        classify(self.entries.get(id).map_or(&[][..], Vec::as_slice))
+    }
+}
+
+pub(crate) fn look_up_ticket<'a>(scan: &'a TicketScan, id: &TicketId) -> TicketLookup<'a> {
+    let entries: Vec<TicketEntry<'a>> = scan_entries(scan)
+        .filter(|(entry_id, _)| *entry_id == id)
+        .map(|(_, entry)| entry)
+        .collect();
+
+    classify(&entries)
 }
 
 pub(crate) fn find_ticket<'a>(
     scan: &'a TicketScan,
     id: &TicketId,
 ) -> Result<&'a StoredTicket, StoreError> {
-    ticket_path(scan, id)?;
-
-    if let Some(error) = scan
-        .errors
-        .iter()
-        .find(|error| error.id.as_ref() == Some(id))
-    {
-        return Err(StoreError::TicketParse {
+    match look_up_ticket(scan, id) {
+        TicketLookup::Found(ticket) => Ok(ticket),
+        TicketLookup::Unreadable(error) => Err(StoreError::TicketParse {
             path: error.path.clone(),
             message: error.message.clone(),
-        });
+        }),
+        TicketLookup::Shared(paths) => Err(shared(id, &paths)),
+        TicketLookup::Missing => Err(StoreError::NotFound { id: id.to_string() }),
     }
-
-    scan.tickets
-        .iter()
-        .find(|ticket| ticket.id == *id)
-        .ok_or_else(|| StoreError::NotFound { id: id.to_string() })
 }
 
 pub(crate) fn ticket_path<'a>(scan: &'a TicketScan, id: &TicketId) -> Result<&'a Path, StoreError> {
+    match look_up_ticket(scan, id) {
+        TicketLookup::Found(ticket) => Ok(&ticket.path),
+        TicketLookup::Unreadable(error) => Ok(&error.path),
+        TicketLookup::Shared(paths) => Err(shared(id, &paths)),
+        TicketLookup::Missing => Err(StoreError::NotFound { id: id.to_string() }),
+    }
+}
+
+// Parsed files come before broken ones, which keeps the order of the paths of a shared ID.
+fn scan_entries(scan: &TicketScan) -> impl Iterator<Item = (&TicketId, TicketEntry<'_>)> {
     let parsed = scan
         .tickets
         .iter()
-        .filter(|ticket| ticket.id == *id)
-        .map(|ticket| ticket.path.as_path());
+        .map(|ticket| (&ticket.id, TicketEntry::Parsed(ticket)));
     let broken = scan
         .errors
         .iter()
-        .filter(|error| error.id.as_ref() == Some(id))
-        .map(|error| error.path.as_path());
-    let paths: Vec<&Path> = parsed.chain(broken).collect();
+        .filter_map(|error| error.id.as_ref().map(|id| (id, TicketEntry::Broken(error))));
 
-    match paths.as_slice() {
-        [] => Err(StoreError::NotFound { id: id.to_string() }),
-        [path] => Ok(path),
-        _ => Err(StoreError::IdShared {
-            id: id.to_string(),
-            paths: paths.iter().map(|path| path.to_path_buf()).collect(),
-        }),
+    parsed.chain(broken)
+}
+
+fn classify<'a>(entries: &[TicketEntry<'a>]) -> TicketLookup<'a> {
+    match entries {
+        [] => TicketLookup::Missing,
+        [TicketEntry::Parsed(ticket)] => TicketLookup::Found(ticket),
+        [TicketEntry::Broken(error)] => TicketLookup::Unreadable(error),
+        _ => TicketLookup::Shared(
+            entries
+                .iter()
+                .map(|entry| match entry {
+                    TicketEntry::Parsed(ticket) => ticket.path.as_path(),
+                    TicketEntry::Broken(error) => error.path.as_path(),
+                })
+                .collect(),
+        ),
+    }
+}
+
+fn shared(id: &TicketId, paths: &[&Path]) -> StoreError {
+    StoreError::IdShared {
+        id: id.to_string(),
+        paths: paths.iter().map(|path| path.to_path_buf()).collect(),
     }
 }
 
@@ -359,6 +426,7 @@ mod tests {
         let (_directory, store) = store_with_tickets();
         let effects = QueryEffects {
             lock_store: busy_lock,
+            ..QueryEffects::system()
         };
 
         let listed = list_tickets(&store, &TicketFilter::default(), &effects);
