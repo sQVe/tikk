@@ -22,6 +22,11 @@ pub fn rank_ticket(
     let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
     let scan = read_tickets(store.root())?;
     let current = find_ticket(&scan, id)?;
+
+    if anchors_itself(place, id) {
+        return Ok(current.clone());
+    }
+
     let mut order = sorted_siblings(&scan, current);
     let from = order
         .iter()
@@ -30,7 +35,7 @@ pub fn rank_ticket(
 
     order.remove(from);
 
-    let to = place_index(&scan, current, &order, place, from)?;
+    let to = place_index(&scan, current, &order, place)?;
 
     order.insert(to, current);
 
@@ -55,6 +60,14 @@ pub fn rank_ticket(
     Ok(ranked)
 }
 
+// The ticket already sits beside itself, so even siblings with gaps in their ranks stay as they are.
+fn anchors_itself(place: &RankPlace, id: &TicketId) -> bool {
+    match place {
+        RankPlace::Before(anchor) | RankPlace::After(anchor) => anchor == id,
+        RankPlace::First | RankPlace::Last => false,
+    }
+}
+
 fn sorted_siblings<'a>(scan: &'a TicketScan, ticket: &StoredTicket) -> Vec<&'a StoredTicket> {
     let parent = ticket.document.fields.parent();
     let mut siblings: Vec<&StoredTicket> = scan
@@ -75,7 +88,6 @@ fn place_index(
     ticket: &StoredTicket,
     others: &[&StoredTicket],
     place: &RankPlace,
-    from: usize,
 ) -> Result<usize, StoreError> {
     let (anchor, offset) = match place {
         RankPlace::First => return Ok(0),
@@ -85,10 +97,6 @@ fn place_index(
     };
 
     find_ticket(scan, anchor)?;
-
-    if *anchor == ticket.id {
-        return Ok(from);
-    }
 
     others
         .iter()
@@ -394,6 +402,32 @@ mod tests {
             assert_eq!(ranked.document.fields.rank(), Some(rank), "case {name}");
             assert_eq!(written_files(), written, "case {name}");
         }
+    }
+
+    #[test]
+    fn rank_beside_itself_writes_nothing_even_when_the_ranks_have_gaps() {
+        let (a, b) = (task("A", -2), task("B", 9));
+        let (directory, store) = store_with(&[
+            ("personal-pppp-p.md", PLAN),
+            ("personal-aaaa-a.md", &a),
+            ("personal-bbbb-b.md", &b),
+        ]);
+        let places = [
+            RankPlace::Before(id("personal-aaaa")),
+            RankPlace::After(id("personal-aaaa")),
+        ];
+
+        for place in places {
+            let ranked = rank_ticket(&store, &id("personal-aaaa"), &place, &recording_effects())
+                .unwrap_or_else(|error| panic!("case {place:?}: {error:?}"));
+
+            assert_eq!(ranked.text, a, "case {place:?}");
+            assert_eq!(written_files(), Vec::<String>::new(), "case {place:?}");
+        }
+        assert_eq!(
+            rank_of(&directory, "personal-bbbb-b.md").as_deref(),
+            Some("9")
+        );
     }
 
     #[test]
