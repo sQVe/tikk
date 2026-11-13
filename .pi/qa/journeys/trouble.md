@@ -24,10 +24,12 @@ Each failure is named with what to fix, and no ticket is lost.
    exits with 0, and `tikk ready` offers the slice again.
 5. Two machines changed the same ticket. The second `tikk sync` exits with 1 and `conflict`, names
    the file, and the ticket keeps the local text.
+6. Two machines drew the same ID. `tikk sync --json` names both files, and `tikk claim` on the ID
+   exits with 1 and `idShared`. After the user renames one file, the claim exits with 0.
 
 ## End state
 
 The broken file stays as the user left it, the edited ticket file holds the user's edit, and
 `tikk ls --json` still lists every other ticket under `tickets`. The released slice has no
 `claim` in `tikk show --json`. The ticket of the conflict holds the local text, and no merge is in
-progress.
+progress. The slice that kept the shared ID is claimed, and `tikk sync --json` lists no clash.
