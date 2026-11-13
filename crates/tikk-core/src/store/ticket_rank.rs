@@ -1,6 +1,6 @@
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::{StoredTicket, TicketScan, read_tickets};
-use crate::store::ticket_queries::{find_ticket, list_order};
+use crate::store::ticket_queries::{find_ticket, list_order, ticket_path};
 use crate::store::ticket_write::{WriteEffects, replace_ticket};
 use crate::store::{Store, StoreError};
 use crate::ticket::{TicketDocument, TicketId};
@@ -28,6 +28,11 @@ pub fn rank_ticket(
     }
 
     let mut order = sorted_siblings(&scan, current);
+
+    for sibling in &order {
+        ticket_path(&scan, &sibling.id)?;
+    }
+
     let from = order
         .iter()
         .position(|sibling| sibling.id == *id)
@@ -502,6 +507,34 @@ mod tests {
         assert_eq!(
             fs::read_to_string(&other).expect("read the other ticket"),
             other_text
+        );
+    }
+
+    #[test]
+    fn rank_refuses_siblings_that_share_an_id_and_writes_nothing() {
+        let (a, b, b_again) = (task("A", 1), task("B", 2), task("B again", 3));
+        let (directory, store) = store_with(&[
+            ("personal-pppp-p.md", PLAN),
+            ("personal-aaaa-a.md", &a),
+            ("personal-bbbb-b.md", &b),
+            ("personal-bbbb-b-again.md", &b_again),
+        ]);
+
+        let result = rank_ticket(
+            &store,
+            &id("personal-aaaa"),
+            &RankPlace::Last,
+            &recording_effects(),
+        );
+
+        assert!(
+            matches!(&result, Err(StoreError::IdShared { id, .. }) if id == "personal-bbbb"),
+            "{result:?}"
+        );
+        assert_eq!(written_files(), Vec::<String>::new());
+        assert_eq!(
+            rank_of(&directory, "personal-aaaa-a.md").as_deref(),
+            Some("1")
         );
     }
 }
