@@ -8,7 +8,7 @@ use crate::store::sync::{
 };
 use crate::store::sync_commit::commit_plan;
 use crate::store::sync_merge::merge_or_note;
-use crate::store::sync_read::{SyncPlan, read_fetched_commit, read_plan};
+use crate::store::sync_read::{SyncPlan, read_plan};
 use crate::store::ticket_files::{TicketScan, read_tickets};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,7 @@ fn run_steps<T>(
     let origin = (effects.read_origin)(root)?;
     let fetched = fetch_origin(root, origin.as_deref(), effects, &mut problems);
     let lock = (effects.lock_store)(root, LockAccess::Exclusive)?;
-    let fetched_commit = read_fetched_commit(root, fetched, effects)?;
+    let fetched_commit = read_plan(root, fetched, effects)?.fetched;
     let merged = match &fetched_commit {
         Some(commit) => merge_or_note(root, commit, effects, &mut problems)?,
         None => false,

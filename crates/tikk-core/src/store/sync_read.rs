@@ -81,9 +81,16 @@ pub(crate) fn read_plan(
     fetched: bool,
     effects: &SyncEffects,
 ) -> Result<SyncPlan, StoreError> {
-    let (fetched, changes) = check_store(root, fetched, effects)?;
+    ensure_on_main(root, effects.run_git)?;
+    ensure_no_merge(root, effects)?;
+
+    let changes = read_changes(root, effects.run_git)?;
     let mut plan = SyncPlan {
-        fetched,
+        fetched: if fetched {
+            read_fetched(root, effects.run_git)?
+        } else {
+            None
+        },
         ..SyncPlan::default()
     };
     let now = (effects.now)();
@@ -93,32 +100,6 @@ pub(crate) fn read_plan(
     }
 
     Ok(plan)
-}
-
-pub(crate) fn read_fetched_commit(
-    root: &Path,
-    fetched: bool,
-    effects: &SyncEffects,
-) -> Result<Option<String>, StoreError> {
-    check_store(root, fetched, effects).map(|(commit, _)| commit)
-}
-
-fn check_store(
-    root: &Path,
-    fetched: bool,
-    effects: &SyncEffects,
-) -> Result<(Option<String>, Vec<Change>), StoreError> {
-    ensure_on_main(root, effects.run_git)?;
-    ensure_no_merge(root, effects)?;
-
-    let changes = read_changes(root, effects.run_git)?;
-    let commit = if fetched {
-        read_fetched(root, effects.run_git)?
-    } else {
-        None
-    };
-
-    Ok((commit, changes))
 }
 
 pub(crate) fn ensure_no_merge(root: &Path, effects: &SyncEffects) -> Result<(), StoreError> {

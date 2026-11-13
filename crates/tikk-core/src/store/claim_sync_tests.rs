@@ -222,6 +222,18 @@ fn a_claim_with_nothing_to_merge_commits_and_pushes_with_no_problem() {
         run_store_git(remote.path(), &["rev-parse", "main"]).expect("read the remote main"),
         run_store_git(directory.path(), &["rev-parse", "HEAD"]).expect("read HEAD")
     );
+    let fact_files = git_text(
+        directory.path(),
+        &["ls-tree", "-r", "--name-only", "HEAD", "facts"],
+    );
+    let committed = git_text(
+        directory.path(),
+        &["show", &format!("HEAD:{}", fact_files.trim())],
+    );
+    assert!(
+        committed.contains("\"kind\":\"claim\",\"ticket\":\"personal-kkkk\""),
+        "the commit holds the claim line: {committed}"
+    );
 }
 
 #[test]
@@ -287,4 +299,103 @@ fn a_merge_conflict_in_a_claim_names_its_files_in_the_merge_problem() {
 
     assert_eq!(synced.sync.problems[0].step, SyncStep::Merge);
     assert_eq!(synced.sync.problems[0].files, [PLAN_FILE]);
+}
+
+fn store_state(directory: &TempDir) -> (String, String, Vec<(PathBuf, Vec<u8>)>) {
+    let root = directory.path();
+    let mut files = Vec::new();
+    collect_files(root, root, &mut files);
+    files.sort();
+
+    (
+        git_text(root, &["rev-parse", "HEAD"]),
+        git_text(root, &["status", "--porcelain", "--untracked-files=all"]),
+        files,
+    )
+}
+
+fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) {
+    for entry in fs::read_dir(folder).expect("list a folder") {
+        let path = entry.expect("read an entry").path();
+
+        if path.ends_with(".git") {
+            continue;
+        }
+
+        if path.is_dir() {
+            collect_files(root, &path, files);
+        } else {
+            let relative = path
+                .strip_prefix(root)
+                .expect("inside the store")
+                .to_owned();
+
+            files.push((relative, fs::read(&path).expect("read a file")));
+        }
+    }
+}
+
+fn git_text(root: &Path, arguments: &[&str]) -> String {
+    String::from_utf8(run_store_git(root, arguments).expect("git runs")).expect("UTF-8 output")
+}
+
+fn entry_failing_on_the_plan(path: &Path) -> Result<Option<FileEntry>, StoreError> {
+    if path.ends_with(PLAN_FILE) {
+        return Err(StoreError::Io {
+            action: "read",
+            path: path.to_path_buf(),
+            source: std::io::Error::other("unreadable"),
+        });
+    }
+
+    read_entry(path)
+}
+
+#[test]
+fn a_claim_in_a_store_with_a_deleted_committed_fact_file_is_refused_and_changes_nothing() {
+    let (directory, store) = store_with_slice();
+    let fact = "facts/test/2020-01.jsonl";
+    let line = "{\"v\":1,\"kind\":\"release\",\"ticket\":\"personal-kkkk\",\"at\":\"2020-01-01T00:00:00Z\",\"agent\":null}\n";
+    fs::create_dir_all(directory.path().join("facts/test")).expect("create the fact folder");
+    fs::write(directory.path().join(fact), line).expect("write a fact file");
+    git_text(directory.path(), &["add", "--", fact]);
+    git_text(
+        directory.path(),
+        &["commit", "--quiet", "--message", "Add a fact"],
+    );
+    fs::remove_file(directory.path().join(fact)).expect("delete the committed fact file");
+    let before = store_state(&directory);
+
+    let result = claim_slice(&store, &slice(), &manager(), &ClaimEffects::system());
+
+    assert!(
+        matches!(&result, Err(StoreError::FactRewritten { path }) if path.ends_with(fact)),
+        "{result:?}"
+    );
+    assert_eq!(store_state(&directory), before);
+}
+
+#[test]
+fn a_claim_whose_changed_file_read_fails_is_refused_and_changes_nothing() {
+    let (directory, store) = store_with_slice();
+    let effects = ClaimEffects {
+        sync: SyncEffects {
+            read_entry: entry_failing_on_the_plan,
+            ..SyncEffects::system()
+        },
+        ..ClaimEffects::system()
+    };
+    let before = store_state(&directory);
+
+    let result = claim_slice(&store, &slice(), &manager(), &effects);
+
+    assert!(
+        matches!(&result, Err(StoreError::Io { path, .. }) if path.ends_with(PLAN_FILE)),
+        "{result:?}"
+    );
+    assert_eq!(store_state(&directory), before);
+    assert!(
+        saved_result(&directory)["error"].is_string(),
+        "the error is saved as the last sync result"
+    );
 }
