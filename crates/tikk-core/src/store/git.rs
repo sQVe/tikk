@@ -345,6 +345,31 @@ mod tests {
     }
 
     #[test]
+    fn only_the_store_init_policy_keeps_the_config_environment() {
+        let config_environment = ["GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"];
+        let cases = [
+            (GitPolicy::StoreInit, false),
+            (GitPolicy::ProjectLookup, true),
+            (GitPolicy::StoreStep, true),
+            (GitPolicy::NetworkStep, true),
+        ];
+
+        for (index, (policy, drops)) in cases.into_iter().enumerate() {
+            let command = git_command(policy, "git", Path::new("/store"), &["status"]);
+            let removed: Vec<bool> = config_environment
+                .iter()
+                .map(|name| {
+                    command
+                        .get_envs()
+                        .any(|(key, value)| key == *name && value.is_none())
+                })
+                .collect();
+
+            assert_eq!(removed, [drops; 3], "case {index}");
+        }
+    }
+
+    #[test]
     fn each_git_policy_passes_its_own_settings_and_environment() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         let program = fake_git(
