@@ -177,7 +177,7 @@ fn fake_entry(path: &Path) -> Result<Option<FileEntry>, StoreError> {
     })
 }
 
-/// The preflight also reads `MERGE_HEAD`. Only the read after a failed merge finds the file.
+// The preflight also reads `MERGE_HEAD`. Only the read after a failed merge finds the file.
 fn entry_failing_on_merge_head(path: &Path) -> Result<Option<FileEntry>, StoreError> {
     if path.ends_with(".git/MERGE_HEAD") && path.exists() {
         return Err(StoreError::Git {
