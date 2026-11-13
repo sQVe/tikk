@@ -5,7 +5,7 @@ use crate::fact::{PrObservation, PullRequest, ShownPr, current_prs};
 use crate::store::derived_state::{DerivedStates, DerivedStatus, derive_states};
 use crate::store::fact_files::read_facts;
 use crate::store::pr_github::{PrFailure, read_pull_request};
-use crate::store::pr_link::{PrEffects, append_pr, check_linkable};
+use crate::store::pr_link::{PrEffects, append_pr_fact, check_linkable};
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::read_tickets;
 use crate::store::ticket_queries::{TicketIndex, TicketLookup, shared};
@@ -121,7 +121,7 @@ fn append_observed(
     let scan = read_tickets(root)?;
     let index = TicketIndex::new(&scan);
     let current = current_prs(&read_facts(root)?.facts);
-    let mut refreshed = Vec::new();
+    let mut appended = Vec::new();
 
     refuse_shared_ids(&index, observed.iter().map(|(slice, _)| slice))?;
 
@@ -130,17 +130,28 @@ fn append_observed(
             continue;
         }
 
-        let pr = append_pr(root, &slice, observation, &effects.lease)?;
-
-        refreshed.push(RefreshedPr { slice, pr });
+        append_pr_fact(root, &slice, observation, &effects.lease)?;
+        appended.push(slice);
     }
 
+    // One read after all appends, so a tie in time orders by file and line, as `show` does.
     let facts = read_facts(root)?.facts;
-    let derived = derive_states(&scan, &facts, &current_prs(&facts));
-    let audit_behind = refreshed
+    let mut prs = current_prs(&facts);
+    let derived = derive_states(&scan, &facts, &prs);
+    let audit_behind = appended
         .iter()
-        .map(|refreshed| refreshed.slice.clone())
         .filter(|slice| is_audit_behind(&index, &derived, slice))
+        .cloned()
+        .collect();
+    let refreshed = appended
+        .into_iter()
+        .map(|slice| {
+            let pr = prs
+                .remove(&slice)
+                .expect("the slice has the pr fact just appended");
+
+            RefreshedPr { slice, pr }
+        })
         .collect();
 
     Ok(RefreshOutcome {
