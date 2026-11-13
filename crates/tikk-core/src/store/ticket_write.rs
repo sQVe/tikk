@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_file_write::replace_ticket_file;
 use crate::store::ticket_files::{StoredTicket, io_error, read_tickets, sha256_hex};
-use crate::store::ticket_link_checks::check_ticket_links;
+use crate::store::ticket_link_checks::check_written_links;
 use crate::store::ticket_queries::find_ticket;
 use crate::store::{Store, StoreError};
 use crate::ticket::{TicketDocument, TicketError, TicketFields, TicketId, write_document};
@@ -52,7 +52,7 @@ pub fn write_ticket(
         });
     }
 
-    check_ticket_links(&document.fields, &scan)?;
+    check_written_links(&request.id, &document.fields, &scan)?;
 
     replace_ticket(current, document, effects)
 }
@@ -205,5 +205,119 @@ mod tests {
         assert_eq!(written.hash, sha256_hex(expected.as_bytes()));
         assert_eq!(written.path, path);
         assert_eq!(fs::read_to_string(&path).expect("read the task"), expected);
+    }
+
+    fn store_with(files: &[(&str, &str)]) -> (TempDir, Store) {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let folder = directory.path().join("tickets/personal");
+        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
+        fs::create_dir_all(&folder).expect("create the project folder");
+
+        for (name, text) in files {
+            fs::write(folder.join(name), text).expect("write a ticket");
+        }
+
+        let store = Store {
+            root: directory.path().to_path_buf(),
+        };
+
+        (directory, store)
+    }
+
+    fn rewrite(directory: &TempDir, id: &str, old: &str, new: &str) -> TicketWrite {
+        let file = directory.path().join("document.md");
+        fs::write(&file, new).expect("write the document");
+
+        TicketWrite {
+            id: TicketId::parse(id).expect("a valid ID"),
+            file,
+            hash: sha256_hex(old.as_bytes()),
+        }
+    }
+
+    #[test]
+    fn write_refuses_a_parent_that_closes_a_cycle_and_writes_nothing() {
+        let plan = "---\nkind: plan\ntitle: Plan\n---\n";
+        let instruction = "---\nkind: instruction\ntitle: Step\nparent: personal-kkkk\n---\n";
+        // A hand edit put the slice under the instruction, which passes the check of one file.
+        let looped = "---\nkind: slice\ntitle: Slice\nparent: personal-iiii\n---\n";
+        let (directory, store) = store_with(&[
+            ("personal-pppp-plan.md", plan),
+            ("personal-iiii-step.md", instruction),
+            ("personal-kkkk-slice.md", looped),
+        ]);
+
+        let error = write_ticket(
+            &store,
+            rewrite(&directory, "personal-iiii", instruction, instruction),
+            &WriteEffects::system(),
+        )
+        .expect_err("the instruction would sit under itself");
+
+        assert!(
+            matches!(
+                &error,
+                StoreError::Ticket(TicketError::Invalid { field, problem })
+                    if field == "parent" && problem.contains("cycle")
+            ),
+            "{error:?}"
+        );
+        let text = fs::read_to_string(
+            directory
+                .path()
+                .join("tickets/personal/personal-iiii-step.md"),
+        )
+        .expect("read the instruction");
+        assert_eq!(text, instruction);
+    }
+
+    #[test]
+    fn write_checks_children_against_the_new_kind() {
+        let plan = "---\nkind: plan\ntitle: Plan\n---\n";
+        let task = "---\nkind: task\ntitle: Task\nparent: personal-pppp\n---\n";
+        let (directory, store) = store_with(&[
+            ("personal-pppp-plan.md", plan),
+            ("personal-tttt-task.md", task),
+        ]);
+
+        let as_task = write_ticket(
+            &store,
+            rewrite(
+                &directory,
+                "personal-pppp",
+                plan,
+                "---\nkind: task\ntitle: Plan\n---\n",
+            ),
+            &WriteEffects::system(),
+        );
+
+        assert!(
+            matches!(
+                &as_task,
+                Err(StoreError::Ticket(TicketError::Invalid { field, problem }))
+                    if field == "kind" && problem.contains("personal-tttt")
+            ),
+            "{as_task:?}"
+        );
+        let text = fs::read_to_string(
+            directory
+                .path()
+                .join("tickets/personal/personal-pppp-plan.md"),
+        )
+        .expect("read the plan");
+        assert_eq!(text, plan);
+
+        let retitled = write_ticket(
+            &store,
+            rewrite(
+                &directory,
+                "personal-pppp",
+                plan,
+                "---\nkind: plan\ntitle: Renamed\n---\n",
+            ),
+            &WriteEffects::system(),
+        );
+
+        assert!(retitled.is_ok(), "{retitled:?}");
     }
 }

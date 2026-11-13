@@ -150,6 +150,51 @@ fn write_refuses_a_link_to_a_missing_ticket_and_keeps_the_file() {
 }
 
 #[test]
+fn write_refuses_a_plan_rewritten_as_a_slice_under_itself_and_keeps_the_file() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let shown = home.show_json(&plan);
+    let path = shown["path"].as_str().expect("show prints the path");
+    let before = std::fs::read(path).expect("read the plan file");
+
+    let run = write_document(
+        &home,
+        &plan,
+        &format!("---\nkind: slice\ntitle: Self parent\nparent: {plan}\n---\n"),
+        shown["hash"].as_str().expect("show prints the hash"),
+    );
+
+    assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
+    let error = &parse_json(&run.stderr)["error"];
+    assert_eq!(error["code"], json!("invalidTicket"));
+    assert_eq!(error["field"], json!("parent"));
+    assert_eq!(std::fs::read(path).expect("read the plan file"), before);
+}
+
+#[test]
+fn write_refuses_a_kind_that_its_children_cannot_sit_under_and_keeps_the_file() {
+    let home = Home::initialized();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    home.new_ticket(&["slice", "Lock the store", "--parent", &plan]);
+    let shown = home.show_json(&plan);
+    let path = shown["path"].as_str().expect("show prints the path");
+    let before = std::fs::read(path).expect("read the plan file");
+
+    let run = write_document(
+        &home,
+        &plan,
+        "---\nkind: task\ntitle: Move to tikk\n---\n",
+        shown["hash"].as_str().expect("show prints the hash"),
+    );
+
+    assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
+    let error = &parse_json(&run.stderr)["error"];
+    assert_eq!(error["code"], json!("invalidTicket"));
+    assert_eq!(error["field"], json!("kind"));
+    assert_eq!(std::fs::read(path).expect("read the plan file"), before);
+}
+
+#[test]
 fn write_without_a_hash_is_wrong_usage() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);
