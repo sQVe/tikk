@@ -151,3 +151,39 @@ fn problem_text(problem: &AttentionProblem) -> String {
         format!("problem {}: {place}: {message}", problem.code())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use tikk_core::{Attention, AttentionProblem, TicketId};
+
+    use super::attention_text;
+
+    #[test]
+    fn each_problem_is_one_line_with_its_code_place_and_message() {
+        let attention = Attention {
+            items: Vec::new(),
+            problems: vec![
+                AttentionProblem::TicketUnreadable {
+                    path: PathBuf::from("/s/tickets/p/p-9999.md"),
+                    message: "broken".to_owned(),
+                },
+                AttentionProblem::IdShared {
+                    id: TicketId::parse("p-3333").expect("a valid ID"),
+                    paths: vec![PathBuf::from("/s/a.md"), PathBuf::from("/s/b.md")],
+                },
+                AttentionProblem::SyncFailed {
+                    at: None,
+                    message: "Sync stopped.".to_owned(),
+                    files: Vec::new(),
+                },
+            ],
+        };
+
+        assert_eq!(
+            attention_text(&attention),
+            "problem parseError: /s/tickets/p/p-9999.md: broken\nproblem idShared: /s/a.md  /s/b.md: 2 files share the ID p-3333. Rename all but one.\nproblem syncFailed: Sync stopped."
+        );
+    }
+}

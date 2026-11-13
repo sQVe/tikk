@@ -119,3 +119,70 @@ fn scan_problems(scan: &TicketScan, facts: &FactScan) -> Vec<AttentionProblem> {
 
     tickets.chain(clashes).chain(lines).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::Path;
+
+    use super::{AttentionEffects, read_attention};
+    use crate::fact::{AttentionProblem, AttentionReason};
+    use crate::store::{Store, StoreError};
+
+    fn no_origin(_: &Path) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
+    fn store_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Store) {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        fs::create_dir(directory.path().join(".git")).expect("create the Git folder");
+        let folder = directory.path().join("tickets/personal");
+        fs::create_dir_all(&folder).expect("create the project folder");
+
+        for (name, text) in files {
+            fs::write(folder.join(name), text).expect("write a ticket");
+        }
+
+        let store = Store {
+            root: directory.path().to_path_buf(),
+        };
+
+        (directory, store)
+    }
+
+    fn effects() -> AttentionEffects {
+        AttentionEffects {
+            read_origin: no_origin,
+            ..AttentionEffects::system()
+        }
+    }
+
+    #[test]
+    fn a_loose_open_task_in_the_store_is_an_item() {
+        let (_directory, store) = store_with(&[(
+            "personal-tttt-renew.md",
+            "---\nkind: task\ntitle: Renew the domain\n---\n",
+        )]);
+
+        let attention = read_attention(&store, &effects()).expect("the store is read");
+
+        assert_eq!(attention.items.len(), 1, "{attention:?}");
+        assert_eq!(attention.items[0].id.to_string(), "personal-tttt");
+        assert_eq!(attention.items[0].reason, AttentionReason::LooseTask);
+    }
+
+    #[test]
+    fn a_ticket_file_that_does_not_parse_is_a_problem() {
+        let (_directory, store) = store_with(&[("personal-9999-broken.md", "kind: task\n")]);
+
+        let attention = read_attention(&store, &effects()).expect("the store is read");
+
+        assert!(
+            matches!(
+                attention.problems.as_slice(),
+                [AttentionProblem::TicketUnreadable { path, .. }] if path.ends_with("personal-9999-broken.md")
+            ),
+            "{attention:?}"
+        );
+    }
+}

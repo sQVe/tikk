@@ -113,8 +113,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{AskEffects, ask_question};
-    use crate::fact::{FactEvent, current_questions};
-    use crate::store::fact_files::read_facts;
+    use std::time::SystemTime;
+
+    use crate::fact::{AgentName, Claim, FactEvent, FactLine, Timestamp, current_questions};
+    use crate::store::fact_files::{append_fact, append_line, read_facts};
     use crate::store::identity::Identity;
     use crate::store::{MachineName, Store, StoreEffects, StoreError, init};
     use crate::ticket::TicketId;
@@ -222,6 +224,60 @@ mod tests {
 
         assert!(
             matches!(&error, StoreError::NoFreeItem { id } if id == "personal-tttt"),
+            "{error:?}"
+        );
+        assert_eq!(
+            read_facts(store.root())
+                .expect("read the facts")
+                .facts
+                .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn ask_by_another_agent_on_a_claimed_slice_is_refused_and_writes_nothing() {
+        let (directory, store) = store_with_task();
+        let folder = directory.path().join("tickets/personal");
+        fs::write(
+            folder.join("personal-pppp-plan.md"),
+            "---\nkind: plan\ntitle: Plan\n---\n",
+        )
+        .expect("write the plan");
+        fs::write(
+            folder.join("personal-kkkk-slice.md"),
+            "---\nkind: slice\ntitle: Slice\nparent: personal-pppp\ncriteria:\n  - id: s1\n    check: c\n    expected: e\n---\n",
+        )
+        .expect("write the slice");
+        let now = Timestamp::from_system_time(SystemTime::now());
+        let claim = Claim::starting(
+            AgentName::parse("manager").expect("a valid name"),
+            None,
+            None,
+            now,
+        );
+        let fact = FactLine {
+            ticket: id("personal-kkkk"),
+            at: now,
+            event: FactEvent::Claim(claim),
+        };
+        append_fact(directory.path(), &fact, append_line).expect("append the claim");
+        let other = Identity {
+            agent: AgentName::parse("other"),
+            ..Identity::default()
+        };
+
+        let error = ask_question(
+            &store,
+            &id("personal-kkkk"),
+            "Which crate?",
+            &other,
+            &AskEffects::system(),
+        )
+        .expect_err("another agent holds the slice");
+
+        assert!(
+            matches!(&error, StoreError::Claimed { agent, .. } if agent == "manager"),
             "{error:?}"
         );
         assert_eq!(
