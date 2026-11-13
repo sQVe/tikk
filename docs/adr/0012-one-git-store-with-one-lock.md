@@ -37,16 +37,37 @@ private GitHub repository.
   builds the store in a staging folder and renames it into place. When another `init` wins the
   rename, `init` checks the store that won and reports that the store exists.
 - Writes never commit. `tikk init` is the one exception: it makes the store's first commit, so the
-  store has a `main` branch from the start. One sync step fetches, then commits and merges under the lock, then pushes.
-  The network steps run outside the lock, because writers wait for the lock at most five seconds.
-  Each network step has a timeout, and a failed one leaves the sync to the next run.
-- The sync step is one function of the core crate, and `tikk sync` runs it. A write on a store with
-  an `origin` remote starts a detached `tikk sync` process, unless a live one is waiting. The
-  waiting process sleeps three seconds first, so a burst of writes shares one sync.
-- `facts/` merges with Git's `union` driver, so it never conflicts. tikk never rebases.
-- A conflict can occur only in `tickets/`, when two machines edited one ticket offline. tikk aborts
-  the merge, skips the push, stops the sync, and names the file. No merge is left in progress.
-- Hand edits are committed by sync only when the file parses and has not changed for two seconds.
+  store has a `main` branch from the start. `tikk init --remote <url>` clones the remote's `main`,
+  or creates the store and pushes `main` when the remote has no branches. It refuses a remote
+  whose `main` holds the folder `facts/<machine>/` of the default machine name unless `--machine`
+  is given, so two machines never write one fact folder.
+- One sync fetches, then commits and merges in one hold of the exclusive lock, then pushes. A read
+  command therefore never sees a half-merged store. The network steps run outside the lock,
+  because writers wait for the lock at most five seconds. Each network step stops after 30
+  seconds.
+- A failed fetch keeps the local commit and skips the merge and the push, so a stale `origin/main`
+  is never merged. A failed push leaves the next sync to push. A network failure is a result, not a
+  refusal: sync reports `fetched` or `pushed` as false and names the failure under `problems`.
+- Every read of sync returns an error when it fails, and sync finishes its reads before it changes
+  a file, the index, or `HEAD`. A failed read never counts as "nothing there".
+- Sync is one function of the core crate that returns its result. `tikk sync` runs it, and no
+  command starts a sync in the background.
+- `facts/` merges with Git's `union` driver through a normal merge, and facts are append-only. Sync
+  refuses a fact file whose committed lines changed or were removed, and changes nothing.
+- tikk never rebases, stashes, resets, or drops local content to make a merge work. A merge that a
+  pending or changed file would block is refused, and so is a store with a merge in progress or
+  with staged changes that sync did not make.
+- Any unmerged path is a conflict. tikk aborts the merge, skips the push, stops the sync with the
+  code `conflict`, and names each file. No merge is left in progress, and each file keeps the
+  local text.
+- A changed ticket file is committed only when it parses and has not changed for two seconds.
+  Sync waits outside the lock for the rest of the two seconds, then checks once more under the
+  lock. A file that changed again stays pending as `settling`, and one that does not parse stays
+  pending as `unparsed`. Other files outside `facts/` follow the same two-second rule. Sync stages
+  the bytes it checked, not a later read of the file.
+- Sync saves its last result, or its error, in `.git/tikk-sync.json`, outside the synced content.
+- The Git calls of sync and `init --remote` run with no hook, no signing, no terminal prompt, no
+  autostash, and no global or system Git config, with the fixed identity `tikk`.
 
 ## Consequences
 
@@ -60,6 +81,9 @@ private GitHub repository.
 - A store lock serializes writes from all agents on a machine.
 - Facts are permanent in Git, so a leaked secret needs a history rewrite.
 - Two offline machines can claim the same slice. tikk does not report that clash yet.
+- Sync ignores the global Git config, so a credential helper set there does not apply. A remote
+  must authenticate without it, as an SSH remote with a key does.
+- A conflict stops every sync until the user merges `origin/main` by hand.
 
 ## Alternatives considered
 
@@ -77,6 +101,13 @@ Let each write commit. Rejected because many agents committing at once jam Git.
 Create a lock file that holds the writer's PID, and clear it when that process is gone. Rejected
 because a crash leaves the file behind, and the next command must guess whether the PID still
 belongs to tikk. The operating system lock ends with its process.
+
+### Sync in the background after each write
+
+Let each write start a detached `tikk sync`, and let a burst of writes share one. Rejected because
+a background process fails where no caller sees it, and a write would start network work its
+caller did not ask for. An explicit sync returns its result, so the caller sees each conflict and
+network failure.
 
 ### Rebase on sync
 
