@@ -144,8 +144,10 @@ fn usage_response(json: bool, error: &clap::Error) -> Response {
 
     let message = rendered
         .lines()
-        .next()
-        .unwrap_or_default()
+        .take_while(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join(" ")
         .trim_start_matches("error: ")
         .to_owned();
     let failure = Failure {

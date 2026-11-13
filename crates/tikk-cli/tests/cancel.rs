@@ -32,9 +32,11 @@ fn cancel_without_a_reason_exits_with_2() {
     let run = home.tikk(&["cancel", &task, "--json"]);
 
     assert_eq!(run.exit_code, 2, "stdout: {}", run.stdout);
+    let error = &parse_json(&run.stderr)["error"];
+    assert_eq!(error["code"], json!("invalidArguments"));
     assert_eq!(
-        parse_json(&run.stderr)["error"]["code"],
-        json!("invalidArguments")
+        error["message"],
+        json!("the following required arguments were not provided: --reason <TEXT>")
     );
     assert_eq!(home.show_json(&task)["status"], json!("open"));
 }
