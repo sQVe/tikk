@@ -54,6 +54,11 @@ pub fn write_ticket(
 
     check_written_links(&request.id, &document.fields, &scan)?;
 
+    // A hand-formatted file keeps its form when the caller sends its text back unchanged.
+    if text == current.text {
+        return Ok(current.clone());
+    }
+
     replace_ticket(current, document, effects)
 }
 

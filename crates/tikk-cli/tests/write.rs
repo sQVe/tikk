@@ -195,6 +195,35 @@ fn write_refuses_a_kind_that_its_children_cannot_sit_under_and_keeps_the_file() 
 }
 
 #[test]
+fn write_of_an_unchanged_hand_formatted_document_keeps_the_file_bytes() {
+    let home = Home::initialized();
+    let id = home.new_ticket(&["task", "Renew the domain"]);
+    let path = home.show_json(&id)["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    let hand_edit = "---\n# renew by May\ntitle: Renew the domain\nkind: task\n---\nNotes.\n";
+    std::fs::write(&path, hand_edit).expect("edit the ticket file by hand");
+    let shown = home.show_json(&id);
+
+    let run = write_document(
+        &home,
+        &id,
+        shown["document"]
+            .as_str()
+            .expect("show prints the document"),
+        shown["hash"].as_str().expect("show prints the hash"),
+    );
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("read the ticket file"),
+        hand_edit
+    );
+    assert_eq!(parse_json(&run.stdout)["hash"], shown["hash"]);
+}
+
+#[test]
 fn write_without_a_hash_is_wrong_usage() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);
