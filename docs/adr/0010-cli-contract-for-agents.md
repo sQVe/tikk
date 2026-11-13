@@ -48,9 +48,11 @@ both.
   `$EDITOR` on the ticket file. Neither edits ticket text itself.
 - An agent changes a ticket with `tikk write <id> --file <path> --hash <hash>`. It takes the
   `document` and `hash` of `tikk show --json`, changes that text, and writes it back. tikk refuses
-  the write with `changedOnDisk` when the file no longer has that hash, so an agent never
-  overwrites an edit it did not read. An agent never builds the front matter from other JSON
-  fields.
+  the write with `changedOnDisk` when the file no longer has that hash. A write therefore never
+  replaces a change made by another tikk command, or a change saved before tikk checks the hash.
+  A program outside tikk, such as an editor, takes no lock, and a rename cannot compare and swap.
+  So a save by such a program in the instant between the check and the rename can still be lost.
+  An agent never builds the front matter from other JSON fields.
 - `tikk open` starts the desktop app.
 
 ## Consequences

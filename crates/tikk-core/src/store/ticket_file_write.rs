@@ -10,17 +10,37 @@ pub(crate) fn replace_ticket_file(
     text: &str,
     expected_hash: &str,
 ) -> Result<(), StoreError> {
+    replace_ticket_file_with(path, text, expected_hash, |path| fs::read(path))
+}
+
+fn replace_ticket_file_with(
+    path: &Path,
+    text: &str,
+    expected_hash: &str,
+    read_current: fn(&Path) -> io::Result<Vec<u8>>,
+) -> Result<(), StoreError> {
     let folder = path.parent().unwrap_or(Path::new("."));
     let mut temporary = tempfile::NamedTempFile::new_in(folder)
         .map_err(|source| io_error("create", folder, source))?;
     let temporary_path = temporary.path().to_path_buf();
 
+    let permissions = match fs::metadata(path) {
+        Ok(metadata) => metadata.permissions(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Err(changed_on_disk(path));
+        }
+        Err(source) => return Err(io_error("check", path, source)),
+    };
+
     temporary
         .write_all(text.as_bytes())
+        .and_then(|()| temporary.as_file().set_permissions(permissions))
         .and_then(|()| temporary.as_file().sync_all())
         .map_err(|source| io_error("write", &temporary_path, source))?;
 
-    let current = match fs::read(path) {
+    // Only the rename follows this check. A program outside tikk that saves the file in between
+    // can still lose its save, since a rename cannot compare and swap.
+    let current = match read_current(path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return Err(changed_on_disk(path));
@@ -32,12 +52,6 @@ pub(crate) fn replace_ticket_file(
         return Err(changed_on_disk(path));
     }
 
-    let permissions = fs::metadata(path)
-        .map_err(|source| io_error("check", path, source))?
-        .permissions();
-
-    fs::set_permissions(&temporary_path, permissions)
-        .map_err(|source| io_error("write", &temporary_path, source))?;
     temporary
         .persist(path)
         .map_err(|error| io_error("rename", path, error.error))?;
@@ -56,7 +70,11 @@ mod tests {
     use std::fs;
     use std::os::unix::fs::PermissionsExt as _;
 
-    use super::replace_ticket_file;
+    use std::cell::RefCell;
+    use std::io;
+    use std::path::Path;
+
+    use super::{replace_ticket_file, replace_ticket_file_with};
     use crate::store::StoreError;
     use crate::store::ticket_files::sha256_hex;
 
@@ -75,6 +93,72 @@ mod tests {
         names.sort();
 
         names
+    }
+
+    thread_local! {
+        static AT_CHECK: RefCell<Vec<(String, u32)>> = const { RefCell::new(Vec::new()) };
+    }
+
+    // Records the text and mode of every other file in the folder when the final check reads.
+    fn read_after_recording_the_temporary_file(path: &Path) -> io::Result<Vec<u8>> {
+        let folder = path.parent().expect("the ticket is in a folder");
+
+        for entry in fs::read_dir(folder)? {
+            let other = entry?.path();
+
+            if other != path {
+                let text = fs::read_to_string(&other)?;
+                let mode = fs::metadata(&other)?.permissions().mode() & 0o777;
+
+                AT_CHECK.with(|seen| seen.borrow_mut().push((text, mode)));
+            }
+        }
+
+        fs::read(path)
+    }
+
+    #[test]
+    fn the_temporary_file_is_complete_before_the_final_hash_check() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let path = directory.path().join("personal-abcd-a.md");
+        fs::write(&path, "old").expect("write the ticket");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("set the mode");
+
+        replace_ticket_file_with(
+            &path,
+            "new",
+            &sha256_hex(b"old"),
+            read_after_recording_the_temporary_file,
+        )
+        .expect("the hash matches");
+
+        assert_eq!(
+            AT_CHECK.with(|seen| seen.take()),
+            [("new".to_owned(), 0o644)]
+        );
+        assert_eq!(fs::read_to_string(&path).expect("read the ticket"), "new");
+    }
+
+    fn read_after_a_delete(_: &Path) -> io::Result<Vec<u8>> {
+        Err(io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    #[test]
+    fn replace_refuses_a_file_deleted_before_the_final_check_and_writes_nothing() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let path = directory.path().join("personal-abcd-a.md");
+        fs::write(&path, "old").expect("write the ticket");
+
+        let error =
+            replace_ticket_file_with(&path, "new", &sha256_hex(b"old"), read_after_a_delete)
+                .expect_err("the file is gone at the check");
+
+        assert!(
+            matches!(&error, StoreError::ChangedOnDisk { path: found } if *found == path),
+            "{error:?}"
+        );
+        assert_eq!(fs::read_to_string(&path).expect("read the ticket"), "old");
+        assert_eq!(folder_names(directory.path()), ["personal-abcd-a.md"]);
     }
 
     #[test]
