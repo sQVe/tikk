@@ -88,8 +88,6 @@ pub(crate) fn read_plan(
 ) -> Result<SyncPlan, StoreError> {
     ensure_on_main(root, effects.run_git)?;
 
-    let head = read_head(root, effects.run_git)?;
-
     if (effects.read_entry)(&root.join(MERGE_HEAD))?.is_some() {
         return Err(StoreError::MergeInProgress {
             store: root.to_path_buf(),
@@ -108,7 +106,7 @@ pub(crate) fn read_plan(
     let now = (effects.now)();
 
     for change in changes {
-        plan_change(root, &head, change, now, effects, &mut plan)?;
+        plan_change(root, change, now, effects, &mut plan)?;
     }
 
     Ok(plan)
@@ -181,15 +179,6 @@ fn ensure_on_main(
     }
 
     Ok(())
-}
-
-fn read_head(
-    root: &Path,
-    run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
-) -> Result<String, StoreError> {
-    let output = run_git(root, &["rev-parse", "--verify", "HEAD^{commit}"])?;
-
-    Ok(String::from_utf8_lossy(&output).trim().to_owned())
 }
 
 /// The fetched `main` when it has commits that `HEAD` lacks. `for-each-ref` prints nothing when the
@@ -273,7 +262,6 @@ fn read_changes(
 
 fn plan_change(
     root: &Path,
-    head: &str,
     change: Change,
     now: SystemTime,
     effects: &SyncEffects,
@@ -302,7 +290,7 @@ fn plan_change(
     };
 
     if is_fact(&path) {
-        return plan_fact(root, head, path, tracked, effects, plan);
+        return plan_fact(root, path, tracked, effects, plan);
     }
 
     let Some(entry) = (effects.read_entry)(&root.join(&path))? else {
@@ -326,10 +314,10 @@ fn plan_change(
     Ok(())
 }
 
-/// Facts are append-only, so the committed bytes of a fact file must stay its start.
+/// Facts are append-only, so the committed bytes of a fact file must stay its start. The index
+/// holds no staged change here, so `HEAD` is the committed version.
 fn plan_fact(
     root: &Path,
-    head: &str,
     path: String,
     tracked: bool,
     effects: &SyncEffects,
@@ -345,7 +333,7 @@ fn plan_fact(
     };
 
     if tracked {
-        let committed = (effects.run_git)(root, &["cat-file", "blob", &format!("{head}:{path}")])?;
+        let committed = (effects.run_git)(root, &["cat-file", "blob", &format!("HEAD:{path}")])?;
 
         if entry.kind != FileKind::File || !entry.bytes.starts_with(&committed) {
             return Err(rewritten());
@@ -392,7 +380,7 @@ fn parses(root: &Path, path: &str, entry: &FileEntry) -> bool {
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use super::{Change, is_fact, is_ticket_file, read_changes};
+    use super::{Change, is_fact, is_ticket_file, read_changes, read_entry};
     use crate::store::StoreError;
 
     fn status_output(_: &Path, _: &[&str]) -> Result<Vec<u8>, StoreError> {
@@ -415,6 +403,28 @@ mod tests {
                 Change::Deleted("tickets/personal/gone.md".to_owned()),
                 Change::NameNotUtf8("odd-\u{fffd}".to_owned()),
             ]
+        );
+    }
+
+    #[test]
+    fn read_entry_is_none_for_a_missing_file_and_an_error_when_it_cannot_check() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let file = directory.path().join("file");
+        std::fs::write(&file, "text").expect("write a file");
+
+        let missing = read_entry(&directory.path().join("missing"));
+        let below_a_file = read_entry(&file.join("inside"));
+
+        assert!(matches!(missing, Ok(None)), "{missing:?}");
+        assert!(
+            matches!(
+                below_a_file,
+                Err(StoreError::Io {
+                    action: "check",
+                    ..
+                })
+            ),
+            "{below_a_file:?}"
         );
     }
 

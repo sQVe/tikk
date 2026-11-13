@@ -10,7 +10,8 @@ const COMMIT_MESSAGE: &str = "Sync the tikk store";
 const GIT_FOLDER: &str = ".git";
 
 /// Stages the checked bytes of the plan, not the files as they are now, and commits them. A plan
-/// with nothing to commit changes nothing.
+/// with nothing to commit changes nothing. Sync refuses an index with staged changes before this
+/// runs, so when staging or the commit fails, every staged path is its own, and it unstages them.
 pub(crate) fn commit_plan(
     root: &Path,
     plan: &SyncPlan,
@@ -20,6 +21,29 @@ pub(crate) fn commit_plan(
         return Ok(());
     }
 
+    let Err(cause) = stage_and_commit(root, plan, run_git) else {
+        return Ok(());
+    };
+    let paths = plan.committed_paths();
+    let mut arguments = vec!["--literal-pathspecs", "reset", "--quiet", "--"];
+
+    arguments.extend(paths.iter().map(String::as_str));
+
+    match run_git(root, &arguments) {
+        Ok(_) => Err(cause),
+        Err(unstage) => Err(StoreError::UnstageFailed {
+            store: root.to_path_buf(),
+            cause: Box::new(cause),
+            unstage: Box::new(unstage),
+        }),
+    }
+}
+
+fn stage_and_commit(
+    root: &Path,
+    plan: &SyncPlan,
+    run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
+) -> Result<(), StoreError> {
     let mut entries = Vec::new();
 
     for file in &plan.stage {

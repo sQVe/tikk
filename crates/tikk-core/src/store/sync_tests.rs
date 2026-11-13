@@ -494,7 +494,7 @@ fn a_pending_file_that_blocks_the_merge_is_refused_and_nothing_is_pushed() {
     let error = sync(&desktop, &effects()).expect_err("Git refuses the merge");
 
     assert!(
-        matches!(error, StoreError::MergeBlocked { .. }),
+        matches!(&error, StoreError::MergeBlocked { message } if message.contains("would be overwritten by merge")),
         "{error:?}"
     );
     assert!(!desktop.join(".git/MERGE_HEAD").exists());
@@ -600,6 +600,162 @@ fn a_result_that_cannot_be_saved_is_a_problem_or_joins_the_error() {
         matches!(&error, StoreError::ResultNotSaved { error, save }
             if matches!(**error, StoreError::StagedChanges { .. })
                 && matches!(**save, StoreError::Io { action: "replace", .. })),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn a_deleted_ticket_is_committed_as_a_deletion() {
+    let machines = machines_with_work();
+    let desktop = machines.desktop();
+    fs::remove_file(desktop.join(TICKET)).expect("delete a ticket by hand");
+
+    let outcome = sync(&desktop, &effects()).expect("sync runs");
+
+    assert!(
+        outcome.committed_paths.contains(&TICKET.to_owned()),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        git(&desktop, &["ls-tree", "--name-only", "HEAD", "--", TICKET]),
+        ""
+    );
+    assert_eq!(git(&desktop, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn a_store_on_another_branch_is_refused_and_nothing_changes() {
+    let machines = machines_with_work();
+    let desktop = machines.desktop();
+    git(&desktop, &["switch", "--quiet", "--create", "work"]);
+    write(
+        &desktop,
+        "tickets/personal/personal-wxyz-new.md",
+        TICKET_TEXT,
+    );
+    let before = snapshot(&desktop);
+
+    let error = sync(&desktop, &effects()).expect_err("a store off main is refused");
+
+    assert!(
+        matches!(&error, StoreError::NotOnMain { branch, .. } if branch == "refs/heads/work"),
+        "{error:?}"
+    );
+    assert_eq!(snapshot(&desktop), before);
+}
+
+#[test]
+fn a_fact_line_changed_in_place_makes_sync_refuse_and_change_nothing() {
+    let machines = machines_with_work();
+    let desktop = machines.desktop();
+    write(
+        &desktop,
+        FACT,
+        &FACT_LINE.replace("personal-abcd", "personal-zzzz"),
+    );
+    let before = snapshot(&desktop);
+
+    let error = sync(&desktop, &effects()).expect_err("a rewritten line is refused");
+
+    assert!(
+        matches!(&error, StoreError::FactRewritten { path } if path.ends_with(FACT)),
+        "{error:?}"
+    );
+    assert_eq!(snapshot(&desktop), before);
+}
+
+#[test]
+fn the_outcome_names_each_reason_and_step_in_camel_case() {
+    let pending = |path: &str, reason| PendingFile {
+        path: path.to_owned(),
+        reason,
+    };
+    let problem = |step| super::SyncProblem {
+        step,
+        message: "failed".to_owned(),
+    };
+    let outcome = SyncOutcome {
+        committed: false,
+        committed_paths: Vec::new(),
+        pending: vec![
+            pending("a", PendingReason::Settling),
+            pending("b", PendingReason::Unparsed),
+            pending("c", PendingReason::NameNotUtf8),
+        ],
+        fetched: false,
+        merged: false,
+        pushed: false,
+        problems: vec![
+            problem(SyncStep::Fetch),
+            problem(SyncStep::Push),
+            problem(SyncStep::Save),
+        ],
+    };
+
+    let json = serde_json::to_value(&outcome).expect("the outcome serializes");
+
+    assert_eq!(
+        json["pending"],
+        serde_json::json!([
+            { "path": "a", "reason": "settling" },
+            { "path": "b", "reason": "unparsed" },
+            { "path": "c", "reason": "nameNotUtf8" },
+        ])
+    );
+    assert_eq!(
+        json["problems"],
+        serde_json::json!([
+            { "step": "fetch", "message": "failed" },
+            { "step": "push", "message": "failed" },
+            { "step": "save", "message": "failed" },
+        ])
+    );
+}
+
+#[test]
+fn a_failed_commit_unstages_what_sync_staged_and_the_next_sync_works() {
+    let machines = machines_with_work();
+    let desktop = machines.desktop();
+    write(
+        &desktop,
+        "tickets/personal/personal-wxyz-new.md",
+        TICKET_TEXT,
+    );
+    fs::remove_file(desktop.join(TICKET)).expect("delete a ticket by hand");
+    let before = snapshot(&desktop);
+    FAIL_GIT.set(vec!["commit"]);
+
+    let error = sync(&desktop, &effects()).expect_err("the commit fails");
+    let after_failure = snapshot(&desktop);
+    FAIL_GIT.set(Vec::new());
+    let next = sync(&desktop, &effects());
+
+    assert!(
+        matches!(&error, StoreError::Git { arguments, .. } if arguments.starts_with("commit")),
+        "{error:?}"
+    );
+    assert_eq!(after_failure, before);
+    let next = next.expect("the next sync works with no reset by hand");
+    assert!(next.committed && next.merged, "{next:?}");
+}
+
+#[test]
+fn a_failed_unstage_after_a_failed_commit_reports_both_errors() {
+    let machines = machines_with_work();
+    let desktop = machines.desktop();
+    write(
+        &desktop,
+        "tickets/personal/personal-wxyz-new.md",
+        TICKET_TEXT,
+    );
+    FAIL_GIT.set(vec!["commit", "--literal-pathspecs reset"]);
+
+    let error = sync(&desktop, &effects()).expect_err("the commit and the unstage fail");
+
+    assert!(
+        matches!(&error, StoreError::UnstageFailed { cause, unstage, .. }
+            if matches!(**cause, StoreError::Git { ref arguments, .. } if arguments.starts_with("commit"))
+                && matches!(**unstage, StoreError::Git { ref arguments, .. } if arguments.starts_with("--literal-pathspecs reset"))),
         "{error:?}"
     );
 }

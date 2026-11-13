@@ -165,6 +165,12 @@ pub enum StoreError {
         "Git refused to merge the remote, so nothing was merged: {message}. Fix or wait for the files it names, then run `tikk sync` again."
     )]
     MergeBlocked { message: String },
+    #[error("{cause} Then unstaging the files sync staged failed: {unstage}. Run `git -C {} reset -q` before the next `tikk sync`.", store.display())]
+    UnstageFailed {
+        store: PathBuf,
+        cause: Box<StoreError>,
+        unstage: Box<StoreError>,
+    },
     #[error("A merge is in progress in {}. Finish it with `git commit`, or stop it with `git merge --abort`, then run `tikk sync` again.", store.display())]
     MergeInProgress { store: PathBuf },
     #[error("The Git index of {} has staged changes that sync did not make: {}. Commit them, or unstage them with `git -C {} reset -q`, then run `tikk sync` again.", store.display(), describe_paths(paths), store.display())]
@@ -298,6 +304,21 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{StoreError, open, store_path};
+
+    #[test]
+    fn a_conflict_names_each_file() {
+        let error = StoreError::Conflict {
+            store: PathBuf::from("/store"),
+            files: vec![PathBuf::from("tickets/a.md"), PathBuf::from("tickets/b.md")],
+        };
+
+        assert!(
+            error
+                .to_string()
+                .starts_with("Sync stopped: tickets/a.md, tickets/b.md changed both here"),
+            "{error}"
+        );
+    }
 
     #[test]
     fn open_reports_not_initialized_for_a_missing_store() {

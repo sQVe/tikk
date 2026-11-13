@@ -36,6 +36,7 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::ConflictsUnreadable { .. } => ("conflictsUnreadable", Exit::Refused),
         StoreError::MergeAbortFailed { .. } => ("mergeAbortFailed", Exit::Refused),
         StoreError::MergeBlocked { .. } => ("mergeBlocked", Exit::Refused),
+        StoreError::UnstageFailed { .. } => ("unstageFailed", Exit::Refused),
         StoreError::MergeInProgress { .. } => ("mergeInProgress", Exit::Refused),
         StoreError::StagedChanges { .. } => ("stagedChanges", Exit::Refused),
         StoreError::NotOnMain { .. } => ("notOnMain", Exit::Refused),
@@ -354,6 +355,15 @@ mod tests {
                     abort: Box::new(git_failure("merge --abort")),
                 },
                 "mergeAbortFailed",
+                Exit::Refused,
+            ),
+            (
+                StoreError::UnstageFailed {
+                    store: PathBuf::from("/tmp/store"),
+                    cause: Box::new(git_failure("commit")),
+                    unstage: Box::new(git_failure("reset")),
+                },
+                "unstageFailed",
                 Exit::Refused,
             ),
             (

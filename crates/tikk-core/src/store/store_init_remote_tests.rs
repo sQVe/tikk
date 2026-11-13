@@ -280,3 +280,20 @@ fn an_existing_store_is_reported_and_not_attached() {
         "the remote got a branch"
     );
 }
+
+#[test]
+fn a_folder_with_other_files_is_refused_before_the_remote_is_touched() {
+    let setup = Setup::new();
+    fs::create_dir_all(setup.store()).expect("create the store folder");
+    fs::write(setup.store().join("notes.txt"), "mine\n").expect("write a file");
+
+    let error = init_from_remote(&setup.store(), &setup.remote(), None, &effects())
+        .expect_err("the folder holds other files");
+
+    assert!(
+        matches!(error, StoreError::FolderNotEmpty { .. }),
+        "{error:?}"
+    );
+    assert_eq!(git(Path::new(&setup.remote()), &["for-each-ref"]), "");
+    assert_eq!(setup.leftovers(), ["store"]);
+}
