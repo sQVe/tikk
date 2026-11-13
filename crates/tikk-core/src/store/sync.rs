@@ -209,6 +209,7 @@ fn run_sync(root: &Path, effects: &SyncEffects) -> Result<SyncOutcome, StoreErro
     let (plan, merged, clashes) = {
         let _lock = (effects.lock_store)(root, LockAccess::Exclusive)?;
         let plan = read_plan(root, fetched, effects)?;
+        let scanned = read_clashes(root)?;
 
         commit_plan(root, &plan, effects.run_git)?;
 
@@ -220,8 +221,13 @@ fn run_sync(root: &Path, effects: &SyncEffects) -> Result<SyncOutcome, StoreErro
             }
             None => false,
         };
+        let clashes = if merged {
+            merged_clashes(root, scanned, &mut problems)
+        } else {
+            scanned
+        };
 
-        (plan, merged, read_clashes(root)?)
+        (plan, merged, clashes)
     };
     let pushed = fetched && push(root, effects, &mut problems);
 
@@ -281,6 +287,23 @@ pub(crate) fn read_clashes(root: &Path) -> Result<Vec<IdClash>, StoreError> {
     let scan = read_tickets(root)?;
 
     Ok(relative_clashes(root, &scan))
+}
+
+// The store has changed by now, so a failed scan is a problem, and the clashes found before the
+// merge stand.
+fn merged_clashes(
+    root: &Path,
+    before: Vec<IdClash>,
+    problems: &mut Vec<SyncProblem>,
+) -> Vec<IdClash> {
+    match read_clashes(root) {
+        Ok(clashes) => clashes,
+        Err(error) => {
+            problems.push(SyncProblem::new(SyncStep::Merge, error.to_string()));
+
+            before
+        }
+    }
 }
 
 pub(crate) fn relative_clashes(root: &Path, scan: &TicketScan) -> Vec<IdClash> {

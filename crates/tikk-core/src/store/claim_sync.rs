@@ -58,12 +58,14 @@ fn run_steps<T>(
     let fetched = fetch_origin(root, origin.as_deref(), effects, &mut problems);
     let lock = (effects.lock_store)(root, LockAccess::Exclusive)?;
     let fetched_commit = read_plan(root, fetched, effects)?.fetched;
+    let scanned = read_tickets(root)?;
     let merged = match &fetched_commit {
         Some(commit) => merge_or_note(root, commit, effects, &mut problems)?,
         None => false,
     };
     let merge_failed = fetched_commit.is_some() && !merged;
-    let scan = read_tickets(root)?;
+    // The check needs the merged tickets, so a failed scan after the merge fails the change.
+    let scan = if merged { read_tickets(root)? } else { scanned };
     let clashes = relative_clashes(root, &scan);
     let changed = match change(&scan) {
         Ok(changed) => changed,

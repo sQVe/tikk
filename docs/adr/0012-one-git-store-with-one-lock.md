@@ -64,7 +64,11 @@ private GitHub repository.
 - Every read of sync returns an error when it fails, and sync finishes its reads before it changes
   a file, the index, or `HEAD`. A failed read never counts as "nothing there". A claim and a release
   finish the same reads before their merge, and read the changed files again after the append, so
-  the commit holds the new fact.
+  the commit holds the new fact. These reads include the scan of the tickets for ID clashes. After a
+  merge, sync scans the tickets again, so the clash list holds the merged tickets. The store has
+  changed by then, so a failed second scan is a problem of the `merge` step, not a refusal, and sync
+  still pushes. A claim or a release needs the merged tickets for its check, so a failed second scan
+  fails it before the append.
 - Sync is one function of the core crate that returns its result. `tikk sync`, `tikk claim`, and
   `tikk release` run its steps. No other command syncs, and no command starts a sync in the
   background or leaves a process running after it exits. Other writes reach the remote at the next

@@ -322,7 +322,15 @@ fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>
             continue;
         }
 
-        if path.is_dir() {
+        if path.is_symlink() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("inside the store")
+                .to_owned();
+            let target = fs::read_link(&path).expect("read a symlink");
+
+            files.push((relative, target.into_os_string().into_encoded_bytes()));
+        } else if path.is_dir() {
             collect_files(root, &path, files);
         } else {
             let relative = path
@@ -398,4 +406,61 @@ fn a_claim_whose_changed_file_read_fails_is_refused_and_changes_nothing() {
         saved_result(&directory)["error"].is_string(),
         "the error is saved as the last sync result"
     );
+}
+
+fn store_on_remote(remote: &Path, machine: &str) -> TempDir {
+    let directory = tempfile::tempdir().expect("create a temporary directory");
+    init_from_remote(
+        directory.path(),
+        remote.to_str().expect("a UTF-8 path"),
+        Some(MachineName::parse(machine).expect("a valid machine name")),
+        &RemoteInitEffects::system(),
+    )
+    .expect("init from the remote");
+
+    directory
+}
+
+fn commit_and_push(root: &Path, message: &str) {
+    git_text(root, &["add", "--all"]);
+    git_text(root, &["commit", "--quiet", "--message", message]);
+    git_text(root, &["push", "--quiet", "origin", "main"]);
+}
+
+#[test]
+fn a_claim_whose_ticket_scan_fails_is_refused_before_the_merge_and_changes_nothing() {
+    let remote = tempfile::tempdir().expect("create the remote folder");
+    run_store_git(
+        remote.path(),
+        &["init", "--quiet", "--bare", "--initial-branch=main"],
+    )
+    .expect("create the bare remote");
+    let (laptop, _laptop_store) = with_slice(store_on_remote(remote.path(), "laptop"));
+    commit_and_push(laptop.path(), "Add the slice");
+    let desktop = store_on_remote(remote.path(), "desktop");
+    fs::write(
+        laptop.path().join("tickets/personal/personal-tttt-task.md"),
+        "---\nkind: task\ntitle: Task\n---\n",
+    )
+    .expect("write a task on the laptop");
+    commit_and_push(laptop.path(), "Add a task");
+    std::os::unix::fs::symlink(
+        "missing.md",
+        desktop
+            .path()
+            .join("tickets/personal/personal-zzzz-link.md"),
+    )
+    .expect("leave a dangling ticket symlink");
+    let store = Store {
+        root: desktop.path().to_path_buf(),
+    };
+    let before = store_state(&desktop);
+
+    let result = claim_slice(&store, &slice(), &manager(), &ClaimEffects::system());
+
+    assert!(
+        matches!(&result, Err(StoreError::Io { path, .. }) if path.ends_with("personal-zzzz-link.md")),
+        "{result:?}"
+    );
+    assert_eq!(store_state(&desktop), before, "no merge, fact, or commit");
 }
