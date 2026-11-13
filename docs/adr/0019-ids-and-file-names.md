@@ -23,8 +23,9 @@ never renames a ticket file or folder on its own, not even after an ID clash. An
 ticket files in one project with one ID, as a sync merge can bring. tikk reports the clash and
 renames nothing: `tikk sync` and `tikk ls` name the ID and both files. Until the user renames one
 file, and its folder if it has one, to a new ID, commands that append a fact for the ID refuse it
-with the `idShared` error and write nothing. That covers `claim`, `release`, and the lease renewal
-by `new`, `done`, and `cancel` on an instruction of the slice.
+with the `idShared` error and write nothing. That covers `claim`, `release`, `pr link`, and the
+lease renewal by `new`, `done`, and `cancel` on an instruction of the slice. `pr refresh` without a
+slice refuses before it runs `gh` when any slice it would read has a shared ID.
 
 Facts cannot tell which of the two tickets they belong to, so tikk derives no state from facts for
 a shared ID. `tikk show` of the ID refuses with `idShared` and names both files, and `tikk ready`

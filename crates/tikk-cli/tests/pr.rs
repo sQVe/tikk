@@ -290,6 +290,33 @@ fn pr_link_refuses_a_url_that_is_not_a_pr_and_a_ticket_that_is_not_a_slice() {
 }
 
 #[test]
+fn pr_refresh_of_all_refuses_a_linked_slice_whose_id_is_shared_before_gh_runs() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let healthy = linked_slice(&home, &gh, 7);
+    let shared = linked_slice(&home, &gh, 8);
+    let paths = home.share_id(&shared);
+    let calls = gh.calls();
+    let before = home.store_files();
+
+    let refresh = home.tikk_with_gh(&gh, None, &["pr", "refresh", "--json"]);
+
+    assert_eq!(refresh.exit_code, 1, "refresh: {}", refresh.stdout);
+    let error = &parse_json(&refresh.stderr)["error"];
+    assert_eq!(error["code"], json!("idShared"), "{error}");
+    assert_eq!(error["files"], json!(paths), "{error}");
+    assert!(
+        error["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&shared)),
+        "{error}"
+    );
+    assert_eq!(gh.calls(), calls, "the refusal runs no gh");
+    assert_eq!(home.store_files(), before, "the refusal writes nothing");
+    assert_ne!(healthy, shared);
+}
+
+#[test]
 fn pr_refresh_of_a_slice_without_a_pr_exits_with_not_linked() {
     let home = Home::initialized();
     let gh = FakeGh::new();

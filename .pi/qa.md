@@ -261,9 +261,10 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   `"clashes":[{"id":<id>,"paths":["tickets/<project>/<file>","tickets/<project>/<id>-copy.md"]}]`,
   and without `--json` as `idShared: <id>  <path>  <path>`. `tikk ls --json` lists it under
   `errors` as `{"code":"idShared","id":<id>,"paths":[...],"message":...}`, with absolute paths.
-  `tikk show <id> --json`, `tikk claim`, `tikk release`, and `TIKK_AGENT=<holder> tikk done` on an
-  instruction of the slice exit with 1 and print
-  `{"error":{"code":"idShared","files":[<path>,<path>],...}}`, and write nothing.
+  `tikk show <id> --json`, `tikk claim`, `tikk release`, `tikk pr link`, `tikk pr refresh`, and
+  `TIKK_AGENT=<holder> tikk done` on an instruction of the slice exit with 1 and print
+  `{"error":{"code":"idShared","files":[<path>,<path>],...}}`, and write nothing. For a linked
+  slice, `tikk pr refresh` with no slice refuses the same way before it runs `gh`.
   `tikk ready --json` lists each file of the slice as skipped with
   `{"reason":"idShared","paths":[...]}` and no `claimed` hold. After a rename of one file to a new
   ID, `tikk claim <id>` exits with 0.

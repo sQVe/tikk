@@ -7,7 +7,7 @@ use crate::store::pr_github::{PrFailure, read_pull_request};
 use crate::store::pr_link::{PrEffects, append_pr, check_linkable};
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::read_tickets;
-use crate::store::ticket_queries::{TicketIndex, TicketLookup};
+use crate::store::ticket_queries::{TicketIndex, TicketLookup, shared};
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, TicketId};
 
@@ -70,15 +70,32 @@ fn refresh_targets(
     }
 
     let index = TicketIndex::new(&scan);
-    let mut targets: Vec<(TicketId, PullRequest)> = prs
+    let mut linked: Vec<(TicketId, PullRequest)> = prs
         .into_iter()
-        .filter(|(id, shown)| !shown.observation.in_trunk && is_slice(&index, id))
+        .filter(|(_, shown)| !shown.observation.in_trunk)
         .map(|(id, shown)| (id, shown.observation.pull_request))
         .collect();
 
-    targets.sort();
+    linked.sort();
+    refuse_shared_ids(&index, linked.iter().map(|(id, _)| id))?;
+    linked.retain(|(id, _)| is_slice(&index, id));
 
-    Ok(targets)
+    Ok(linked)
+}
+
+// A slice that is missing or no longer a slice is skipped, but a shared ID is refused, since tikk
+// cannot tell which file the fact belongs to.
+fn refuse_shared_ids<'a>(
+    index: &TicketIndex<'_>,
+    slices: impl IntoIterator<Item = &'a TicketId>,
+) -> Result<(), StoreError> {
+    for slice in slices {
+        if let TicketLookup::Shared(paths) = index.look_up(slice) {
+            return Err(shared(slice, &paths));
+        }
+    }
+
+    Ok(())
 }
 
 fn append_observed(
@@ -95,6 +112,8 @@ fn append_observed(
     let index = TicketIndex::new(&scan);
     let current = current_prs(&read_facts(root)?.facts);
     let mut refreshed = Vec::new();
+
+    refuse_shared_ids(&index, observed.iter().map(|(slice, _)| slice))?;
 
     for (slice, observation) in observed {
         if !still_linked(&index, &current, &slice, &observation.pull_request) {
@@ -267,6 +286,28 @@ mod tests {
         assert_eq!(CALLS.with(|calls| calls.take()), Vec::<String>::new());
         assert_eq!(refreshed, Vec::new());
         assert_eq!(facts.len(), 2);
+    }
+
+    #[test]
+    fn refresh_returns_the_state_show_selects_when_a_weaker_read_follows_a_stronger_fact() {
+        let (directory, store) = store_with_slice();
+        let in_trunk = PrObservation {
+            state: PrState::Merged,
+            merge_commit: Some("merge".to_owned()),
+            in_trunk: true,
+            ..observation(7)
+        };
+        link_ticket(directory.path(), "personal-kkkk", in_trunk.clone());
+
+        let refreshed = refresh_prs(&store, Some(&id("personal-kkkk")), &open_effects())
+            .expect("the refresh runs");
+
+        let facts = read_facts(store.root()).expect("read the facts").facts;
+        CALLS.with(|calls| calls.take());
+        assert_eq!(facts.len(), 2);
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].pr.observation, in_trunk);
+        assert_eq!(refreshed[0].pr.checked_at, facts[1].at);
     }
 
     #[test]

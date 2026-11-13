@@ -233,7 +233,7 @@ fn classify<'a>(entries: &[TicketEntry<'a>]) -> TicketLookup<'a> {
     }
 }
 
-fn shared(id: &TicketId, paths: &[&Path]) -> StoreError {
+pub(crate) fn shared(id: &TicketId, paths: &[&Path]) -> StoreError {
     StoreError::IdShared {
         id: id.to_string(),
         paths: paths.iter().map(|path| path.to_path_buf()).collect(),
