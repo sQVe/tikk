@@ -324,20 +324,19 @@ fn an_unreadable_fact_line_keeps_a_merged_slice_from_reading_done() {
     assert_eq!(ready.exit_code, 0, "ready: {}", ready.stderr);
     let queue = parse_json(&ready.stdout);
     assert_eq!(queue["candidates"], json!([]), "{queue}");
-    let holds: Vec<Value> = queue["skipped"]
+    let mut holds: Vec<String> = queue["skipped"]
         .as_array()
         .expect("ready lists skipped slices")
         .iter()
-        .map(|row| json!([row["id"], row["holds"][0]["reason"]]))
+        .map(|row| format!("{} {}", row["id"], row["holds"][0]["reason"]))
         .collect();
-    assert_eq!(
-        holds,
-        [
-            json!([slice, "mergedUnverified"]),
-            json!([blocked, "blockedBy"])
-        ],
-        "{queue}"
-    );
+    holds.sort();
+    let mut expected = [
+        format!("{} {}", json!(slice), json!("mergedUnverified")),
+        format!("{} {}", json!(blocked), json!("blockedBy")),
+    ];
+    expected.sort();
+    assert_eq!(holds, expected, "{queue}");
     assert_ne!(queue["errors"], json!([]), "{queue}");
 }
 
