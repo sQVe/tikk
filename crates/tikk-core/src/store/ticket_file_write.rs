@@ -204,6 +204,21 @@ mod tests {
     }
 
     #[test]
+    fn replace_reports_a_mode_check_error_that_is_not_a_missing_file() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let path = directory.path().join("a".repeat(300));
+
+        let error = replace_ticket_file(&path, "new", &sha256_hex(b"old"))
+            .expect_err("the file name is too long");
+
+        assert!(
+            matches!(&error, StoreError::Io { action: "check", path: found, .. } if *found == path),
+            "{error:?}"
+        );
+        assert_eq!(folder_names(directory.path()), Vec::<String>::new());
+    }
+
+    #[test]
     fn replace_reports_a_read_error_that_is_not_a_missing_file() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         let path = directory.path().join("personal-abcd-a.md");

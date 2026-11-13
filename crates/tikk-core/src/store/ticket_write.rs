@@ -275,8 +275,10 @@ mod tests {
     fn write_checks_children_against_the_new_kind() {
         let plan = "---\nkind: plan\ntitle: Plan\n---\n";
         let task = "---\nkind: task\ntitle: Task\nparent: personal-pppp\n---\n";
+        let other_plan = "---\nkind: plan\ntitle: Other\n---\n";
         let (directory, store) = store_with(&[
             ("personal-pppp-plan.md", plan),
+            ("personal-qqqq-other.md", other_plan),
             ("personal-tttt-task.md", task),
         ]);
 
@@ -319,5 +321,13 @@ mod tests {
         );
 
         assert!(retitled.is_ok(), "{retitled:?}");
+
+        let child = write_ticket(
+            &store,
+            rewrite(&directory, "personal-tttt", task, task),
+            &WriteEffects::system(),
+        );
+
+        assert!(child.is_ok(), "{child:?}");
     }
 }
