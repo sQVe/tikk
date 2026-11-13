@@ -42,15 +42,7 @@ impl TicketId {
     }
 
     pub fn draw(project: &ProjectName, random: &[u8]) -> Option<Self> {
-        let alphabet = ID_ALPHABET.as_bytes();
-        let code: String = random
-            .iter()
-            .filter(|byte| **byte < UNBIASED_LIMIT)
-            .take(CODE_LENGTH)
-            .map(|byte| char::from(alphabet[usize::from(*byte) % alphabet.len()]))
-            .collect();
-
-        (code.len() == CODE_LENGTH).then(|| Self {
+        draw_code(random).map(|code| Self {
             project: project.clone(),
             code,
         })
@@ -86,7 +78,20 @@ impl fmt::Display for TicketId {
     }
 }
 
-fn is_code(code: &str) -> bool {
+// The 4 characters of a ticket ID's suffix, from unbiased random bytes.
+pub(crate) fn draw_code(random: &[u8]) -> Option<String> {
+    let alphabet = ID_ALPHABET.as_bytes();
+    let code: String = random
+        .iter()
+        .filter(|byte| **byte < UNBIASED_LIMIT)
+        .take(CODE_LENGTH)
+        .map(|byte| char::from(alphabet[usize::from(*byte) % alphabet.len()]))
+        .collect();
+
+    (code.len() == CODE_LENGTH).then_some(code)
+}
+
+pub(crate) fn is_code(code: &str) -> bool {
     code.len() == CODE_LENGTH
         && code
             .chars()

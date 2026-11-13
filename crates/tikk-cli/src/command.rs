@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use tikk_core::{
-    Kind, MachineName, ProjectName, PullRequest, RankPlace, Repository, Status, StoreError,
-    TicketId,
+    Kind, MachineName, ProjectName, PullRequest, QuestionItem, RankPlace, Repository, Status,
+    StoreError, TicketId,
 };
 
 #[derive(Debug, Parser)]
@@ -122,6 +122,28 @@ pub(crate) enum Command {
     /// Record a verdict for criteria of a slice, seen at a PR head. By the claim holder, it renews
     /// the lease. It runs no `gh`.
     Audit(AuditArguments),
+    /// Ask the user a question about a ticket, and print its item ID. By the claim holder, it
+    /// renews the lease.
+    Ask {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        /// The question.
+        #[arg(long, value_name = "TEXT", value_parser = parse_text)]
+        text: String,
+    },
+    /// Answer a question of a ticket. A later answer to the same item replaces it.
+    Answer {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        /// The item ID that `tikk ask` printed.
+        #[arg(value_name = "ITEM", value_parser = parse_item)]
+        item: QuestionItem,
+        /// The answer.
+        #[arg(long, value_name = "TEXT", value_parser = parse_text)]
+        text: String,
+    },
+    /// List what waits on the user, and the problems in the store. It runs no `gh` and no Git.
+    Needs,
     /// Record the PR of a slice, and read the state of linked PRs. Only these commands run `gh`.
     Pr {
         #[command(subcommand)]
@@ -276,6 +298,20 @@ fn parse_head(head: &str) -> Result<String, String> {
     }
 
     Ok(head.to_owned())
+}
+
+fn parse_text(text: &str) -> Result<String, String> {
+    if text.trim().is_empty() {
+        return Err("the text must not be blank".to_owned());
+    }
+
+    Ok(text.to_owned())
+}
+
+fn parse_item(item: &str) -> Result<QuestionItem, String> {
+    QuestionItem::parse(item).ok_or_else(|| {
+        format!("`{item}` is not an item ID; use 4 characters of 346789abcdefghijkmnpqrtwxyz")
+    })
 }
 
 fn parse_repository(repository: &str) -> Result<Repository, String> {

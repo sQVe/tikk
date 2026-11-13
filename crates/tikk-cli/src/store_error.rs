@@ -47,6 +47,8 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::MachineInUse { .. } => ("machineInUse", Exit::Refused),
         StoreError::Gh { .. } => ("ghError", Exit::Refused),
         StoreError::NotLinked { .. } => ("notLinked", Exit::Refused),
+        StoreError::UnknownQuestion { .. } => ("unknownQuestion", Exit::Refused),
+        StoreError::NoFreeItem { .. } => ("noFreeItem", Exit::Refused),
         StoreError::InvalidVerdicts { .. } => ("invalidArguments", Exit::WrongUsage),
         StoreError::UnknownCriterion { .. } => ("unknownCriterion", Exit::Refused),
         StoreError::NoRepository { .. } => ("noRepository", Exit::Refused),
@@ -456,6 +458,21 @@ mod tests {
                     id: "personal-abcd".to_owned(),
                 },
                 "notLinked",
+                Exit::Refused,
+            ),
+            (
+                StoreError::UnknownQuestion {
+                    id: "personal-abcd".to_owned(),
+                    item: "3333".to_owned(),
+                },
+                "unknownQuestion",
+                Exit::Refused,
+            ),
+            (
+                StoreError::NoFreeItem {
+                    id: "personal-abcd".to_owned(),
+                },
+                "noFreeItem",
                 Exit::Refused,
             ),
             (
