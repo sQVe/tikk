@@ -2,7 +2,8 @@
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
 `tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `block`, `unblock`,
-`move`, `rank`, `--help`, and `--version`, and `tikk-desktop` is a stub. A mock scene of the UI
+`move`, `rank`, `claim`, `release`, `ready`, `--help`, and `--version`, and `tikk-desktop` is a
+stub. A mock scene of the UI
 opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
 folder under `/tmp`.
 
@@ -40,11 +41,11 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
 A journey is one user's path through several commands. Each journey file lists its steps, and its
 test runs them against the built binary.
 
-| Journey                                                     | Goal                                                                      | Run it when the change touches                                          | Test                                                    |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output         | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
-| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, ticket validation                            | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
-| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
+| Journey                                                     | Goal                                                                      | Run it when the change touches                                                     | Test                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                    | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, `ready`, `claim`, `done`, ticket validation             | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
 
 ## Before a launch
 
@@ -101,11 +102,18 @@ Never:
 ### External programs
 
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
-`--parent` and `--project` starts `git config --get remote.origin.url` in the working directory. All
+`--parent` and `--project`, and `tikk ready` without them, start
+`git config --get remote.origin.url` in the working directory. All
 run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
 and its arguments. It runs the program with no shell, with those arguments and then the ticket file
 path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
 `noEditor`.
+
+### Identity
+
+`TIKK_AGENT` names the agent that runs a command, `TIKK_SESSION` its session, and
+`TIKK_SESSION_LOG` the path of the session's log. An empty value counts as unset. Without
+`TIKK_AGENT`, the caller is a person. Unset all three before a check that runs as a person.
 
 ### What to check
 
@@ -192,6 +200,39 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   `notSibling`, and the message starts with its ID. `tikk rank <id> --before <id>` or `--after <id>`
   with the ticket itself exits with 0 and leaves every file as it was. Without one of the four
   flags, or with two, it exits with 2.
+- `TIKK_AGENT=manager TIKK_SESSION=s-1 TIKK_SESSION_LOG=/tmp/log.jsonl target/debug/tikk claim
+  <slice> --json` on an open slice with a criterion exits with 0 and prints
+  `{"claim":{"agent":"manager","leaseEnd":...,"session":"s-1","sessionLog":"/tmp/log.jsonl","state":"claimed"},"id":...}`.
+  The `leaseEnd` is 4 hours after the claim, in UTC to the millisecond. The claim is one line in
+  `$TIKK_HOME/facts/<machine>/<yyyy-mm>.jsonl`, with the machine from `.git/tikk-machine`:
+  `{"v":1,"kind":"claim","ticket":...,"at":...,"agent":"manager",...}`. A second claim by the same
+  agent prints a later `leaseEnd`. The same command with another `TIKK_AGENT` exits with 1 and
+  `claimed`, and the message names the holder. Without `TIKK_AGENT`, it exits with 1 and
+  `noTikkAgent`. A slice with no criteria exits with 1 and the field `criteria`, a draft slice the
+  field `status`, and a task `wrongKind`.
+- `target/debug/tikk show <slice> --json` has `claim` with `agent`, `session`, `sessionLog`,
+  `leaseEnd`, and `state` (`claimed`, or `staleClaim` after the lease end), or `null`. Without
+  `--json`, it prints a `claim: claimed by <agent> until <leaseEnd>` line. A claim line with a past
+  `leaseEnd`, added to the fact file by hand, gives `staleClaim`, and another agent's claim then
+  exits with 0.
+- `TIKK_AGENT=manager target/debug/tikk done <instruction>` under the manager's claimed slice moves
+  the slice's `leaseEnd` forward, and so do `new` and `cancel` of its instructions. The same
+  commands without `TIKK_AGENT` leave it as it was. With another `TIKK_AGENT`, they exit with 1 and
+  `claimed`, and change no file.
+- `target/debug/tikk release <slice> --json` without `TIKK_AGENT` exits with 0, prints
+  `{"id":...,"released":true}`, and appends a `release` line with `"agent":null`. With another
+  agent's `TIKK_AGENT` on a live claim, it exits with 1 and `claimed`. On a slice with no claim, it
+  prints `"released":false` and writes nothing.
+- `target/debug/tikk ready --parent <plan> --json` exits with 0 and prints
+  `{"candidates":[...],"errors":[],"skipped":[...]}`. Candidates are open slices, in rank order,
+  then by ID, as `ls` rows. Each skipped row adds `holds`, such as
+  `{"reason":"blockedBy","blocker":<id>,"via":null,"state":"open"}`. A blocker of the plan has the
+  plan in `via`. A live claim gives `{"reason":"claimed","claim":{...}}`, and a draft slice
+  `{"reason":"draft"}`. A blocker that does not exist has the state `missing`. A fact line that
+  does not parse is in `errors` with its `path` and `line`. Without `--parent`, it lists the slices
+  of the project that `tikk new` would choose, such as `tikk` from the worktree root, and
+  `--project <p>` lists another project's. `--parent` with `--project` exits with 2. Without
+  `--json`, it prints the candidate rows, then `skipped: <row>` with each hold indented below it.
 - The store lock is the file `$TIKK_HOME/.git/tikk.lock`. While another process holds it, such as
   `flock $TIKK_HOME/.git/tikk.lock sleep 7`, `target/debug/tikk show <id> --json` waits five
   seconds, then exits with 1 and `locked`.
