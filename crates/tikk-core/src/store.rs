@@ -377,6 +377,24 @@ mod tests {
     }
 
     #[test]
+    fn no_repository_names_the_origin_it_read_and_the_flag_to_pass() {
+        let missing = StoreError::NoRepository { origin: None }.to_string();
+        let other = StoreError::NoRepository {
+            origin: Some("https://gitlab.com/owner/app.git".to_owned()),
+        }
+        .to_string();
+
+        assert!(missing.contains("no Git `origin`"), "{missing}");
+        assert!(
+            other.contains("`https://gitlab.com/owner/app.git` names no GitHub repository"),
+            "{other}"
+        );
+        for message in [missing, other] {
+            assert!(message.contains("--repository <owner/name>"), "{message}");
+        }
+    }
+
+    #[test]
     fn a_conflict_names_each_file() {
         let error = StoreError::Conflict {
             store: PathBuf::from("/store"),

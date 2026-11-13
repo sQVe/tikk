@@ -184,7 +184,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::refresh_prs;
-    use crate::fact::{FactEvent, FactLine, PrObservation, PrState, PullRequest, Timestamp};
+    use crate::fact::{
+        Audit, FactEvent, FactLine, PrObservation, PrState, PullRequest, Repository, Timestamp,
+    };
     use crate::store::fact_files::{append_fact, append_line, read_facts};
     use crate::store::pr_link::PrEffects;
     use crate::store::{MachineName, Store, StoreEffects, StoreError, init};
@@ -375,5 +377,48 @@ mod tests {
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(refreshed, Vec::new());
         assert_eq!(facts.len(), 2);
+    }
+
+    fn audit_head(root: &std::path::Path, head: &str) {
+        let fact = FactLine {
+            ticket: id("personal-kkkk"),
+            at: Timestamp::parse("2026-11-13T01:30:00Z").expect("a valid time"),
+            event: FactEvent::Audit(Audit {
+                repository: Repository::parse("owner/app").expect("a valid repository"),
+                head: head.to_owned(),
+                ticket_hash: "hash".to_owned(),
+                verdicts: Vec::new(),
+            }),
+        };
+
+        append_fact(root, &fact, append_line).expect("append the audit fact");
+    }
+
+    #[test]
+    fn refresh_lists_a_slice_as_audit_behind_only_when_its_last_audit_saw_another_head() {
+        let cases = [
+            ("no audit", None, Vec::new()),
+            (
+                "an audit of the old head",
+                Some("head"),
+                vec![id("personal-kkkk")],
+            ),
+            ("an audit of the new head", Some("new-head"), Vec::new()),
+        ];
+
+        for (name, audited, expected) in cases {
+            let (directory, store) = store_with_slice();
+            link(directory.path(), 7, "2026-11-13T01:00:00Z");
+
+            if let Some(head) = audited {
+                audit_head(directory.path(), head);
+            }
+
+            let outcome = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+
+            CALLS.with(|calls| calls.take());
+            assert_eq!(outcome.refreshed.len(), 1, "case {name}");
+            assert_eq!(outcome.audit_behind, expected, "case {name}");
+        }
     }
 }

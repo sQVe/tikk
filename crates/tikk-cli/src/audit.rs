@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use tikk_core::{
-    AuditCheck, AuditEffects, AuditReason, AuditRequest, AuditVerdict, Identity, ShownAudit, Store,
-    StoreError, Verdict,
+    Audit, AuditCheck, AuditEffects, AuditReason, AuditRequest, AuditVerdict, Identity, ShownAudit,
+    Store, StoreError, Verdict,
 };
 
 use crate::output::Output;
@@ -45,7 +45,10 @@ pub(crate) fn checked_audit_json(check: &AuditCheck) -> Value {
 }
 
 pub(crate) fn audit_text(shown: &ShownAudit) -> String {
-    let audit = &shown.audit;
+    format!("{}, at {}", verdicts_text(&shown.audit), shown.at)
+}
+
+fn verdicts_text(audit: &Audit) -> String {
     let met = audit
         .verdicts
         .iter()
@@ -53,11 +56,10 @@ pub(crate) fn audit_text(shown: &ShownAudit) -> String {
         .count();
 
     format!(
-        "audit of {} at {}: {met} of {} met, at {}",
+        "audit of {} at {}: {met} of {} met",
         audit.repository,
         audit.head,
-        audit.verdicts.len(),
-        shown.at
+        audit.verdicts.len()
     )
 }
 
@@ -97,4 +99,40 @@ fn reason_json(reason: &AuditReason) -> Value {
     }
 
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use tikk_core::{Audit, AuditVerdict, Repository, Verdict};
+
+    use super::verdicts_text;
+
+    fn verdict(criterion: &str, verdict: Verdict) -> AuditVerdict {
+        AuditVerdict {
+            criterion: criterion.to_owned(),
+            check: "c".to_owned(),
+            expected: "e".to_owned(),
+            verdict,
+            evidence: "seen".to_owned(),
+        }
+    }
+
+    #[test]
+    fn the_audit_text_counts_only_the_met_verdicts() {
+        let audit = Audit {
+            repository: Repository::parse("owner/app").expect("a valid repository"),
+            head: "abc".to_owned(),
+            ticket_hash: "hash".to_owned(),
+            verdicts: vec![
+                verdict("s1", Verdict::Met),
+                verdict("s2", Verdict::NotMet),
+                verdict("s3", Verdict::Deferred),
+            ],
+        };
+
+        assert_eq!(
+            verdicts_text(&audit),
+            "audit of owner/app at abc: 1 of 3 met"
+        );
+    }
 }

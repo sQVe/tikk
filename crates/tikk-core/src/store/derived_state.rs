@@ -223,7 +223,7 @@ fn slice_status(pr: Option<&ShownPr>, check: Option<&AuditCheck>) -> DerivedStat
 
 // The caller derives the slices first.
 fn plan_status(plan: &TicketId, scan: &TicketScan, states: &DerivedStates) -> DerivedStatus {
-    let mut members = 0;
+    let mut has_member = false;
 
     for child in &scan.tickets {
         if child.id == *plan || child.document.fields.parent() != Some(plan) {
@@ -239,15 +239,15 @@ fn plan_status(plan: &TicketId, scan: &TicketScan, states: &DerivedStates) -> De
 
         match status {
             DerivedStatus::Canceled => {}
-            DerivedStatus::Done => members += 1,
+            DerivedStatus::Done => has_member = true,
             _ => return DerivedStatus::Open,
         }
     }
 
-    if members == 0 {
-        DerivedStatus::Open
-    } else {
+    if has_member {
         DerivedStatus::Done
+    } else {
+        DerivedStatus::Open
     }
 }
 
@@ -567,6 +567,14 @@ mod tests {
                 vec![slice("personal-kkkk", ""), canceled_slice],
                 DerivedStatus::Done,
             ),
+            (
+                "a done slice and an open task under no plan",
+                vec![
+                    slice("personal-kkkk", ""),
+                    ticket("personal-wwww", "kind: task\ntitle: Loose\n"),
+                ],
+                DerivedStatus::Done,
+            ),
         ];
 
         for (name, children, expected) in cases {
@@ -589,5 +597,43 @@ mod tests {
 
         assert_eq!(states.status(&draft), Some(DerivedStatus::Draft));
         assert_eq!(states.status(&task), None);
+    }
+
+    #[test]
+    fn each_derived_status_and_reason_has_its_json_name_and_criterion() {
+        let statuses = [
+            (DerivedStatus::Draft, "draft"),
+            (DerivedStatus::Open, "open"),
+            (DerivedStatus::AuditBehind, "auditBehind"),
+            (DerivedStatus::MergedUnverified, "mergedUnverified"),
+            (DerivedStatus::Done, "done"),
+            (DerivedStatus::Canceled, "canceled"),
+        ];
+        let criterion = || "s1".to_owned();
+        let reasons = [
+            (AuditReason::NotLinked, "notLinked", None),
+            (AuditReason::RepositoryDiffers, "repositoryDiffers", None),
+            (AuditReason::HeadDiffers, "headDiffers", None),
+            (
+                AuditReason::CriterionMissing(criterion()),
+                "criterionMissing",
+                Some("s1"),
+            ),
+            (
+                AuditReason::CriterionChanged(criterion()),
+                "criterionChanged",
+                Some("s1"),
+            ),
+            (AuditReason::NotMet(criterion()), "notMet", Some("s1")),
+        ];
+
+        for (status, name) in statuses {
+            assert_eq!(status.as_str(), name, "case {status:?}");
+        }
+
+        for (reason, name, expected) in reasons {
+            assert_eq!(reason.as_str(), name, "case {reason:?}");
+            assert_eq!(reason.criterion(), expected, "case {reason:?}");
+        }
     }
 }

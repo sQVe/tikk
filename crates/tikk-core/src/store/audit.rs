@@ -217,7 +217,8 @@ mod tests {
 
     use super::{AuditEffects, AuditRequest, audit_slice};
     use crate::fact::{
-        AgentName, Claim, FactEvent, FactLine, Repository, Timestamp, current_claims,
+        AgentName, AuditVerdict, Claim, FactEvent, FactLine, Repository, Timestamp, Verdict,
+        current_claims,
     };
     use crate::store::claim_lease::LeaseEffects;
     use crate::store::fact_files::{append_fact, append_line, read_facts};
@@ -411,5 +412,61 @@ mod tests {
             .expect("a person audits a claimed slice");
 
         assert_eq!(audit_count(&store), 1);
+    }
+
+    #[test]
+    fn audit_records_each_verdict_of_the_file_with_the_criterion_text_of_the_slice() {
+        let (_directory, store, request) = store_with_claimed_slice();
+
+        let shown = audit_slice(&store, &request, &Identity::default(), &effects())
+            .expect("the audit runs");
+
+        let expected = vec![AuditVerdict {
+            criterion: "s1".to_owned(),
+            check: "c".to_owned(),
+            expected: "e".to_owned(),
+            verdict: Verdict::Met,
+            evidence: "seen".to_owned(),
+        }];
+        let facts = read_facts(store.root()).expect("read the facts").facts;
+        let recorded = facts.iter().find_map(|fact| match &fact.event {
+            FactEvent::Audit(audit) => Some(audit.verdicts.clone()),
+            _ => None,
+        });
+        assert_eq!(shown.audit.verdicts, expected);
+        assert_eq!(recorded, Some(expected));
+    }
+
+    #[test]
+    fn audit_refuses_a_criterion_the_slice_does_not_have_and_a_wrong_file() {
+        let cases = [
+            (
+                "[{\"criterion\":\"s9\",\"verdict\":\"met\",\"evidence\":\"seen\"}]",
+                "unknown",
+            ),
+            (
+                "[{\"criterion\":\"s1\",\"verdict\":\"passed\",\"evidence\":\"seen\"}]",
+                "invalid",
+            ),
+        ];
+
+        for (text, case) in cases {
+            let (_directory, store, request) = store_with_claimed_slice();
+            fs::write(&request.file, text).expect("write the verdicts");
+
+            let error = audit_slice(&store, &request, &Identity::default(), &effects())
+                .expect_err("the audit is refused");
+
+            let matched = match case {
+                "unknown" => matches!(
+                    &error,
+                    StoreError::UnknownCriterion { id, criterion }
+                        if id == "personal-kkkk" && criterion == "s9"
+                ),
+                _ => matches!(&error, StoreError::InvalidVerdicts { .. }),
+            };
+            assert!(matched, "case {case}: {error:?}");
+            assert_eq!(audit_count(&store), 0, "case {case}");
+        }
     }
 }
