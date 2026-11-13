@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::fact::{Claim, Timestamp, current_claims};
@@ -7,7 +7,7 @@ use crate::store::project_choice::choose_project;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_files::{StoredTicket, TicketScan, UnreadableTicket, read_tickets};
-use crate::store::ticket_queries::{find_ticket, list_order};
+use crate::store::ticket_queries::{TicketIndex, TicketLookup, find_ticket, list_order};
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, ProjectName, Status, TicketId};
 
@@ -87,12 +87,6 @@ impl BlockerState {
     }
 }
 
-enum Lookup<'a> {
-    Found(&'a StoredTicket),
-    Unreadable,
-    Shared,
-}
-
 pub fn ready_slices(
     store: &Store,
     scope: ReadyScope,
@@ -105,7 +99,7 @@ pub fn ready_slices(
     };
     let in_scope = scope_filter(&scan, scope, effects)?;
     let now = (effects.now)();
-    let lookups = index_tickets(&scan);
+    let lookups = TicketIndex::new(&scan);
     let claims = current_claims(&facts.facts);
     let mut slices: Vec<&StoredTicket> = scan
         .tickets
@@ -190,29 +184,7 @@ fn is_open_or_draft_slice(ticket: &StoredTicket) -> bool {
     fields.kind() == Kind::Slice && matches!(fields.status(), Status::Open | Status::Draft)
 }
 
-fn index_tickets(scan: &TicketScan) -> HashMap<&TicketId, Lookup<'_>> {
-    let mut lookups = HashMap::new();
-    let parsed = scan
-        .tickets
-        .iter()
-        .map(|ticket| (&ticket.id, Lookup::Found(ticket)));
-    let broken = scan
-        .errors
-        .iter()
-        .filter_map(|error| error.id.as_ref())
-        .map(|id| (id, Lookup::Unreadable));
-
-    for (id, lookup) in parsed.chain(broken) {
-        lookups
-            .entry(id)
-            .and_modify(|existing| *existing = Lookup::Shared)
-            .or_insert(lookup);
-    }
-
-    lookups
-}
-
-fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>) -> Vec<Hold> {
+fn blocking_holds(slice: &StoredTicket, lookups: &TicketIndex<'_>) -> Vec<Hold> {
     let fields = &slice.document.fields;
     let mut holds = Vec::new();
     let mut named: Vec<(&TicketId, Option<&TicketId>)> = fields
@@ -226,7 +198,7 @@ fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>
     }
 
     if let Some(parent) = fields.parent() {
-        match found(lookups.get(parent)) {
+        match found(lookups.look_up(parent)) {
             Ok(plan) => {
                 let plan_fields = &plan.document.fields;
 
@@ -258,7 +230,7 @@ fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>
             continue;
         }
 
-        if let Some(state) = blocker_state(lookups.get(blocker)) {
+        if let Some(state) = blocker_state(lookups.look_up(blocker)) {
             holds.push(Hold::BlockedBy {
                 blocker: blocker.clone(),
                 via: via.cloned(),
@@ -278,7 +250,7 @@ fn plan_hold(status: Status) -> Option<BlockerState> {
     }
 }
 
-fn blocker_state(lookup: Option<&Lookup<'_>>) -> Option<BlockerState> {
+fn blocker_state(lookup: TicketLookup<'_>) -> Option<BlockerState> {
     match found(lookup) {
         Ok(ticket) => match ticket.document.fields.status() {
             Status::Done | Status::Canceled => None,
@@ -289,12 +261,12 @@ fn blocker_state(lookup: Option<&Lookup<'_>>) -> Option<BlockerState> {
     }
 }
 
-fn found<'a>(lookup: Option<&Lookup<'a>>) -> Result<&'a StoredTicket, BlockerState> {
+fn found(lookup: TicketLookup<'_>) -> Result<&StoredTicket, BlockerState> {
     match lookup {
-        Some(Lookup::Found(ticket)) => Ok(ticket),
-        Some(Lookup::Unreadable) => Err(BlockerState::Unreadable),
-        Some(Lookup::Shared) => Err(BlockerState::Shared),
-        None => Err(BlockerState::Missing),
+        TicketLookup::Found(ticket) => Ok(ticket),
+        TicketLookup::Unreadable(_) => Err(BlockerState::Unreadable),
+        TicketLookup::Shared(_) => Err(BlockerState::Shared),
+        TicketLookup::Missing => Err(BlockerState::Missing),
     }
 }
 
