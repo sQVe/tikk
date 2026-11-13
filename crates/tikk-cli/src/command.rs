@@ -83,7 +83,7 @@ pub(crate) enum Command {
         #[arg(value_name = "BLOCKER", value_parser = TicketId::parse)]
         blocker: TicketId,
     },
-    /// Move a ticket under another parent, or make it loose. The move clears its rank.
+    /// Move a ticket under another parent, or make it loose. A new parent clears its rank.
     Move {
         #[arg(value_name = "ID", value_parser = TicketId::parse)]
         id: TicketId,
