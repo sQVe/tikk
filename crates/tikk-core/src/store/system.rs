@@ -2,7 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -44,150 +44,153 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_OBJECT_DIRECTORY",
     "GIT_COMMON_DIR",
 ];
+const CONFIG_ENVIRONMENT: &[&str] = &["GIT_CONFIG", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"];
 
-pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
-    run_git_with("git", directory, arguments)
+/// The environment and settings of one kind of Git call.
+#[derive(Clone, Copy)]
+enum GitPolicy {
+    /// `init` in the store: the user's config applies, and Git never finds a parent repository.
+    StoreInit,
+    /// The project's `origin`: Git may find the repository in a parent folder, and reads only its
+    /// config.
+    ProjectLookup,
+    /// A local step of sync or `init --remote`.
+    StoreStep,
+    /// A step that reaches the remote. It keeps the global and system config, so the user's
+    /// credential helper reaches a private remote.
+    NetworkStep,
 }
 
-fn run_git_with(
-    program: &str,
-    directory: &Path,
-    arguments: &[&str],
-) -> Result<Vec<u8>, StoreError> {
-    let mut command = git_command(program, directory, arguments);
+impl GitPolicy {
+    fn has_store_settings(self) -> bool {
+        matches!(self, Self::StoreStep | Self::NetworkStep)
+    }
+
+    fn reads_only_repository_config(self) -> bool {
+        matches!(self, Self::ProjectLookup | Self::StoreStep)
+    }
+
+    fn drops_config_environment(self) -> bool {
+        !matches!(self, Self::StoreInit)
+    }
 
     // Git stops looking for a repository at the store's parent, so it never finds another one.
-    if let Some(parent) = directory.parent() {
-        command.env("GIT_CEILING_DIRECTORIES", parent);
+    fn stops_at_parent(self) -> bool {
+        !matches!(self, Self::ProjectLookup)
     }
-
-    let git_error = |message: String| StoreError::Git {
-        arguments: arguments.join(" "),
-        message,
-    };
-    let output = command
-        .output()
-        .map_err(|error| git_error(error.to_string()))?;
-
-    if !output.status.success() {
-        return Err(git_error(
-            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        ));
-    }
-
-    Ok(output.stdout)
 }
 
-pub(crate) fn read_origin_url(directory: &Path) -> Result<Option<String>, StoreError> {
-    read_origin_url_with("git", directory)
-}
-
-fn read_origin_url_with(program: &str, directory: &Path) -> Result<Option<String>, StoreError> {
-    let arguments = ["config", "--get", "remote.origin.url"];
-    let git_error = |message: String| StoreError::Git {
-        arguments: arguments.join(" "),
-        message,
-    };
-    let mut command = git_command(program, directory, &arguments);
-
-    // Only the repository's own config names its origin. A global or system `origin`, or one
-    // passed in the environment, belongs to no repository.
-    command
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1")
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_COUNT")
-        .env_remove("GIT_CONFIG_PARAMETERS");
-
-    let output = command
-        .output()
-        .map_err(|error| git_error(error.to_string()))?;
-    let url = String::from_utf8(output.stdout)
-        .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned()))?;
-
-    match output.status.code() {
-        Some(0) => Ok(Some(url.trim().to_owned())),
-        Some(1) => Ok(None),
-        _ => Err(git_error(
-            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        )),
-    }
+pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+    run_git_with(GitPolicy::StoreInit, "git", directory, arguments)
 }
 
 pub(crate) fn run_store_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
-    let git_error = |message: String| StoreError::Git {
-        arguments: arguments.join(" "),
-        message,
-    };
-    let output = store_git_command("git", directory, arguments)
-        .output()
-        .map_err(|error| git_error(error.to_string()))?;
-
-    if !output.status.success() {
-        return Err(git_error(
-            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        ));
-    }
-
-    Ok(output.stdout)
+    run_git_with(GitPolicy::StoreStep, "git", directory, arguments)
 }
 
 pub(crate) fn run_network_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     run_git_within("git", directory, arguments, NETWORK_TIMEOUT)
 }
 
+pub(crate) fn read_origin_url(directory: &Path) -> Result<Option<String>, StoreError> {
+    read_origin_with(GitPolicy::ProjectLookup, "git", directory)
+}
+
 pub(crate) fn read_store_origin(root: &Path) -> Result<Option<String>, StoreError> {
+    read_origin_with(GitPolicy::StoreStep, "git", root)
+}
+
+fn run_git_with(
+    policy: GitPolicy,
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Vec<u8>, StoreError> {
+    let output = run_command(policy, program, directory, arguments)?;
+
+    if !output.status.success() {
+        return Err(git_error(arguments, stderr_message(&output.stderr)));
+    }
+
+    Ok(output.stdout)
+}
+
+/// Git exits with 1 when the key is missing.
+fn read_origin_with(
+    policy: GitPolicy,
+    program: &str,
+    directory: &Path,
+) -> Result<Option<String>, StoreError> {
     let arguments = ["config", "--get", "remote.origin.url"];
-    let git_error = |message: String| StoreError::Git {
-        arguments: arguments.join(" "),
-        message,
-    };
-    let output = store_git_command("git", root, &arguments)
-        .output()
-        .map_err(|error| git_error(error.to_string()))?;
+    let output = run_command(policy, program, directory, &arguments)?;
 
     match output.status.code() {
         Some(0) => String::from_utf8(output.stdout)
             .map(|url| Some(url.trim().to_owned()))
-            .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned())),
+            .map_err(|_| git_error(&arguments, "Git printed text that is not UTF-8".to_owned())),
         Some(1) => Ok(None),
-        _ => Err(git_error(
-            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        )),
+        _ => Err(git_error(&arguments, stderr_message(&output.stderr))),
     }
 }
 
-fn store_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
-    let mut command = network_git_command(program, directory, arguments);
-
-    command
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_NOSYSTEM", "1");
-
-    command
+fn run_command(
+    policy: GitPolicy,
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Output, StoreError> {
+    git_command(policy, program, directory, arguments)
+        .output()
+        .map_err(|error| git_error(arguments, error.to_string()))
 }
 
-fn network_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
+fn git_error(arguments: &[&str], message: String) -> StoreError {
+    StoreError::Git {
+        arguments: arguments.join(" "),
+        message,
+    }
+}
+
+fn stderr_message(stderr: &[u8]) -> String {
+    String::from_utf8_lossy(stderr).trim().to_owned()
+}
+
+fn git_command(policy: GitPolicy, program: &str, directory: &Path, arguments: &[&str]) -> Command {
     let mut command = Command::new(program);
 
-    command
-        .arg("-C")
-        .arg(directory)
-        .args(STORE_SETTINGS)
-        .args(arguments)
-        .stdin(Stdio::null())
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .envs(IDENTITY.iter().copied())
-        .env_remove("GIT_CONFIG")
-        .env_remove("GIT_CONFIG_COUNT")
-        .env_remove("GIT_CONFIG_PARAMETERS");
+    command.arg("-C").arg(directory);
+
+    if policy.has_store_settings() {
+        command
+            .args(STORE_SETTINGS)
+            .stdin(Stdio::null())
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .env("GIT_OPTIONAL_LOCKS", "0")
+            .envs(IDENTITY.iter().copied());
+    }
+
+    command.args(arguments);
 
     for name in REPOSITORY_ENVIRONMENT {
         command.env_remove(name);
     }
 
-    if let Some(parent) = directory.parent() {
+    // A global or system `origin`, or one passed in the environment, belongs to no repository.
+    if policy.reads_only_repository_config() {
+        command
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+    }
+
+    if policy.drops_config_environment() {
+        for name in CONFIG_ENVIRONMENT {
+            command.env_remove(name);
+        }
+    }
+
+    if policy.stops_at_parent()
+        && let Some(parent) = directory.parent()
+    {
         command.env("GIT_CEILING_DIRECTORIES", parent);
     }
 
@@ -202,42 +205,34 @@ fn run_git_within(
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<Vec<u8>, StoreError> {
-    let git_error = |message: String| StoreError::Git {
-        arguments: arguments.join(" "),
-        message,
-    };
+    let failed = |message: String| git_error(arguments, message);
     let capture = || {
-        tempfile::tempfile()
-            .map_err(|error| git_error(format!("could not capture output: {error}")))
+        tempfile::tempfile().map_err(|error| failed(format!("could not capture output: {error}")))
     };
     let mut stdout = capture()?;
     let mut stderr = capture()?;
-    let mut command = network_git_command(program, directory, arguments);
+    let mut command = git_command(GitPolicy::NetworkStep, program, directory, arguments);
 
     command
-        .stdout(clone_capture(&stdout).map_err(git_error)?)
-        .stderr(clone_capture(&stderr).map_err(git_error)?);
+        .stdout(clone_capture(&stdout).map_err(failed)?)
+        .stderr(clone_capture(&stderr).map_err(failed)?);
 
-    let child = command
-        .spawn()
-        .map_err(|error| git_error(error.to_string()))?;
+    let child = command.spawn().map_err(|error| failed(error.to_string()))?;
     let status = wait_within(child, timeout).map_err(|failure| match failure {
         WaitFailure::TimedOut => StoreError::GitTimeout {
             arguments: arguments.join(" "),
             timeout,
         },
-        WaitFailure::Failed(message) => git_error(message),
+        WaitFailure::Failed(message) => failed(message),
     })?;
 
     if !status.success() {
-        let message = read_capture(&mut stderr).map_err(git_error)?;
+        let message = read_capture(&mut stderr).map_err(failed)?;
 
-        return Err(git_error(
-            String::from_utf8_lossy(&message).trim().to_owned(),
-        ));
+        return Err(failed(stderr_message(&message)));
     }
 
-    read_capture(&mut stdout).map_err(git_error)
+    read_capture(&mut stdout).map_err(failed)
 }
 
 enum WaitFailure {
@@ -288,18 +283,6 @@ fn read_capture(file: &mut File) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("could not read the output: {error}"))?;
 
     Ok(bytes)
-}
-
-fn git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
-    let mut command = Command::new(program);
-
-    command.arg("-C").arg(directory).args(arguments);
-
-    for name in REPOSITORY_ENVIRONMENT {
-        command.env_remove(name);
-    }
-
-    command
 }
 
 pub(crate) fn start_editor(
@@ -364,9 +347,9 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        fill_random, network_git_command, read_host_name, read_host_name_with, read_origin_url,
-        read_origin_url_with, read_store_origin, run_git, run_git_with, run_git_within,
-        run_store_git, start_editor, store_git_command,
+        GitPolicy, fill_random, git_command, read_host_name, read_host_name_with, read_origin_url,
+        read_origin_with, read_store_origin, run_git, run_git_with, run_git_within, run_store_git,
+        start_editor,
     };
     use crate::store::StoreError;
 
@@ -396,12 +379,14 @@ mod tests {
         );
         let settings = "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgSign=false -c tag.gpgSign=false -c merge.autoStash=false -c merge.ff=true";
 
-        let local = seen_by_git(&mut store_git_command(
+        let local = seen_by_git(&mut git_command(
+            GitPolicy::StoreStep,
             &program,
             directory.path(),
             &["merge"],
         ));
-        let network = seen_by_git(&mut network_git_command(
+        let network = seen_by_git(&mut git_command(
+            GitPolicy::NetworkStep,
             &program,
             directory.path(),
             &["fetch"],
@@ -415,6 +400,59 @@ mod tests {
         assert_eq!(
             network,
             format!("-C {folder} {settings} fetch|unset|unset|0\n")
+        );
+    }
+
+    #[test]
+    fn each_git_policy_passes_its_own_settings_and_environment() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let program = fake_git(
+            directory.path(),
+            "echo \"$*|${GIT_CEILING_DIRECTORIES-unset}|${GIT_CONFIG_GLOBAL-unset}|${GIT_CONFIG_NOSYSTEM-unset}|${GIT_TERMINAL_PROMPT-unset}|${GIT_OPTIONAL_LOCKS-unset}|${GIT_AUTHOR_NAME-unset}|$(cat)\"",
+        );
+        let folder = directory.path().display();
+        let parent = directory.path().parent().expect("a parent").display();
+        let settings = "-c core.hooksPath=/dev/null -c core.fsmonitor=false -c commit.gpgSign=false -c tag.gpgSign=false -c merge.autoStash=false -c merge.ff=true";
+
+        let init = run_git_with(
+            GitPolicy::StoreInit,
+            &program,
+            directory.path(),
+            &["status"],
+        )
+        .expect("the script runs");
+        let lookup = read_origin_with(GitPolicy::ProjectLookup, &program, directory.path())
+            .expect("the script runs");
+        let local = seen_by_git(&mut git_command(
+            GitPolicy::StoreStep,
+            &program,
+            directory.path(),
+            &["merge"],
+        ));
+        let network = seen_by_git(&mut git_command(
+            GitPolicy::NetworkStep,
+            &program,
+            directory.path(),
+            &["fetch"],
+        ));
+
+        assert_eq!(
+            String::from_utf8(init).expect("UTF-8"),
+            format!("-C {folder} status|{parent}|unset|unset|unset|unset|unset|\n")
+        );
+        assert_eq!(
+            lookup,
+            Some(format!(
+                "-C {folder} config --get remote.origin.url|unset|/dev/null|1|unset|unset|unset|"
+            ))
+        );
+        assert_eq!(
+            local,
+            format!("-C {folder} {settings} merge|{parent}|/dev/null|1|0|0|tikk|\n")
+        );
+        assert_eq!(
+            network,
+            format!("-C {folder} {settings} fetch|{parent}|unset|unset|0|0|tikk|\n")
         );
     }
 
@@ -507,8 +545,8 @@ mod tests {
     fn a_git_that_exits_nonzero_gives_a_git_error() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
 
-        let error =
-            run_git_with("false", directory.path(), &["status"]).expect_err("the program fails");
+        let error = run_git_with(GitPolicy::StoreInit, "false", directory.path(), &["status"])
+            .expect_err("the program fails");
 
         assert!(
             matches!(&error, StoreError::Git { arguments, .. } if arguments == "status"),
@@ -571,8 +609,12 @@ mod tests {
     fn read_origin_url_reports_a_git_that_cannot_start() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
 
-        let error = read_origin_url_with("tikk-test-no-such-program", directory.path())
-            .expect_err("the program does not exist");
+        let error = read_origin_with(
+            GitPolicy::ProjectLookup,
+            "tikk-test-no-such-program",
+            directory.path(),
+        )
+        .expect_err("the program does not exist");
 
         assert!(
             matches!(&error, StoreError::Git { arguments, .. } if arguments == "config --get remote.origin.url"),
