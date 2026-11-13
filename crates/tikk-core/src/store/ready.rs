@@ -214,14 +214,42 @@ fn is_open_or_draft_slice(ticket: &StoredTicket) -> bool {
     fields.kind() == Kind::Slice && matches!(fields.status(), Status::Open | Status::Draft)
 }
 
+enum BlockerEdge {
+    Holds(Hold),
+    Stacks(StackParent),
+    Cleared,
+}
+
 fn blocking_holds(
     slice: &StoredTicket,
     lookups: &TicketIndex<'_>,
     prs: &HashMap<TicketId, ShownPr>,
 ) -> (Vec<Hold>, Option<StackParent>) {
+    let (mut holds, edges) = own_holds_and_edges(slice, lookups);
+    let mut stack_parents = Vec::new();
+
+    for (blocker, via) in edges {
+        match classify_edge(blocker, via, lookups, prs) {
+            BlockerEdge::Holds(hold) => holds.push(hold),
+            BlockerEdge::Stacks(parent) => stack_parents.push(parent),
+            BlockerEdge::Cleared => {}
+        }
+    }
+
+    let stack_parent = stack_parents
+        .into_iter()
+        .min_by(|left, right| left.slice.cmp(&right.slice));
+
+    (holds, stack_parent)
+}
+
+// Returns the draft and plan holds, and each blocker edge once, the slice's own edges first.
+fn own_holds_and_edges<'a>(
+    slice: &'a StoredTicket,
+    lookups: &TicketIndex<'a>,
+) -> (Vec<Hold>, Vec<(&'a TicketId, Option<&'a TicketId>)>) {
     let fields = &slice.document.fields;
     let mut holds = Vec::new();
-    let mut stack_parent: Option<StackParent> = None;
     let mut named: Vec<(&TicketId, Option<&TicketId>)> = fields
         .blocked_by()
         .iter()
@@ -260,45 +288,40 @@ fn blocking_holds(
 
     let mut seen = HashSet::new();
 
-    for (blocker, via) in named {
-        if !seen.insert(blocker) {
-            continue;
-        }
+    named.retain(|(blocker, _)| seen.insert(*blocker));
 
-        let open_pr = match via {
-            None => open_slice_pr(lookups.look_up(blocker), prs),
-            Some(_) => None,
-        };
+    (holds, named)
+}
 
-        if let Some(pr) = open_pr {
-            let smaller = stack_parent
-                .as_ref()
-                .is_none_or(|parent| *blocker < parent.slice);
+fn classify_edge(
+    blocker: &TicketId,
+    via: Option<&TicketId>,
+    lookups: &TicketIndex<'_>,
+    prs: &HashMap<TicketId, ShownPr>,
+) -> BlockerEdge {
+    let lookup = lookups.look_up(blocker);
 
-            if smaller {
-                stack_parent = Some(StackParent {
-                    slice: blocker.clone(),
-                    pr: pr.clone(),
-                });
-            }
-
-            continue;
-        }
-
-        if let Some(state) = blocker_state(lookups.look_up(blocker)) {
-            holds.push(Hold::BlockedBy {
-                blocker: blocker.clone(),
-                via: via.cloned(),
-                state,
-            });
-        }
+    if via.is_none()
+        && let Some(pr) = open_slice_pr(&lookup, prs)
+    {
+        return BlockerEdge::Stacks(StackParent {
+            slice: blocker.clone(),
+            pr: pr.clone(),
+        });
     }
 
-    (holds, stack_parent)
+    match blocker_state(lookup) {
+        Some(state) => BlockerEdge::Holds(Hold::BlockedBy {
+            blocker: blocker.clone(),
+            via: via.cloned(),
+            state,
+        }),
+        None => BlockerEdge::Cleared,
+    }
 }
 
 fn open_slice_pr<'a>(
-    lookup: TicketLookup<'_>,
+    lookup: &TicketLookup<'_>,
     prs: &'a HashMap<TicketId, ShownPr>,
 ) -> Option<&'a ShownPr> {
     let TicketLookup::Found(ticket) = lookup else {
