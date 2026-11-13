@@ -67,11 +67,13 @@ agent's live claim with `claimed`, renews the holder's lease ([ADR
 0022](./0022-claims-leases-and-ready-queue.md)), and runs no `gh` and no sync.
 
 A slice's last audit is its newest `audit` fact. It counts only when its repository and head match
-the PR state that the rules above select, every current criterion has a `met` verdict, and each
+the PR state that the rules above select, with owner and name compared without letter case as
+GitHub does, the slice still has at least one criterion, every current criterion has a `met` verdict, and each
 criterion's `check` and `expected` text is the text the audit saw. An edit to either text voids the
 verdict until a new audit runs. `tikk show` lists each reason the last audit does not count:
 `headDiffers`, `repositoryDiffers`, `criterionChanged`, `criterionMissing`, or `notMet`, with the
-criterion where one applies, and `notLinked` when the slice has no PR. `tikk pr refresh` lists the
+criterion where one applies, `noCriteria` when the slice has no criterion left, and `notLinked`
+when the slice has no PR. `tikk pr refresh` lists the
 refreshed slices that are `auditBehind`.
 
 ## Consequences

@@ -344,8 +344,9 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   `derivedStatus`: `open`, `auditBehind`, `mergedUnverified`, `done`, or the stored `draft` or
   `canceled`. A slice also has `audit`: `null`, or the last audit with `counts` and `reasons`, such
   as `[{"reason":"notMet","criterion":"s1"}]`. The reasons are `headDiffers`,
-  `repositoryDiffers`, `criterionChanged`, `criterionMissing`, `notMet`, and `notLinked` for a slice
-  with no PR. To give a slice a PR state without `gh`, append a line such as
+  `repositoryDiffers` (owner and name compare without letter case), `criterionChanged`,
+  `criterionMissing`, `notMet`, `noCriteria` for a slice with no criterion left, and `notLinked`
+  for a slice with no PR. To give a slice a PR state without `gh`, append a line such as
   `{"v":1,"kind":"pr","ticket":<slice>,"at":"2026-11-13T01:00:00Z","repository":"owner/app","number":7,"state":"merged","base":"main","head":<sha>,"mergeCommit":"def","inTrunk":true}`
   to the fact file. With that line and no audit, the slice is `mergedUnverified`; after an audit
   with `met` for each criterion at that head and repository, it is `done`, and the plan is `done`

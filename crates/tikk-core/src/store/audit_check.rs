@@ -6,6 +6,7 @@ pub enum AuditReason {
     NotLinked,
     RepositoryDiffers,
     HeadDiffers,
+    NoCriteria,
     CriterionMissing(String),
     CriterionChanged(String),
     NotMet(String),
@@ -23,6 +24,7 @@ impl AuditReason {
             Self::NotLinked => "notLinked",
             Self::RepositoryDiffers => "repositoryDiffers",
             Self::HeadDiffers => "headDiffers",
+            Self::NoCriteria => "noCriteria",
             Self::CriterionMissing(_) => "criterionMissing",
             Self::CriterionChanged(_) => "criterionChanged",
             Self::NotMet(_) => "notMet",
@@ -31,7 +33,9 @@ impl AuditReason {
 
     pub fn criterion(&self) -> Option<&str> {
         match self {
-            Self::NotLinked | Self::RepositoryDiffers | Self::HeadDiffers => None,
+            Self::NotLinked | Self::RepositoryDiffers | Self::HeadDiffers | Self::NoCriteria => {
+                None
+            }
             Self::CriterionMissing(criterion)
             | Self::CriterionChanged(criterion)
             | Self::NotMet(criterion) => Some(criterion),
@@ -55,7 +59,13 @@ pub(crate) fn check_audit(
     match pr.map(|pr| &pr.observation) {
         None => reasons.push(AuditReason::NotLinked),
         Some(observation) => {
-            if observation.pull_request.repository() != audit.audit.repository.as_str() {
+            // GitHub owner and repository names ignore letter case.
+            let same_repository = observation
+                .pull_request
+                .repository()
+                .eq_ignore_ascii_case(audit.audit.repository.as_str());
+
+            if !same_repository {
                 reasons.push(AuditReason::RepositoryDiffers);
             }
 
@@ -63,6 +73,10 @@ pub(crate) fn check_audit(
                 reasons.push(AuditReason::HeadDiffers);
             }
         }
+    }
+
+    if criteria.is_empty() {
+        reasons.push(AuditReason::NoCriteria);
     }
 
     for criterion in criteria {
@@ -192,6 +206,24 @@ mod tests {
     }
 
     #[test]
+    fn an_audit_does_not_count_once_the_slice_has_no_criterion() {
+        let met = audit("owner/app", "head", &[("s1", "e", Verdict::Met)]);
+
+        let check = check_audit(met, &[], Some(&pr()));
+
+        assert_eq!(check.reasons, vec![AuditReason::NoCriteria]);
+    }
+
+    #[test]
+    fn an_audit_matches_the_pr_repository_in_any_letter_case() {
+        let met = audit("Owner/App", "head", &[("s1", "e", Verdict::Met)]);
+
+        let check = check_audit(met, &[criterion("s1")], Some(&pr()));
+
+        assert_eq!(check.reasons, Vec::new());
+    }
+
+    #[test]
     fn an_audit_of_a_slice_without_a_pr_does_not_count() {
         let met = audit("owner/app", "head", &[("s1", "e", Verdict::Met)]);
 
@@ -207,6 +239,7 @@ mod tests {
             (AuditReason::NotLinked, "notLinked", None),
             (AuditReason::RepositoryDiffers, "repositoryDiffers", None),
             (AuditReason::HeadDiffers, "headDiffers", None),
+            (AuditReason::NoCriteria, "noCriteria", None),
             (
                 AuditReason::CriterionMissing(criterion()),
                 "criterionMissing",
