@@ -56,6 +56,9 @@ merge does not stop the claim.
   in the working directory, unless the caller names another.
 - Only an `open` slice can start. A `draft` slice is skipped as a draft. Done and canceled slices
   are not listed.
+- A slice whose plan is `draft` or `canceled` is skipped, and the hold names the plan and its
+  status. A draft plan is not yet agreed, and a canceled plan's slices never start. A plan that is
+  done does not hold its slices.
 - A slice is held back by its own `blockedBy` edges and by those of its plan ([ADR
   0020](./0020-edges.md)). A blocker that both levels name is listed once, at the slice. A blocker
   from the plan names the plan that holds it. A blocker that is missing or does not parse holds the

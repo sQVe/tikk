@@ -60,7 +60,7 @@ pub enum Hold {
         via: Option<TicketId>,
         state: BlockerState,
     },
-    /// The slice's plan cannot be read, so its blockers are unknown.
+    /// The slice's plan is a draft, is canceled, or cannot be read.
     Parent {
         parent: TicketId,
         state: BlockerState,
@@ -72,6 +72,7 @@ pub enum Hold {
 pub enum BlockerState {
     Open,
     Draft,
+    Canceled,
     Missing,
     Unreadable,
     Shared,
@@ -82,6 +83,7 @@ impl BlockerState {
         match self {
             Self::Open => "open",
             Self::Draft => "draft",
+            Self::Canceled => "canceled",
             Self::Missing => "missing",
             Self::Unreadable => "unreadable",
             Self::Shared => "shared",
@@ -232,13 +234,23 @@ fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>
 
     if let Some(parent) = fields.parent() {
         match found(lookups.get(parent)) {
-            Ok(plan) => named.extend(
-                plan.document
-                    .fields
-                    .blocked_by()
-                    .iter()
-                    .map(|blocker| (blocker, Some(parent))),
-            ),
+            Ok(plan) => {
+                let plan_fields = &plan.document.fields;
+
+                if let Some(state) = plan_hold(plan_fields.status()) {
+                    holds.push(Hold::Parent {
+                        parent: parent.clone(),
+                        state,
+                    });
+                }
+
+                named.extend(
+                    plan_fields
+                        .blocked_by()
+                        .iter()
+                        .map(|blocker| (blocker, Some(parent))),
+                );
+            }
             Err(state) => holds.push(Hold::Parent {
                 parent: parent.clone(),
                 state,
@@ -265,6 +277,15 @@ fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>
     holds
 }
 
+// A draft plan's slices wait until the plan is agreed, and a canceled plan's never start.
+fn plan_hold(status: Status) -> Option<BlockerState> {
+    match status {
+        Status::Draft => Some(BlockerState::Draft),
+        Status::Canceled => Some(BlockerState::Canceled),
+        Status::Open | Status::Done => None,
+    }
+}
+
 // A done or canceled blocker no longer holds.
 fn blocker_state(lookup: Option<&Lookup<'_>>) -> Option<BlockerState> {
     match found(lookup) {
@@ -283,5 +304,246 @@ fn found<'a>(lookup: Option<&Lookup<'a>>) -> Result<&'a StoredTicket, BlockerSta
         Some(Lookup::Unreadable) => Err(BlockerState::Unreadable),
         Some(Lookup::Shared) => Err(BlockerState::Shared),
         None => Err(BlockerState::Missing),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::SystemTime;
+
+    use tempfile::TempDir;
+
+    use super::{BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, ready_slices};
+    use crate::fact::Timestamp;
+    use crate::store::{Store, StoreError};
+    use crate::ticket::{Kind, TicketId};
+
+    const CRITERIA: &str = "criteria:\n  - id: s1\n    check: c\n    expected: e\n";
+
+    fn no_origin(_: &Path) -> Result<Option<String>, StoreError> {
+        Ok(None)
+    }
+
+    fn epoch() -> Timestamp {
+        Timestamp::from_system_time(SystemTime::UNIX_EPOCH)
+    }
+
+    fn effects() -> ReadyEffects {
+        ReadyEffects {
+            read_origin_url: no_origin,
+            now: epoch,
+            ..ReadyEffects::system()
+        }
+    }
+
+    fn store_with(files: &[(&str, String)]) -> (TempDir, Store) {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let folder = directory.path().join("tickets/personal");
+        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
+        fs::create_dir_all(&folder).expect("create the project folder");
+
+        for (name, text) in files {
+            fs::write(folder.join(name), text).expect("write a ticket");
+        }
+
+        let store = Store {
+            root: directory.path().to_path_buf(),
+        };
+
+        (directory, store)
+    }
+
+    fn reason(status: &str) -> &'static str {
+        if status == "canceled" {
+            "reason: Dropped\n"
+        } else {
+            ""
+        }
+    }
+
+    fn plan(status: &str, blocked_by: &str) -> String {
+        format!(
+            "---\nkind: plan\ntitle: Plan\nstatus: {status}\n{}blockedBy: [{blocked_by}]\n---\n",
+            reason(status)
+        )
+    }
+
+    fn slice(parent: &str, status: &str, blocked_by: &str) -> String {
+        format!(
+            "---\nkind: slice\ntitle: Slice\nstatus: {status}\n{}parent: {parent}\nblockedBy: [{blocked_by}]\n{CRITERIA}---\n",
+            reason(status)
+        )
+    }
+
+    fn task(status: &str, parent: &str) -> String {
+        format!(
+            "---\nkind: task\ntitle: Task\nstatus: {status}\n{}{parent}---\n",
+            reason(status)
+        )
+    }
+
+    fn id(text: &str) -> TicketId {
+        TicketId::parse(text).expect("a valid ID")
+    }
+
+    fn ready_under(store: &Store, parent: &str) -> Result<ReadyQueue, StoreError> {
+        let scope = ReadyScope {
+            parent: Some(id(parent)),
+            project: None,
+            working_directory: PathBuf::from("/work"),
+        };
+
+        ready_slices(store, scope, &effects())
+    }
+
+    fn candidate_ids(queue: &ReadyQueue) -> Vec<String> {
+        queue
+            .candidates
+            .iter()
+            .map(|ticket| ticket.id.to_string())
+            .collect()
+    }
+
+    fn skipped(queue: &ReadyQueue) -> Vec<(String, Vec<Hold>)> {
+        queue
+            .skipped
+            .iter()
+            .map(|skipped| (skipped.ticket.id.to_string(), skipped.holds.clone()))
+            .collect()
+    }
+
+    #[test]
+    fn ready_offers_open_slices_skips_drafts_and_omits_other_kinds_and_canceled_slices() {
+        let (_directory, store) = store_with(&[
+            ("personal-pppp-plan.md", plan("open", "")),
+            ("personal-aaaa-open.md", slice("personal-pppp", "open", "")),
+            (
+                "personal-dddd-draft.md",
+                slice("personal-pppp", "draft", ""),
+            ),
+            (
+                "personal-cccc-gone.md",
+                slice("personal-pppp", "canceled", ""),
+            ),
+            (
+                "personal-tttt-task.md",
+                task("open", "parent: personal-pppp\n"),
+            ),
+        ]);
+
+        let queue = ready_under(&store, "personal-pppp").expect("the queue is read");
+
+        assert_eq!(candidate_ids(&queue), ["personal-aaaa"]);
+        assert_eq!(
+            skipped(&queue),
+            [("personal-dddd".to_owned(), vec![Hold::Draft])]
+        );
+    }
+
+    #[test]
+    fn a_slice_is_held_once_by_each_open_blocker_of_its_own_and_of_its_plan() {
+        let (_directory, store) = store_with(&[
+            (
+                "personal-pppp-plan.md",
+                plan("open", "personal-xxxx, personal-yyyy"),
+            ),
+            (
+                "personal-kkkk-slice.md",
+                slice(
+                    "personal-pppp",
+                    "open",
+                    "personal-xxxx, personal-zzzz, personal-mmmm, personal-rrrr",
+                ),
+            ),
+            ("personal-xxxx-x.md", task("open", "")),
+            ("personal-yyyy-y.md", task("open", "")),
+            ("personal-zzzz-z.md", task("done", "")),
+            ("personal-rrrr-r.md", task("canceled", "")),
+        ]);
+
+        let queue = ready_under(&store, "personal-pppp").expect("the queue is read");
+
+        let blocked = |blocker: &str, via: Option<&str>, state| Hold::BlockedBy {
+            blocker: id(blocker),
+            via: via.map(id),
+            state,
+        };
+        assert_eq!(candidate_ids(&queue), Vec::<String>::new());
+        assert_eq!(
+            skipped(&queue),
+            [(
+                "personal-kkkk".to_owned(),
+                vec![
+                    blocked("personal-xxxx", None, BlockerState::Open),
+                    blocked("personal-mmmm", None, BlockerState::Missing),
+                    blocked("personal-yyyy", Some("personal-pppp"), BlockerState::Open),
+                ]
+            )]
+        );
+    }
+
+    #[test]
+    fn a_slice_is_held_by_a_draft_or_canceled_plan_and_not_by_an_open_one() {
+        let (_directory, store) = store_with(&[
+            ("personal-dddd-plan.md", plan("draft", "")),
+            ("personal-cccc-plan.md", plan("canceled", "")),
+            ("personal-nnnn-plan.md", plan("open", "")),
+            ("personal-aaaa-a.md", slice("personal-dddd", "open", "")),
+            ("personal-bbbb-b.md", slice("personal-cccc", "open", "")),
+            ("personal-eeee-e.md", slice("personal-nnnn", "open", "")),
+        ]);
+        let cases = [
+            ("personal-dddd", "personal-aaaa", Some(BlockerState::Draft)),
+            (
+                "personal-cccc",
+                "personal-bbbb",
+                Some(BlockerState::Canceled),
+            ),
+            ("personal-nnnn", "personal-eeee", None),
+        ];
+
+        for (plan, slice, state) in cases {
+            let queue = ready_under(&store, plan).expect("the queue is read");
+
+            match state {
+                Some(state) => {
+                    assert_eq!(
+                        skipped(&queue),
+                        [(
+                            slice.to_owned(),
+                            vec![Hold::Parent {
+                                parent: id(plan),
+                                state
+                            }]
+                        )],
+                        "case {plan}"
+                    );
+                    assert!(queue.candidates.is_empty(), "case {plan}");
+                }
+                None => assert_eq!(candidate_ids(&queue), [slice], "case {plan}"),
+            }
+        }
+    }
+
+    #[test]
+    fn ready_parent_takes_a_plan_and_refuses_another_kind() {
+        let (_directory, store) = store_with(&[
+            ("personal-pppp-plan.md", plan("open", "")),
+            ("personal-kkkk-slice.md", slice("personal-pppp", "open", "")),
+        ]);
+
+        let of_plan = ready_under(&store, "personal-pppp");
+        let of_slice = ready_under(&store, "personal-kkkk");
+
+        assert!(of_plan.is_ok(), "{of_plan:?}");
+        assert!(
+            matches!(
+                &of_slice,
+                Err(StoreError::WrongKind { id, kind: Kind::Slice, .. }) if id == "personal-kkkk"
+            ),
+            "{of_slice:?}"
+        );
     }
 }

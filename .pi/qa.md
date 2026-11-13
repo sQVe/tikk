@@ -228,7 +228,9 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   then by ID, as `ls` rows. Each skipped row adds `holds`, such as
   `{"reason":"blockedBy","blocker":<id>,"via":null,"state":"open"}`. A blocker of the plan has the
   plan in `via`. A live claim gives `{"reason":"claimed","claim":{...}}`, and a draft slice
-  `{"reason":"draft"}`. A blocker that does not exist has the state `missing`. A fact line that
+  `{"reason":"draft"}`. A slice under a draft or canceled plan gives
+  `{"reason":"parent","parent":<plan>,"state":"draft"}` or `"state":"canceled"`. A blocker that
+  does not exist has the state `missing`. A fact line that
   does not parse is in `errors` with its `path` and `line`. Without `--parent`, it lists the slices
   of the project that `tikk new` would choose, such as `tikk` from the worktree root, and
   `--project <p>` lists another project's. `--parent` with `--project` exits with 2. Without

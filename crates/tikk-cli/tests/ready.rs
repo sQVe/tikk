@@ -73,6 +73,46 @@ fn ready_parent_skips_the_slices_of_a_blocked_plan_and_names_the_plan() {
 }
 
 #[test]
+fn ready_parent_skips_the_slices_of_a_draft_or_canceled_plan_and_names_the_plan() {
+    let home = Home::initialized();
+    let draft_document = home.document(
+        "draft-plan.md",
+        "---\nkind: plan\ntitle: Not agreed\nstatus: draft\n---\n",
+    );
+    let draft_plan = home.new_ticket(&["--file", draft_document.to_str().expect("a UTF-8 path")]);
+    let canceled_plan = home.new_ticket(&["plan", "Dropped"]);
+    let open_plan = home.new_ticket(&["plan", "Agreed"]);
+    let under_draft = home.slice_under(&draft_plan, "Wait for the plan", &[]);
+    let under_canceled = home.slice_under(&canceled_plan, "Never start", &[]);
+    let under_open = home.slice_under(&open_plan, "Start", &[]);
+    let cancel = home.tikk(&["cancel", &canceled_plan, "--reason", "Out of scope"]);
+    assert_eq!(cancel.exit_code, 0, "cancel: {}", cancel.stderr);
+
+    let cases = [
+        (&draft_plan, &under_draft, "draft"),
+        (&canceled_plan, &under_canceled, "canceled"),
+    ];
+
+    for (plan, slice, state) in cases {
+        let queue = ready(&home, &["--parent", plan]);
+
+        assert_eq!(queue["candidates"], json!([]), "case {state}");
+        assert_eq!(
+            ids(&queue["skipped"]),
+            std::slice::from_ref(slice),
+            "case {state}"
+        );
+        assert_eq!(
+            queue["skipped"][0]["holds"],
+            json!([{ "reason": "parent", "parent": plan, "state": state }]),
+            "case {state}"
+        );
+    }
+    let open = ready(&home, &["--parent", &open_plan]);
+    assert_eq!(ids(&open["candidates"]), [under_open]);
+}
+
+#[test]
 fn ready_skips_a_claimed_draft_or_wrongly_blocked_slice_and_omits_a_canceled_one() {
     let home = Home::initialized();
     let plan = home.new_ticket(&["plan", "Move to tikk"]);
