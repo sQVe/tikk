@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
+use support::audit::{HEAD, audit_met, link_open_pr, merge_and_refresh};
 use support::{FakeGh, Home, parse_json, run_git};
 
 fn ready(home: &Home, arguments: &[&str]) -> Value {
@@ -252,17 +253,6 @@ fn ready_without_json_prints_rows_and_the_holds_of_skipped_slices() {
 
 const ALPHABET: &str = "346789abcdefghijkmnpqrtwxyz";
 
-const HEAD: &str = "1111111111111111111111111111111111111111";
-
-fn link_open_pr(home: &Home, gh: &FakeGh, slice: &str, number: u64) {
-    let url = format!("https://github.com/owner/app/pull/{number}");
-    gh.open_pr("owner/app", number, HEAD);
-
-    let link = home.tikk_with_gh(gh, None, &["pr", "link", slice, &url, "--json"]);
-
-    assert_eq!(link.exit_code, 0, "link: {}", link.stderr);
-}
-
 #[test]
 fn ready_offers_a_slice_blocked_by_a_slice_with_an_open_pr_and_names_that_pr() {
     let home = Home::initialized();
@@ -454,47 +444,6 @@ fn ready_skips_a_claimed_slice_with_a_shared_id_with_id_shared_and_no_claim() {
     );
 }
 
-fn merge_and_refresh(home: &Home, gh: &FakeGh, number: u64) {
-    gh.merged_pr(
-        "owner/app",
-        number,
-        support::TRUNK,
-        HEAD,
-        "3333333333333333333333333333333333333333",
-    );
-
-    let refresh = home.tikk_with_gh(gh, None, &["pr", "refresh", "--json"]);
-
-    assert_eq!(refresh.exit_code, 0, "refresh: {}", refresh.stderr);
-}
-
-fn audit_met(home: &Home, slice: &str) {
-    let file = home.document(
-        "verdicts.json",
-        &json!([{ "criterion": "s1", "verdict": "met", "evidence": "The tests pass." }])
-            .to_string(),
-    );
-    let hash = home.show_json(slice)["hash"]
-        .as_str()
-        .expect("show prints the hash")
-        .to_owned();
-
-    let run = home.tikk(&[
-        "audit",
-        slice,
-        "--hash",
-        &hash,
-        "--head",
-        HEAD,
-        "--repository",
-        "owner/app",
-        "--file",
-        file.to_str().expect("a UTF-8 path"),
-    ]);
-
-    assert_eq!(run.exit_code, 0, "audit: {}", run.stderr);
-}
-
 #[test]
 fn ready_holds_a_merged_unverified_slice_and_its_blocked_slice_until_the_audit_counts() {
     let home = Home::initialized();
@@ -503,7 +452,7 @@ fn ready_holds_a_merged_unverified_slice_and_its_blocked_slice_until_the_audit_c
     let first = home.slice_under(&plan, "Add the store", &[]);
     let second = home.slice_under(&plan, "Add ticket files", &[&first]);
     link_open_pr(&home, &gh, &first, 7);
-    merge_and_refresh(&home, &gh, 7);
+    merge_and_refresh(&home, &gh, 7, HEAD);
 
     let unverified = ready(&home, &["--parent", &plan]);
 
@@ -543,7 +492,7 @@ fn ready_offers_the_slices_of_a_plan_blocked_by_a_done_plan() {
     let second_plan = home.new_ticket(&["--file", plan_document.to_str().expect("a UTF-8 path")]);
     let second = home.slice_under(&second_plan, "Add the lease", &[]);
     link_open_pr(&home, &gh, &first, 7);
-    merge_and_refresh(&home, &gh, 7);
+    merge_and_refresh(&home, &gh, 7, HEAD);
 
     let before = ready(&home, &["--parent", &second_plan]);
 
