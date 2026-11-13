@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use support::{Home, parse_json, run_git};
+use support::{Home, Remote, parse_json, run_git};
 
 fn repository_with_origin(directory: &Path, url: &str) {
     std::fs::create_dir_all(directory).expect("create the repository folder");
@@ -254,4 +254,27 @@ fn a_global_origin_never_sets_the_project_of_new() {
             .to_owned();
         assert!(id.starts_with("personal-"), "case {name}: {id}");
     }
+}
+
+#[test]
+fn new_on_a_store_with_a_remote_makes_no_commit_and_leaves_no_child_process() {
+    let remote = Remote::new();
+    let home = Home::on_remote(&remote, "laptop");
+    let head = home.git(&["rev-parse", "HEAD"]);
+    let remote_main = remote.git(&["rev-parse", "main"]);
+
+    // `output` reads stdout and stderr to their end, so it would wait for a child that kept them.
+    let id = home.new_ticket(&["task", "Renew the domain"]);
+
+    assert_eq!(
+        home.git(&["rev-parse", "HEAD"]),
+        head,
+        "new makes no commit"
+    );
+    assert_eq!(remote.git(&["rev-parse", "main"]), remote_main);
+    assert!(
+        home.git(&["status", "--porcelain", "--untracked-files=all"])
+            .contains(&id),
+        "the ticket stays uncommitted"
+    );
 }

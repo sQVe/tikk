@@ -8,7 +8,10 @@ use tempfile::TempDir;
 use super::{PendingFile, PendingReason, SyncEffects, SyncOutcome, SyncStep, sync_store};
 use crate::store::git::{read_store_origin, run_store_git};
 use crate::store::sync_read::read_entry;
-use crate::store::{FileEntry, MachineName, RemoteInitEffects, StoreError, init_from_remote, open};
+use crate::store::{
+    FileEntry, IdClash, MachineName, RemoteInitEffects, StoreError, init_from_remote, open,
+};
+use crate::ticket::TicketId;
 
 const TICKET: &str = "tickets/personal/personal-abcd-renew.md";
 const TICKET_TEXT: &str = "---\nkind: task\ntitle: Renew the domain\n---\n";
@@ -113,7 +116,15 @@ fn collect(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) {
             continue;
         }
 
-        if path.is_dir() {
+        if path.is_symlink() {
+            let relative = path
+                .strip_prefix(root)
+                .expect("inside the store")
+                .to_owned();
+            let target = fs::read_link(&path).expect("read a symlink");
+
+            files.push((relative, target.into_os_string().into_encoded_bytes()));
+        } else if path.is_dir() {
             collect(root, &path, files);
         } else {
             let relative = path
@@ -711,10 +722,7 @@ fn the_outcome_names_each_reason_and_step_in_camel_case() {
         path: path.to_owned(),
         reason,
     };
-    let problem = |step| super::SyncProblem {
-        step,
-        message: "failed".to_owned(),
-    };
+    let problem = |step| super::SyncProblem::new(step, "failed".to_owned());
     let outcome = SyncOutcome {
         committed: false,
         committed_paths: Vec::new(),
@@ -728,9 +736,18 @@ fn the_outcome_names_each_reason_and_step_in_camel_case() {
         pushed: false,
         problems: vec![
             problem(SyncStep::Fetch),
+            super::SyncProblem {
+                files: vec!["d".to_owned()],
+                ..problem(SyncStep::Merge)
+            },
+            problem(SyncStep::Commit),
             problem(SyncStep::Push),
             problem(SyncStep::Save),
         ],
+        clashes: vec![IdClash {
+            id: TicketId::parse("personal-abcd").expect("a valid ID"),
+            paths: vec![PathBuf::from("e"), PathBuf::from("f")],
+        }],
     };
 
     let json = serde_json::to_value(&outcome).expect("the outcome serializes");
@@ -747,9 +764,15 @@ fn the_outcome_names_each_reason_and_step_in_camel_case() {
         json["problems"],
         serde_json::json!([
             { "step": "fetch", "message": "failed" },
+            { "step": "merge", "message": "failed", "files": ["d"] },
+            { "step": "commit", "message": "failed" },
             { "step": "push", "message": "failed" },
             { "step": "save", "message": "failed" },
         ])
+    );
+    assert_eq!(
+        json["clashes"],
+        serde_json::json!([{ "id": "personal-abcd", "paths": ["e", "f"] }])
     );
 }
 
@@ -798,5 +821,128 @@ fn a_failed_unstage_after_a_failed_commit_reports_both_errors() {
             if matches!(**cause, StoreError::Git { ref arguments, .. } if arguments.starts_with("commit"))
                 && matches!(**unstage, StoreError::Git { ref arguments, .. } if arguments.starts_with("--literal-pathspecs reset"))),
         "{error:?}"
+    );
+}
+
+#[test]
+fn sync_lists_each_id_clash_with_relative_paths_and_saves_the_outcome() {
+    let machines = Machines::new();
+    let laptop = machines.laptop();
+    let copy = "tickets/personal/personal-abcd-copy.md";
+    CLOCK.set(later());
+    write(&laptop, TICKET, TICKET_TEXT);
+    write(&laptop, copy, TICKET_TEXT);
+
+    let outcome = sync(&laptop, &effects()).expect("a clash does not stop sync");
+
+    assert_eq!(
+        outcome.clashes,
+        [IdClash {
+            id: TicketId::parse("personal-abcd").expect("a valid ID"),
+            paths: vec![PathBuf::from(copy), PathBuf::from(TICKET)],
+        }]
+    );
+    let mut saved: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(laptop.join(".git/tikk-sync.json")).expect("read the saved result"),
+    )
+    .expect("the saved result is JSON");
+    assert!(saved["at"].is_string(), "{saved}");
+    saved
+        .as_object_mut()
+        .expect("the saved result is an object")
+        .remove("at");
+    assert_eq!(
+        saved,
+        serde_json::to_value(&outcome).expect("the outcome serializes")
+    );
+}
+
+fn dangling_ticket_link(root: &Path) {
+    std::os::unix::fs::symlink(
+        "missing.md",
+        root.join("tickets/personal/personal-zzzz-link.md"),
+    )
+    .expect("leave a dangling ticket symlink");
+}
+
+#[test]
+fn a_ticket_scan_that_fails_before_the_commit_refuses_and_changes_nothing() {
+    let machines = machines_with_work();
+    let desktop = machines.desktop();
+    write(
+        &desktop,
+        "tickets/personal/personal-wxyz-new.md",
+        TICKET_TEXT,
+    );
+    dangling_ticket_link(&desktop);
+    let before = snapshot(&desktop);
+    NETWORK.set(Vec::new());
+
+    let error = sync(&desktop, &effects()).expect_err("the scan fails");
+
+    assert!(
+        matches!(&error, StoreError::Io { path, .. } if path.ends_with("personal-zzzz-link.md")),
+        "{error:?}"
+    );
+    assert_eq!(snapshot(&desktop), before);
+    assert_eq!(NETWORK.take(), ["fetch --quiet --no-tags --prune origin"]);
+}
+
+#[test]
+fn a_ticket_scan_that_fails_after_the_merge_is_a_merge_problem_and_sync_pushes() {
+    let machines = machines_with_work();
+    let (laptop, desktop) = (machines.laptop(), machines.desktop());
+    dangling_ticket_link(&laptop);
+    git(
+        &laptop,
+        &["add", "--", "tickets/personal/personal-zzzz-link.md"],
+    );
+    git(&laptop, &["commit", "--quiet", "--message", "Add a link"]);
+    git(&laptop, &["push", "--quiet", "origin", "main"]);
+    write(
+        &desktop,
+        "tickets/personal/personal-wxyz-new.md",
+        TICKET_TEXT,
+    );
+
+    let outcome = sync(&desktop, &effects()).expect("a failed scan after the merge is a result");
+
+    assert!(
+        outcome.committed && outcome.merged && outcome.pushed,
+        "{outcome:?}"
+    );
+    assert_eq!(outcome.problems.len(), 1, "{outcome:?}");
+    assert_eq!(outcome.problems[0].step, SyncStep::Merge);
+    assert!(
+        outcome.problems[0]
+            .message
+            .contains("personal-zzzz-link.md"),
+        "{outcome:?}"
+    );
+    assert_eq!(
+        git(&laptop, &["ls-remote", "origin", "main"])
+            .split('\t')
+            .next(),
+        Some(git(&desktop, &["rev-parse", "HEAD"]).trim())
+    );
+}
+
+#[test]
+fn the_clash_list_holds_a_clash_that_the_merge_brings() {
+    let machines = machines_with_work();
+    let (laptop, desktop) = (machines.laptop(), machines.desktop());
+    let copy = "tickets/personal/personal-abcd-copy.md";
+    write(&laptop, copy, TICKET_TEXT);
+    sync(&laptop, &effects()).expect("the laptop pushes the copy");
+
+    let outcome = sync(&desktop, &effects()).expect("a clash does not stop sync");
+
+    assert!(outcome.merged, "{outcome:?}");
+    assert_eq!(
+        outcome.clashes,
+        [IdClash {
+            id: TicketId::parse("personal-abcd").expect("a valid ID"),
+            paths: vec![PathBuf::from(copy), PathBuf::from(TICKET)],
+        }]
     );
 }

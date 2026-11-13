@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde_json::{Value, json};
 use tikk_core::{ClaimState, Hold, ReadyQueue, SkippedSlice};
 
@@ -62,6 +64,10 @@ fn hold_json(hold: &Hold) -> Value {
             "reason": "claimed",
             "claim": claim_json(claim, ClaimState::Claimed),
         }),
+        Hold::IdShared { paths } => json!({
+            "reason": "idShared",
+            "paths": paths_text(paths),
+        }),
     }
 }
 
@@ -117,5 +123,13 @@ fn hold_text(hold: &Hold) -> String {
             format!("its plan {parent} is {}", state.as_str())
         }
         Hold::Claimed(claim) => claim_text(claim, ClaimState::Claimed),
+        Hold::IdShared { paths } => format!("idShared: {}", paths_text(paths).join("  ")),
     }
+}
+
+fn paths_text(paths: &[PathBuf]) -> Vec<String> {
+    paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
 }

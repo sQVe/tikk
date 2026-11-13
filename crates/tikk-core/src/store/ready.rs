@@ -63,6 +63,9 @@ pub enum Hold {
         state: BlockerState,
     },
     Claimed(Claim),
+    IdShared {
+        paths: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +117,16 @@ pub fn ready_slices(
     let mut skipped = Vec::new();
 
     for slice in slices {
+        if let TicketLookup::Shared(paths) = lookups.look_up(&slice.id) {
+            skipped.push(SkippedSlice {
+                ticket: slice.clone(),
+                holds: vec![Hold::IdShared {
+                    paths: paths.into_iter().map(Path::to_path_buf).collect(),
+                }],
+            });
+            continue;
+        }
+
         let mut holds = blocking_holds(slice, &lookups);
 
         if let Some(claim) = claims.get(&slice.id).filter(|claim| claim.is_live(now)) {

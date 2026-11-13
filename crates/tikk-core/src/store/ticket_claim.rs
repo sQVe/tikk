@@ -2,10 +2,11 @@ use std::path::Path;
 
 use crate::fact::{Claim, ClaimState, FactEvent, FactLine, Timestamp, current_claims};
 use crate::store::claim_lease::{LeaseEffects, claim_fact, refuse_other_holder};
+use crate::store::claim_sync::{Change, Synced, sync_around};
 use crate::store::fact_files::{append_fact, read_facts};
 use crate::store::identity::Identity;
-use crate::store::store_lock::{self, LockAccess, StoreLock};
-use crate::store::ticket_files::{StoredTicket, TicketScan, read_tickets};
+use crate::store::sync::SyncEffects;
+use crate::store::ticket_files::{StoredTicket, TicketScan};
 use crate::store::ticket_link_checks::check_written_links;
 use crate::store::ticket_queries::find_ticket;
 use crate::store::{Store, StoreError};
@@ -13,15 +14,15 @@ use crate::ticket::{Kind, Status, TicketError, TicketId};
 
 #[derive(Clone, Copy)]
 pub struct ClaimEffects {
-    pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
     pub lease: LeaseEffects,
+    pub sync: SyncEffects,
 }
 
 impl ClaimEffects {
     pub fn system() -> Self {
         Self {
-            lock_store: store_lock::lock_store,
             lease: LeaseEffects::system(),
+            sync: SyncEffects::system(),
         }
     }
 }
@@ -37,24 +38,64 @@ pub fn claim_slice(
     id: &TicketId,
     caller: &Identity,
     effects: &ClaimEffects,
+) -> Result<Synced<Claim>, StoreError> {
+    // Refused before the sync, so a call without an agent starts no network step.
+    if caller.agent.is_none() {
+        return Err(StoreError::NoAgent);
+    }
+
+    let root = store.root();
+
+    sync_around(root, &effects.sync, |scan| {
+        let claim = append_claim(root, scan, id, caller, &effects.lease)?;
+
+        Ok(Change {
+            value: claim,
+            appended: true,
+        })
+    })
+}
+
+pub fn release_slice(
+    store: &Store,
+    id: &TicketId,
+    caller: &Identity,
+    effects: &ClaimEffects,
+) -> Result<Synced<Option<Claim>>, StoreError> {
+    let root = store.root();
+
+    sync_around(root, &effects.sync, |scan| {
+        let ended = append_release(root, scan, id, caller, &effects.lease)?;
+
+        Ok(Change {
+            appended: ended.is_some(),
+            value: ended,
+        })
+    })
+}
+
+// The caller holds the exclusive lock.
+fn append_claim(
+    root: &Path,
+    scan: &TicketScan,
+    id: &TicketId,
+    caller: &Identity,
+    lease: &LeaseEffects,
 ) -> Result<Claim, StoreError> {
-    let agent = caller.agent.clone().ok_or(StoreError::NoAgent)?;
-    let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
-    let scan = read_tickets(store.root())?;
+    let agent = caller.agent.as_ref().ok_or(StoreError::NoAgent)?;
 
-    check_claimable(find_ticket(&scan, id)?, &scan)?;
+    check_claimable(find_ticket(scan, id)?, scan)?;
 
-    let facts = read_facts(store.root())?;
-    let now = (effects.lease.now)();
-
+    let facts = read_facts(root)?;
+    let now = (lease.now)();
     let current = current_claims(&facts.facts).remove(id);
 
     if let Some(current) = &current {
-        refuse_other_holder(id, current, &agent, now)?;
+        refuse_other_holder(id, current, agent, now)?;
     }
 
     // A renewal by the holder keeps each stored session value that the caller leaves unset.
-    let own = current.filter(|current| current.agent == agent);
+    let own = current.filter(|current| current.agent == *agent);
     let session = caller
         .session
         .clone()
@@ -63,30 +104,25 @@ pub fn claim_slice(
         .session_log
         .clone()
         .or_else(|| own.and_then(|own| own.session_log));
-    let claim = Claim::starting(agent, session, session_log, now);
+    let claim = Claim::starting(agent.clone(), session, session_log, now);
 
-    append_fact(
-        store.root(),
-        &claim_fact(id, claim.clone(), now),
-        effects.lease.append_line,
-    )?;
+    append_fact(root, &claim_fact(id, claim.clone(), now), lease.append_line)?;
 
     Ok(claim)
 }
 
-pub fn release_slice(
-    store: &Store,
+// The caller holds the exclusive lock.
+fn append_release(
+    root: &Path,
+    scan: &TicketScan,
     id: &TicketId,
     caller: &Identity,
-    effects: &ClaimEffects,
+    lease: &LeaseEffects,
 ) -> Result<Option<Claim>, StoreError> {
-    let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
-    let scan = read_tickets(store.root())?;
+    refuse_other_kinds(find_ticket(scan, id)?)?;
 
-    refuse_other_kinds(find_ticket(&scan, id)?)?;
-
-    let facts = read_facts(store.root())?;
-    let now = (effects.lease.now)();
+    let facts = read_facts(root)?;
+    let now = (lease.now)();
     let Some(current) = current_claims(&facts.facts).remove(id) else {
         return Ok(None);
     };
@@ -103,7 +139,7 @@ pub fn release_slice(
         },
     };
 
-    append_fact(store.root(), &release, effects.lease.append_line)?;
+    append_fact(root, &release, lease.append_line)?;
 
     Ok(Some(current))
 }
@@ -181,14 +217,14 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{ClaimEffects, claim_slice, release_slice};
-    use crate::fact::{AgentName, ClaimState, Timestamp, current_claims};
+    use crate::fact::{AgentName, Claim, ClaimState, Timestamp, current_claims};
     use crate::store::claim_lease::LeaseEffects;
     use crate::store::fact_files::read_facts;
     use crate::store::identity::Identity;
     use crate::store::ticket_queries::{QueryEffects, show_ticket};
     use crate::store::ticket_status::mark_done;
     use crate::store::ticket_write::WriteEffects;
-    use crate::store::{Store, StoreError};
+    use crate::store::{MachineName, Store, StoreEffects, StoreError, init};
     use crate::ticket::{Kind, Status, TicketError, TicketId};
 
     const PLAN: &str = "---\nkind: plan\ntitle: Plan\n---\n";
@@ -230,13 +266,30 @@ mod tests {
         }
     }
 
+    fn claim_value(
+        store: &Store,
+        slice: &TicketId,
+        caller: &Identity,
+        effects: &ClaimEffects,
+    ) -> Result<Claim, StoreError> {
+        claim_slice(store, slice, caller, effects).map(|synced| synced.value)
+    }
+
+    fn release_value(
+        store: &Store,
+        slice: &TicketId,
+        caller: &Identity,
+        effects: &ClaimEffects,
+    ) -> Result<Option<Claim>, StoreError> {
+        release_slice(store, slice, caller, effects).map(|synced| synced.value)
+    }
+
     fn store_with_slice() -> (TempDir, Store) {
         let directory = tempfile::tempdir().expect("create a temporary directory");
+        let machine = MachineName::parse("test").expect("a valid machine name");
+        init(directory.path(), Some(machine), &StoreEffects::system()).expect("init the store");
         let folder = directory.path().join("tickets/personal");
         fs::create_dir_all(&folder).expect("create the project folder");
-        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
-        fs::write(directory.path().join(".git/tikk-machine"), "test\n")
-            .expect("save the machine name");
 
         for (name, text) in [
             ("personal-pppp-plan.md", PLAN),
@@ -312,7 +365,7 @@ mod tests {
             write_ticket(&directory, name, &text);
             let slice = id(&name[..13]);
 
-            let error = claim_slice(&store, &slice, &agent("manager"), &claim_effects())
+            let error = claim_value(&store, &slice, &agent("manager"), &claim_effects())
                 .expect_err("the slice fails strict validation");
 
             assert!(
@@ -334,8 +387,8 @@ mod tests {
         let task = id("personal-tttt");
         set_clock(0);
 
-        let claimed = claim_slice(&store, &task, &agent("manager"), &claim_effects());
-        let released = release_slice(&store, &task, &Identity::default(), &claim_effects());
+        let claimed = claim_value(&store, &task, &agent("manager"), &claim_effects());
+        let released = release_value(&store, &task, &Identity::default(), &claim_effects());
 
         for (name, result) in [
             ("claim", claimed.map(|_| ())),
@@ -366,7 +419,7 @@ mod tests {
         fs::write(&file, fragment).expect("leave a fragment as a crash would");
         set_clock(0);
 
-        let claim = claim_slice(
+        let claim = claim_value(
             &store,
             &id("personal-kkkk"),
             &agent("manager"),
@@ -399,13 +452,13 @@ mod tests {
             ..agent("manager")
         };
         set_clock(0);
-        claim_slice(&store, &slice, &first, &claim_effects()).expect("the slice is free");
+        claim_value(&store, &slice, &first, &claim_effects()).expect("the slice is free");
 
         set_clock(HOUR);
-        let kept = claim_slice(&store, &slice, &agent("manager"), &claim_effects())
+        let kept = claim_value(&store, &slice, &agent("manager"), &claim_effects())
             .expect("the holder renews");
         set_clock(2 * HOUR);
-        let mixed = claim_slice(&store, &slice, &new_session_only, &claim_effects())
+        let mixed = claim_value(&store, &slice, &new_session_only, &claim_effects())
             .expect("the holder renews");
 
         assert_eq!(kept.session.as_deref(), Some("session-1"));
@@ -424,7 +477,7 @@ mod tests {
         let slice = id("personal-kkkk");
         set_clock(1_000);
 
-        let claim = claim_slice(&store, &slice, &agent("manager-1"), &claim_effects())
+        let claim = claim_value(&store, &slice, &agent("manager-1"), &claim_effects())
             .expect("the slice is free");
 
         assert_eq!(
@@ -433,7 +486,7 @@ mod tests {
         );
 
         set_clock(1_000 + 4 * HOUR - 1);
-        let refused = claim_slice(&store, &slice, &agent("manager-2"), &claim_effects());
+        let refused = claim_value(&store, &slice, &agent("manager-2"), &claim_effects());
 
         assert_eq!(shown_state(&store), Some(ClaimState::Claimed));
         assert!(
@@ -442,7 +495,7 @@ mod tests {
         );
 
         set_clock(1_000 + 4 * HOUR);
-        let taken = claim_slice(&store, &slice, &agent("manager-2"), &claim_effects());
+        let taken = claim_value(&store, &slice, &agent("manager-2"), &claim_effects());
 
         assert!(taken.is_ok(), "{taken:?}");
         assert_eq!(shown_state(&store), Some(ClaimState::Claimed));
@@ -452,7 +505,7 @@ mod tests {
     fn the_slice_shows_a_stale_claim_after_the_lease_end() {
         let (_directory, store) = store_with_slice();
         set_clock(0);
-        claim_slice(
+        claim_value(
             &store,
             &id("personal-kkkk"),
             &agent("manager"),
@@ -469,7 +522,7 @@ mod tests {
     fn a_failed_renewal_reports_the_error_and_keeps_the_write() {
         let (directory, store) = store_with_slice();
         set_clock(0);
-        claim_slice(
+        claim_value(
             &store,
             &id("personal-kkkk"),
             &agent("manager"),
@@ -513,11 +566,11 @@ mod tests {
         let (_directory, store) = store_with_slice();
         let slice = id("personal-kkkk");
         set_clock(0);
-        claim_slice(&store, &slice, &agent("manager-1"), &claim_effects())
+        claim_value(&store, &slice, &agent("manager-1"), &claim_effects())
             .expect("the slice is free");
 
-        let by_agent = release_slice(&store, &slice, &agent("manager-2"), &claim_effects());
-        let by_person = release_slice(&store, &slice, &Identity::default(), &claim_effects())
+        let by_agent = release_value(&store, &slice, &agent("manager-2"), &claim_effects());
+        let by_person = release_value(&store, &slice, &Identity::default(), &claim_effects())
             .expect("a person ends any claim");
 
         assert!(
@@ -529,5 +582,50 @@ mod tests {
             Some("manager-1".to_owned())
         );
         assert_eq!(shown_state(&store), None);
+    }
+
+    #[test]
+    fn done_by_the_holder_on_an_instruction_of_a_shared_slice_id_is_refused_and_writes_nothing() {
+        let (directory, store) = store_with_slice();
+        let folder = directory.path().join("tickets/personal");
+        let instruction = folder.join("personal-iiii-step.md");
+        set_clock(0);
+        claim_value(
+            &store,
+            &id("personal-kkkk"),
+            &agent("manager"),
+            &claim_effects(),
+        )
+        .expect("the slice is free");
+        fs::copy(
+            folder.join("personal-kkkk-slice.md"),
+            folder.join("personal-kkkk-copy.md"),
+        )
+        .expect("put a second file with the ID");
+        let before = fs::read(&instruction).expect("read the instruction");
+        let facts = read_facts(directory.path())
+            .expect("the facts are read")
+            .facts;
+        let effects = WriteEffects {
+            lease: lease(),
+            ..WriteEffects::system()
+        };
+
+        let result = mark_done(&store, &id("personal-iiii"), &agent("manager"), &effects);
+
+        assert!(
+            matches!(&result, Err(StoreError::IdShared { id, .. }) if id == "personal-kkkk"),
+            "{result:?}"
+        );
+        assert_eq!(
+            fs::read(&instruction).expect("read the instruction"),
+            before
+        );
+        assert_eq!(
+            read_facts(directory.path())
+                .expect("the facts are read")
+                .facts,
+            facts
+        );
     }
 }

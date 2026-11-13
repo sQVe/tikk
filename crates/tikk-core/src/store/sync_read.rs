@@ -82,12 +82,7 @@ pub(crate) fn read_plan(
     effects: &SyncEffects,
 ) -> Result<SyncPlan, StoreError> {
     ensure_on_main(root, effects.run_git)?;
-
-    if (effects.read_entry)(&root.join(MERGE_HEAD))?.is_some() {
-        return Err(StoreError::MergeInProgress {
-            store: root.to_path_buf(),
-        });
-    }
+    ensure_no_merge(root, effects)?;
 
     let changes = read_changes(root, effects.run_git)?;
     let mut plan = SyncPlan {
@@ -105,6 +100,16 @@ pub(crate) fn read_plan(
     }
 
     Ok(plan)
+}
+
+pub(crate) fn ensure_no_merge(root: &Path, effects: &SyncEffects) -> Result<(), StoreError> {
+    if (effects.read_entry)(&root.join(MERGE_HEAD))?.is_some() {
+        return Err(StoreError::MergeInProgress {
+            store: root.to_path_buf(),
+        });
+    }
+
+    Ok(())
 }
 
 /// The production `read_entry`. The time is read again after the bytes, so a write during the

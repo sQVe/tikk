@@ -51,7 +51,7 @@ fn change_status(
     let scan = read_tickets(store.root())?;
     let slice = instruction_slice(&find_ticket(&scan, id)?.document.fields);
 
-    write_for_slice(store.root(), slice, caller, &effects.lease, || {
+    write_for_slice(store.root(), &scan, slice, caller, &effects.lease, || {
         change_scanned(&scan, id, effects, |fields, _scan| change(fields).map(Some))
     })
 }

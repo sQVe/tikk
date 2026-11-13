@@ -318,6 +318,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn claim_with_a_fetch_that_times_out_exits_with_0_and_saves_the_failed_fetch() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let store = directory.path().join("store");
+        let machine = MachineName::parse("laptop").expect("a valid machine name");
+        tikk_core::init(&store, Some(machine), &StoreEffects::system()).expect("init the store");
+        std::fs::create_dir_all(store.join("tickets/personal")).expect("create a project");
+        for (name, text) in [
+            (
+                "personal-pppp-plan.md",
+                "---\nkind: plan\ntitle: Plan\n---\n",
+            ),
+            (
+                "personal-kkkk-slice.md",
+                "---\nkind: slice\ntitle: Slice\nparent: personal-pppp\ncriteria:\n  - id: s1\n    check: c\n    expected: e\n---\n",
+            ),
+        ] {
+            std::fs::write(store.join("tickets/personal").join(name), text)
+                .expect("write a ticket");
+        }
+        let mut environment = Environment::system();
+        environment.tikk_home = Some(store.clone().into_os_string());
+        environment.agent = Some(OsString::from("manager"));
+        environment.claim_effects.sync = SyncEffects {
+            read_origin: origin,
+            run_network_git: timed_out,
+            ..SyncEffects::system()
+        };
+
+        let response = run(
+            arguments(&["tikk", "claim", "personal-kkkk", "--json"]),
+            environment,
+        );
+
+        assert_eq!(response.exit, Exit::Success, "{}", response.stderr);
+        let result: Value = serde_json::from_str(&response.stdout).expect("one JSON value");
+        let saved: Value = serde_json::from_str(
+            &std::fs::read_to_string(store.join(".git/tikk-sync.json"))
+                .expect("read the saved result"),
+        )
+        .expect("the saved result is JSON");
+        assert_eq!(result["claim"]["agent"], json!("manager"));
+        for (name, sync) in [("sync field", &result["sync"]), ("saved result", &saved)] {
+            assert_eq!(sync["fetched"], json!(false), "{name}: {sync}");
+            assert_eq!(
+                sync["problems"][0]["step"],
+                json!("fetch"),
+                "{name}: {sync}"
+            );
+            assert!(
+                sync["problems"][0]["message"]
+                    .as_str()
+                    .is_some_and(|message| message.contains("did not finish within 30 seconds")),
+                "{name}: {sync}"
+            );
+        }
+    }
+
     fn arguments(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()
     }

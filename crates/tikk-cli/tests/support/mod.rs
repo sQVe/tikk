@@ -238,6 +238,26 @@ impl Home {
         parse_json(&run.stdout)
     }
 
+    pub(crate) fn share_id(&self, id: &str) -> Vec<String> {
+        let first = PathBuf::from(
+            self.show_json(id)["path"]
+                .as_str()
+                .expect("show prints the path"),
+        );
+        let second = first.with_file_name(format!("{id}-copy.md"));
+
+        std::fs::copy(&first, &second).expect("put a second file with the ID");
+
+        let mut paths: Vec<String> = [first, second]
+            .iter()
+            .map(|path| path.to_str().expect("a UTF-8 path").to_owned())
+            .collect();
+
+        paths.sort();
+
+        paths
+    }
+
     pub(crate) fn lock_file(&self) -> std::fs::File {
         std::fs::OpenOptions::new()
             .read(true)

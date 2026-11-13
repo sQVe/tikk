@@ -4,7 +4,7 @@ use std::process::Stdio;
 
 use serde_json::json;
 
-use support::{Home, finish, parse_json};
+use support::{Home, Remote, finish, parse_json};
 
 #[test]
 fn of_two_agents_that_claim_one_slice_at_once_exactly_one_wins() {
@@ -244,11 +244,120 @@ fn claim_without_json_prints_the_holder_and_lease_end() {
 
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     let lease_end = claim_of(&home, &slice)["leaseEnd"].clone();
+    let lines: Vec<&str> = run.stdout.lines().collect();
     assert_eq!(
-        run.stdout,
+        lines[0],
         format!(
-            "{slice}  claimed by manager until {}\n",
+            "{slice}  claimed by manager until {}",
             lease_end.as_str().expect("a lease end")
         )
     );
+    assert_eq!(
+        lines[1], "committed: 1  fetched: no  merged: no  pushed: no",
+        "the sync line follows: {}",
+        run.stdout
+    );
+}
+
+#[test]
+fn a_claim_on_one_store_refuses_another_agent_on_a_second_store_without_a_sync() {
+    let remote = Remote::new();
+    let laptop = Home::on_remote(&remote, "laptop");
+    let desktop = Home::on_remote(&remote, "desktop");
+    let (_plan, slice) = laptop.plan_and_slice();
+    laptop.settle_files();
+
+    let first = laptop.tikk_as("manager-1", &["claim", &slice, "--json"]);
+    let second = desktop.tikk_as("manager-2", &["claim", &slice, "--json"]);
+
+    assert_eq!(first.exit_code, 0, "first claim: {}", first.stderr);
+    assert_eq!(second.exit_code, 1, "second claim: {}", second.stdout);
+    assert_eq!(
+        parse_json(&second.stderr)["error"]["code"],
+        json!("claimed")
+    );
+}
+
+#[test]
+fn after_a_release_on_one_store_another_agent_claims_on_a_second_store() {
+    let remote = Remote::new();
+    let laptop = Home::on_remote(&remote, "laptop");
+    let desktop = Home::on_remote(&remote, "desktop");
+    let (_plan, slice) = laptop.plan_and_slice();
+    laptop.settle_files();
+    let first = laptop.tikk_as("manager-1", &["claim", &slice, "--json"]);
+    assert_eq!(first.exit_code, 0, "first claim: {}", first.stderr);
+
+    let release = laptop.tikk_as("manager-1", &["release", &slice, "--json"]);
+    let second = desktop.tikk_as("manager-2", &["claim", &slice, "--json"]);
+
+    assert_eq!(release.exit_code, 0, "release: {}", release.stderr);
+    assert_eq!(second.exit_code, 0, "second claim: {}", second.stderr);
+    assert_eq!(
+        parse_json(&second.stdout)["claim"]["agent"],
+        json!("manager-2")
+    );
+}
+
+#[test]
+fn a_merge_conflict_during_the_claim_is_named_in_sync_and_the_claim_exits_with_0() {
+    let remote = Remote::new();
+    let laptop = Home::on_remote(&remote, "laptop");
+    let desktop = Home::on_remote(&remote, "desktop");
+    let (plan, slice) = laptop.plan_and_slice();
+    laptop.settle_files();
+    laptop.sync_json();
+    desktop.sync_json();
+    let plan_file = |home: &Home| {
+        std::path::PathBuf::from(
+            home.show_json(&plan)["path"]
+                .as_str()
+                .expect("show prints the path"),
+        )
+    };
+    std::fs::write(
+        plan_file(&desktop),
+        "---\nkind: plan\ntitle: Move to tikk this year\n---\n",
+    )
+    .expect("edit the plan on the desktop");
+    desktop.settle_files();
+    desktop.sync_json();
+    let local_text = "---\nkind: plan\ntitle: Move to tikk next week\n---\n";
+    std::fs::write(plan_file(&laptop), local_text).expect("edit the plan on the laptop");
+    laptop.git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@localhost",
+        "commit",
+        "--quiet",
+        "--all",
+        "--message",
+        "Edit the plan",
+    ]);
+
+    let run = laptop.tikk_as("manager", &["claim", &slice, "--json"]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    let sync = &parse_json(&run.stdout)["sync"];
+    let relative_plan = plan_file(&laptop)
+        .strip_prefix(laptop.store())
+        .expect("inside the store")
+        .to_str()
+        .expect("a UTF-8 path")
+        .to_owned();
+    assert_eq!(sync["merged"], json!(false), "{sync}");
+    assert_eq!(sync["pushed"], json!(false), "{sync}");
+    assert_eq!(sync["problems"][0]["step"], json!("merge"), "{sync}");
+    assert_eq!(
+        sync["problems"][0]["files"],
+        json!([relative_plan]),
+        "{sync}"
+    );
+    assert!(!laptop.store().join(".git/MERGE_HEAD").exists());
+    assert_eq!(
+        std::fs::read_to_string(plan_file(&laptop)).expect("read the plan"),
+        local_text
+    );
+    assert_eq!(claim_of(&laptop, &slice)["agent"], json!("manager"));
 }

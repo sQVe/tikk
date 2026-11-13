@@ -71,6 +71,7 @@ pub fn create_ticket(
 
     write_for_slice(
         store.root(),
+        &scan,
         slice.as_ref(),
         &request.caller,
         &effects.lease,

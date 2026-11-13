@@ -279,3 +279,20 @@ fn show_without_json_prints_the_blockers() {
         format!("{task}  task  open  -  Renew the domain\nblockedBy: {first}, {second}\n")
     );
 }
+
+#[test]
+fn show_json_of_a_claimed_slice_with_a_shared_id_is_id_shared_and_names_both_paths() {
+    let home = Home::initialized();
+    let (_plan, slice) = home.plan_and_slice();
+    let claim = home.tikk_as("manager", &["claim", &slice]);
+    assert_eq!(claim.exit_code, 0, "claim: {}", claim.stderr);
+    let paths = home.share_id(&slice);
+
+    let run = home.tikk(&["show", &slice, "--json"]);
+
+    assert_eq!(run.exit_code, 1, "{}", run.stdout);
+    assert_eq!(run.stdout, "", "no claim is shown");
+    let error = &parse_json(&run.stderr)["error"];
+    assert_eq!(error["code"], json!("idShared"), "{error}");
+    assert_eq!(error["files"], json!(paths), "{error}");
+}
