@@ -92,7 +92,7 @@ fn refuse_cycle(id: &TicketId, fields: &TicketFields, scan: &TicketScan) -> Resu
         .collect();
 
     for (field, link, target) in wait_edges(fields) {
-        if let Some(path) = find_wait_path(target, id, &waits) {
+        if let Some(path) = find_wait_path(target, id, &waits, scan)? {
             let mut steps = vec![WaitStep {
                 waiter: id.clone(),
                 link,
@@ -120,18 +120,24 @@ fn wait_edges(fields: &TicketFields) -> impl Iterator<Item = (&'static str, Wait
     parent.into_iter().chain(blockers)
 }
 
+// A shared ID is refused, because the walk cannot know which file's links to follow.
 fn find_wait_path<'a>(
     start: &'a TicketId,
     goal: &TicketId,
     waits: &HashMap<&'a TicketId, &'a TicketFields>,
-) -> Option<Vec<WaitStep>> {
+    scan: &TicketScan,
+) -> Result<Option<Vec<WaitStep>>, StoreError> {
     let mut reached_from: HashMap<&TicketId, (&TicketId, WaitLink)> = HashMap::new();
     let mut queue = VecDeque::from([start]);
     let mut seen = HashSet::from([start]);
 
     while let Some(ticket) = queue.pop_front() {
         if ticket == goal {
-            return Some(walk_back(start, goal, &reached_from));
+            return Ok(Some(walk_back(start, goal, &reached_from)));
+        }
+
+        if let Err(error @ StoreError::IdShared { .. }) = ticket_path(scan, ticket) {
+            return Err(error);
         }
 
         let edges = waits
@@ -147,7 +153,7 @@ fn find_wait_path<'a>(
         }
     }
 
-    None
+    Ok(None)
 }
 
 fn walk_back(
@@ -286,5 +292,31 @@ mod tests {
         let checked = check_written_links(&id("personal-aaaa"), &changed, &store);
 
         assert!(checked.is_ok(), "{checked:?}");
+    }
+
+    #[test]
+    fn a_walk_through_an_id_that_two_files_hold_is_refused_as_shared() {
+        // The first C waits on A and the second has no edges, so picking one file could hide the cycle.
+        let store = scan(&[
+            ("personal-aaaa", "---\nkind: task\ntitle: A\n---\n"),
+            (
+                "personal-bbbb",
+                "---\nkind: task\ntitle: B\nblockedBy: [personal-cccc]\n---\n",
+            ),
+            (
+                "personal-cccc",
+                "---\nkind: task\ntitle: C\nblockedBy: [personal-aaaa]\n---\n",
+            ),
+            ("personal-cccc", "---\nkind: task\ntitle: C again\n---\n"),
+        ]);
+        let changed = fields("---\nkind: task\ntitle: A\nblockedBy: [personal-bbbb]\n---\n");
+
+        let error = check_written_links(&id("personal-aaaa"), &changed, &store)
+            .expect_err("the walk reaches a shared ID");
+
+        assert!(
+            matches!(&error, StoreError::IdShared { id, paths } if id == "personal-cccc" && paths.len() == 2),
+            "{error:?}"
+        );
     }
 }
