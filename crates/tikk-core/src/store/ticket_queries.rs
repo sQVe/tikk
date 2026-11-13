@@ -140,6 +140,21 @@ impl<'a> TicketIndex<'a> {
     pub(crate) fn look_up(&self, id: &TicketId) -> TicketLookup<'a> {
         classify(self.entries.get(id).map_or(&[][..], Vec::as_slice))
     }
+
+    pub(crate) fn shared(&self) -> Vec<(&'a TicketId, Vec<&'a Path>)> {
+        let mut shared: Vec<(&TicketId, Vec<&Path>)> = self
+            .entries
+            .iter()
+            .filter_map(|(id, entries)| match classify(entries) {
+                TicketLookup::Shared(paths) => Some((*id, paths)),
+                _ => None,
+            })
+            .collect();
+
+        shared.sort_by_key(|(id, _)| *id);
+
+        shared
+    }
 }
 
 pub(crate) fn look_up_ticket<'a>(scan: &'a TicketScan, id: &TicketId) -> TicketLookup<'a> {

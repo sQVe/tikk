@@ -8,7 +8,10 @@ use tempfile::TempDir;
 use super::{PendingFile, PendingReason, SyncEffects, SyncOutcome, SyncStep, sync_store};
 use crate::store::git::{read_store_origin, run_store_git};
 use crate::store::sync_read::read_entry;
-use crate::store::{FileEntry, MachineName, RemoteInitEffects, StoreError, init_from_remote, open};
+use crate::store::{
+    FileEntry, IdClash, MachineName, RemoteInitEffects, StoreError, init_from_remote, open,
+};
+use crate::ticket::TicketId;
 
 const TICKET: &str = "tickets/personal/personal-abcd-renew.md";
 const TICKET_TEXT: &str = "---\nkind: task\ntitle: Renew the domain\n---\n";
@@ -711,10 +714,7 @@ fn the_outcome_names_each_reason_and_step_in_camel_case() {
         path: path.to_owned(),
         reason,
     };
-    let problem = |step| super::SyncProblem {
-        step,
-        message: "failed".to_owned(),
-    };
+    let problem = |step| super::SyncProblem::new(step, "failed".to_owned());
     let outcome = SyncOutcome {
         committed: false,
         committed_paths: Vec::new(),
@@ -728,9 +728,18 @@ fn the_outcome_names_each_reason_and_step_in_camel_case() {
         pushed: false,
         problems: vec![
             problem(SyncStep::Fetch),
+            super::SyncProblem {
+                files: vec!["d".to_owned()],
+                ..problem(SyncStep::Merge)
+            },
+            problem(SyncStep::Commit),
             problem(SyncStep::Push),
             problem(SyncStep::Save),
         ],
+        clashes: vec![IdClash {
+            id: TicketId::parse("personal-abcd").expect("a valid ID"),
+            paths: vec![PathBuf::from("e"), PathBuf::from("f")],
+        }],
     };
 
     let json = serde_json::to_value(&outcome).expect("the outcome serializes");
@@ -747,9 +756,15 @@ fn the_outcome_names_each_reason_and_step_in_camel_case() {
         json["problems"],
         serde_json::json!([
             { "step": "fetch", "message": "failed" },
+            { "step": "merge", "message": "failed", "files": ["d"] },
+            { "step": "commit", "message": "failed" },
             { "step": "push", "message": "failed" },
             { "step": "save", "message": "failed" },
         ])
+    );
+    assert_eq!(
+        json["clashes"],
+        serde_json::json!([{ "id": "personal-abcd", "paths": ["e", "f"] }])
     );
 }
 

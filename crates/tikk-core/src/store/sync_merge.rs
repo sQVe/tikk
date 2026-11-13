@@ -3,8 +3,8 @@ use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
 use crate::store::StoreError;
-use crate::store::sync::SyncEffects;
-use crate::store::sync_read::MERGE_HEAD;
+use crate::store::sync::{SyncEffects, SyncProblem, SyncStep};
+use crate::store::sync_read::{MERGE_HEAD, ensure_no_merge};
 
 const MERGE_MESSAGE: &str = "Merge the remote tikk store";
 
@@ -27,6 +27,38 @@ pub(crate) fn merge_fetched(
         Ok(_) => Ok(()),
         Err(merge) => Err(merge_failure(root, merge, effects)),
     }
+}
+
+/// Merges like `merge_fetched`, but a merge that fails and leaves no merge in progress adds a
+/// problem and returns `false`. A merge that cannot be aborted, or stays in progress, is an error.
+pub(crate) fn merge_or_note(
+    root: &Path,
+    commit: &str,
+    effects: &SyncEffects,
+    problems: &mut Vec<SyncProblem>,
+) -> Result<bool, StoreError> {
+    let error = match merge_fetched(root, commit, effects) {
+        Ok(()) => return Ok(true),
+        Err(error @ StoreError::MergeAbortFailed { .. }) => return Err(error),
+        Err(error) => error,
+    };
+
+    ensure_no_merge(root, effects)?;
+
+    let files = match &error {
+        StoreError::Conflict { files, .. } => files
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    problems.push(SyncProblem {
+        files,
+        ..SyncProblem::new(SyncStep::Merge, error.to_string())
+    });
+
+    Ok(false)
 }
 
 fn merge_failure(root: &Path, merge: StoreError, effects: &SyncEffects) -> StoreError {

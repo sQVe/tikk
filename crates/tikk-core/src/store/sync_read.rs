@@ -81,21 +81,9 @@ pub(crate) fn read_plan(
     fetched: bool,
     effects: &SyncEffects,
 ) -> Result<SyncPlan, StoreError> {
-    ensure_on_main(root, effects.run_git)?;
-
-    if (effects.read_entry)(&root.join(MERGE_HEAD))?.is_some() {
-        return Err(StoreError::MergeInProgress {
-            store: root.to_path_buf(),
-        });
-    }
-
-    let changes = read_changes(root, effects.run_git)?;
+    let (fetched, changes) = check_store(root, fetched, effects)?;
     let mut plan = SyncPlan {
-        fetched: if fetched {
-            read_fetched(root, effects.run_git)?
-        } else {
-            None
-        },
+        fetched,
         ..SyncPlan::default()
     };
     let now = (effects.now)();
@@ -105,6 +93,44 @@ pub(crate) fn read_plan(
     }
 
     Ok(plan)
+}
+
+/// The fetched commit to merge, after the checks that make a merge or a commit safe: the store is
+/// on `main`, no merge is in progress, and nothing is staged.
+pub(crate) fn read_fetched_commit(
+    root: &Path,
+    fetched: bool,
+    effects: &SyncEffects,
+) -> Result<Option<String>, StoreError> {
+    check_store(root, fetched, effects).map(|(commit, _)| commit)
+}
+
+fn check_store(
+    root: &Path,
+    fetched: bool,
+    effects: &SyncEffects,
+) -> Result<(Option<String>, Vec<Change>), StoreError> {
+    ensure_on_main(root, effects.run_git)?;
+    ensure_no_merge(root, effects)?;
+
+    let changes = read_changes(root, effects.run_git)?;
+    let commit = if fetched {
+        read_fetched(root, effects.run_git)?
+    } else {
+        None
+    };
+
+    Ok((commit, changes))
+}
+
+pub(crate) fn ensure_no_merge(root: &Path, effects: &SyncEffects) -> Result<(), StoreError> {
+    if (effects.read_entry)(&root.join(MERGE_HEAD))?.is_some() {
+        return Err(StoreError::MergeInProgress {
+            store: root.to_path_buf(),
+        });
+    }
+
+    Ok(())
 }
 
 /// The production `read_entry`. The time is read again after the bytes, so a write during the
