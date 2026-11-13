@@ -617,6 +617,30 @@ fn join_another_init_accepts_a_store_and_returns_the_error_otherwise() {
 }
 
 #[test]
+fn init_through_a_symlink_creates_the_store_in_the_target_and_keeps_the_link() {
+    let directory = temporary_directory();
+    let target = directory.path().join("store");
+    let link = directory.path().join("link");
+    fs::create_dir(&target).expect("create the target folder");
+    std::os::unix::fs::symlink(&target, &link).expect("link to the target");
+
+    let outcome = init(&link, None, &effects_with_host(laptop_host)).expect("init succeeds");
+
+    assert!(outcome.created);
+    assert_eq!(commit_count(&target), "1");
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("read the link")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        sorted_names(directory.path()),
+        vec![OsString::from("link"), OsString::from("store")]
+    );
+}
+
+#[test]
 #[expect(
     clippy::print_stderr,
     reason = "a test that returns early names the reason in its output"
