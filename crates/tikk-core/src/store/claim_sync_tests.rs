@@ -11,10 +11,11 @@ use crate::store::id_clash::IdClash;
 use crate::store::identity::Identity;
 use crate::store::sync::{FileEntry, FileKind, SyncEffects, SyncStep};
 use crate::store::sync_read::read_entry;
-use crate::store::ticket_claim::{ClaimEffects, claim_slice, release_slice};
-use crate::store::{
-    MachineName, RemoteInitEffects, Store, StoreEffects, StoreError, init, init_from_remote,
+use crate::store::test_support::sync_remote::{
+    bare_remote, git_text, store_files, store_on_remote,
 };
+use crate::store::ticket_claim::{ClaimEffects, claim_slice, release_slice};
+use crate::store::{MachineName, Store, StoreEffects, StoreError, init};
 use crate::ticket::TicketId;
 
 const FETCHED: &str = "1111111111111111111111111111111111111111";
@@ -193,21 +194,8 @@ fn saved_result(directory: &TempDir) -> serde_json::Value {
 
 #[test]
 fn a_claim_with_nothing_to_merge_commits_and_pushes_with_no_problem() {
-    let remote = tempfile::tempdir().expect("create the remote folder");
-    run_store_git(
-        remote.path(),
-        &["init", "--quiet", "--bare", "--initial-branch=main"],
-    )
-    .expect("create the bare remote");
-    let directory = tempfile::tempdir().expect("create a temporary directory");
-    init_from_remote(
-        directory.path(),
-        remote.path().to_str().expect("a UTF-8 path"),
-        Some(MachineName::parse("laptop").expect("a valid machine name")),
-        &RemoteInitEffects::system(),
-    )
-    .expect("init from the remote");
-    let (directory, store) = with_slice(directory);
+    let remote = bare_remote();
+    let (directory, store) = with_slice(store_on_remote(remote.path(), "laptop"));
 
     let synced = claim_slice(&store, &slice(), &manager(), &ClaimEffects::system())
         .expect("the claim works");
@@ -304,48 +292,12 @@ fn a_merge_conflict_in_a_claim_names_its_files_in_the_merge_problem() {
 
 fn store_state(directory: &TempDir) -> (String, String, Vec<(PathBuf, Vec<u8>)>) {
     let root = directory.path();
-    let mut files = Vec::new();
-    collect_files(root, root, &mut files);
-    files.sort();
 
     (
         git_text(root, &["rev-parse", "HEAD"]),
         git_text(root, &["status", "--porcelain", "--untracked-files=all"]),
-        files,
+        store_files(root),
     )
-}
-
-fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>) {
-    for entry in fs::read_dir(folder).expect("list a folder") {
-        let path = entry.expect("read an entry").path();
-
-        if path.ends_with(".git") {
-            continue;
-        }
-
-        if path.is_symlink() {
-            let relative = path
-                .strip_prefix(root)
-                .expect("inside the store")
-                .to_owned();
-            let target = fs::read_link(&path).expect("read a symlink");
-
-            files.push((relative, target.into_os_string().into_encoded_bytes()));
-        } else if path.is_dir() {
-            collect_files(root, &path, files);
-        } else {
-            let relative = path
-                .strip_prefix(root)
-                .expect("inside the store")
-                .to_owned();
-
-            files.push((relative, fs::read(&path).expect("read a file")));
-        }
-    }
-}
-
-fn git_text(root: &Path, arguments: &[&str]) -> String {
-    String::from_utf8(run_store_git(root, arguments).expect("git runs")).expect("UTF-8 output")
 }
 
 fn entry_failing_on_the_plan(path: &Path) -> Result<Option<FileEntry>, StoreError> {
@@ -409,19 +361,6 @@ fn a_claim_whose_changed_file_read_fails_is_refused_and_changes_nothing() {
     );
 }
 
-fn store_on_remote(remote: &Path, machine: &str) -> TempDir {
-    let directory = tempfile::tempdir().expect("create a temporary directory");
-    init_from_remote(
-        directory.path(),
-        remote.to_str().expect("a UTF-8 path"),
-        Some(MachineName::parse(machine).expect("a valid machine name")),
-        &RemoteInitEffects::system(),
-    )
-    .expect("init from the remote");
-
-    directory
-}
-
 fn commit_and_push(root: &Path, message: &str) {
     git_text(root, &["add", "--all"]);
     git_text(root, &["commit", "--quiet", "--message", message]);
@@ -430,12 +369,7 @@ fn commit_and_push(root: &Path, message: &str) {
 
 #[test]
 fn a_claim_whose_ticket_scan_fails_is_refused_before_the_merge_and_changes_nothing() {
-    let remote = tempfile::tempdir().expect("create the remote folder");
-    run_store_git(
-        remote.path(),
-        &["init", "--quiet", "--bare", "--initial-branch=main"],
-    )
-    .expect("create the bare remote");
+    let remote = bare_remote();
     let (laptop, _laptop_store) = with_slice(store_on_remote(remote.path(), "laptop"));
     commit_and_push(laptop.path(), "Add the slice");
     let desktop = store_on_remote(remote.path(), "desktop");

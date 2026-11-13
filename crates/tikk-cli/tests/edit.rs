@@ -33,13 +33,6 @@ fn edit_with(home: &Home, editor: &str, id: &str) -> support::Run {
     finish(command.output().expect("start the tikk binary"))
 }
 
-fn ticket_path(home: &Home, id: &str) -> String {
-    home.show_json(id)["path"]
-        .as_str()
-        .expect("show prints the path")
-        .to_owned()
-}
-
 fn recorded(record: &Path) -> String {
     std::fs::read_to_string(record).expect("the editor ran and recorded its arguments")
 }
@@ -48,7 +41,7 @@ fn recorded(record: &Path) -> String {
 fn edit_runs_the_editor_script_with_the_ticket_file_path() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);
-    let path = ticket_path(&home, &id);
+    let path = home.ticket_path(&id).display().to_string();
     let before = std::fs::read(&path).expect("read the ticket file");
     let (script, record) = recording_editor(&home);
 
@@ -64,7 +57,7 @@ fn edit_runs_the_editor_script_with_the_ticket_file_path() {
 fn edit_passes_the_arguments_in_editor_before_the_path() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);
-    let path = ticket_path(&home, &id);
+    let path = home.ticket_path(&id).display().to_string();
     let (script, record) = recording_editor(&home);
     let editor = format!("{} --wait", script.to_str().expect("a UTF-8 path"));
 
@@ -78,7 +71,7 @@ fn edit_passes_the_arguments_in_editor_before_the_path() {
 fn edit_opens_a_file_that_does_not_parse() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);
-    let path = ticket_path(&home, &id);
+    let path = home.ticket_path(&id).display().to_string();
     std::fs::write(&path, "kind: [\n").expect("break the ticket file by hand");
     let (script, record) = recording_editor(&home);
 

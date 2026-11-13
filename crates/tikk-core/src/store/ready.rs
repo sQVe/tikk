@@ -1,15 +1,16 @@
-use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use crate::fact::{Claim, PrState, ShownPr, Timestamp, current_claims, current_prs};
-use crate::store::derived_state::{DerivedStates, DerivedStatus, derive_states};
+use crate::fact::{Timestamp, current_claims, current_prs};
+use crate::store::derived_state::{DerivedStatus, derive_states};
 use crate::store::fact_files::{UnreadableFact, read_facts};
 use crate::store::git;
 use crate::store::project_choice::choose_project;
+use crate::store::ready_holds::{Hold, StackParent, blocking_holds};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_files::{StoredTicket, TicketScan, UnreadableTicket, read_tickets};
-use crate::store::ticket_queries::{TicketIndex, TicketLookup, find_ticket, list_order};
+use crate::store::ticket_index::{TicketIndex, TicketLookup, find_ticket};
+use crate::store::ticket_queries::list_order;
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, ProjectName, Status, TicketId};
 
@@ -51,60 +52,10 @@ pub struct ReadySlice {
     pub stack_parent: Option<StackParent>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StackParent {
-    pub slice: TicketId,
-    pub pr: ShownPr,
-}
-
 #[derive(Debug)]
 pub struct SkippedSlice {
     pub ticket: StoredTicket,
     pub holds: Vec<Hold>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Hold {
-    Draft,
-    MergedUnverified,
-    BlockedBy {
-        blocker: TicketId,
-        via: Option<TicketId>,
-        state: BlockerState,
-    },
-    Parent {
-        parent: TicketId,
-        state: BlockerState,
-    },
-    Claimed(Claim),
-    IdShared {
-        paths: Vec<PathBuf>,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BlockerState {
-    Open,
-    Draft,
-    Canceled,
-    MergedUnverified,
-    Missing,
-    Unreadable,
-    Shared,
-}
-
-impl BlockerState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Open => "open",
-            Self::Draft => "draft",
-            Self::Canceled => "canceled",
-            Self::MergedUnverified => "mergedUnverified",
-            Self::Missing => "missing",
-            Self::Unreadable => "unreadable",
-            Self::Shared => "shared",
-        }
-    }
 }
 
 pub fn ready_slices(
@@ -229,169 +180,15 @@ fn is_open_or_draft_slice(ticket: &StoredTicket) -> bool {
     fields.kind() == Kind::Slice && matches!(fields.status(), Status::Open | Status::Draft)
 }
 
-enum BlockerEdge {
-    Holds(Hold),
-    Stacks(StackParent),
-    Cleared,
-}
-
-fn blocking_holds(
-    slice: &StoredTicket,
-    lookups: &TicketIndex<'_>,
-    prs: &HashMap<TicketId, ShownPr>,
-    derived: &DerivedStates,
-) -> (Vec<Hold>, Option<StackParent>) {
-    let (mut holds, edges) = own_holds_and_edges(slice, lookups);
-    let mut stack_parents = Vec::new();
-
-    for (blocker, via) in edges {
-        match classify_edge(blocker, via, lookups, prs, derived) {
-            BlockerEdge::Holds(hold) => holds.push(hold),
-            BlockerEdge::Stacks(parent) => stack_parents.push(parent),
-            BlockerEdge::Cleared => {}
-        }
-    }
-
-    let stack_parent = stack_parents
-        .into_iter()
-        .min_by(|left, right| left.slice.cmp(&right.slice));
-
-    (holds, stack_parent)
-}
-
-// Returns the draft and plan holds, and each blocker edge once, the slice's own edges first.
-fn own_holds_and_edges<'a>(
-    slice: &'a StoredTicket,
-    lookups: &TicketIndex<'a>,
-) -> (Vec<Hold>, Vec<(&'a TicketId, Option<&'a TicketId>)>) {
-    let fields = &slice.document.fields;
-    let mut holds = Vec::new();
-    let mut named: Vec<(&TicketId, Option<&TicketId>)> = fields
-        .blocked_by()
-        .iter()
-        .map(|blocker| (blocker, None))
-        .collect();
-
-    if fields.status() == Status::Draft {
-        holds.push(Hold::Draft);
-    }
-
-    if let Some(parent) = fields.parent() {
-        match found(lookups.look_up(parent)) {
-            Ok(plan) => {
-                let plan_fields = &plan.document.fields;
-
-                if let Some(state) = plan_hold(plan_fields.status()) {
-                    holds.push(Hold::Parent {
-                        parent: parent.clone(),
-                        state,
-                    });
-                }
-
-                named.extend(
-                    plan_fields
-                        .blocked_by()
-                        .iter()
-                        .map(|blocker| (blocker, Some(parent))),
-                );
-            }
-            Err(state) => holds.push(Hold::Parent {
-                parent: parent.clone(),
-                state,
-            }),
-        }
-    }
-
-    let mut seen = HashSet::new();
-
-    named.retain(|(blocker, _)| seen.insert(*blocker));
-
-    (holds, named)
-}
-
-fn classify_edge(
-    blocker: &TicketId,
-    via: Option<&TicketId>,
-    lookups: &TicketIndex<'_>,
-    prs: &HashMap<TicketId, ShownPr>,
-    derived: &DerivedStates,
-) -> BlockerEdge {
-    let lookup = lookups.look_up(blocker);
-
-    if via.is_none()
-        && let Some(pr) = open_slice_pr(&lookup, prs)
-    {
-        return BlockerEdge::Stacks(StackParent {
-            slice: blocker.clone(),
-            pr: pr.clone(),
-        });
-    }
-
-    match blocker_state(lookup, derived) {
-        Some(state) => BlockerEdge::Holds(Hold::BlockedBy {
-            blocker: blocker.clone(),
-            via: via.cloned(),
-            state,
-        }),
-        None => BlockerEdge::Cleared,
-    }
-}
-
-fn open_slice_pr<'a>(
-    lookup: &TicketLookup<'_>,
-    prs: &'a HashMap<TicketId, ShownPr>,
-) -> Option<&'a ShownPr> {
-    let TicketLookup::Found(ticket) = lookup else {
-        return None;
-    };
-
-    if ticket.document.fields.kind() != Kind::Slice {
-        return None;
-    }
-
-    prs.get(&ticket.id)
-        .filter(|shown| shown.state() == PrState::Open)
-}
-
-fn plan_hold(status: Status) -> Option<BlockerState> {
-    match status {
-        Status::Draft => Some(BlockerState::Draft),
-        Status::Canceled => Some(BlockerState::Canceled),
-        Status::Open | Status::Done => None,
-    }
-}
-
-fn blocker_state(lookup: TicketLookup<'_>, derived: &DerivedStates) -> Option<BlockerState> {
-    match found(lookup) {
-        Ok(ticket) => match derived.effective(ticket) {
-            DerivedStatus::Done | DerivedStatus::Canceled => None,
-            DerivedStatus::Open | DerivedStatus::AuditBehind => Some(BlockerState::Open),
-            DerivedStatus::MergedUnverified => Some(BlockerState::MergedUnverified),
-            DerivedStatus::Draft => Some(BlockerState::Draft),
-        },
-        Err(state) => Some(state),
-    }
-}
-
-fn found(lookup: TicketLookup<'_>) -> Result<&StoredTicket, BlockerState> {
-    match lookup {
-        TicketLookup::Found(ticket) => Ok(ticket),
-        TicketLookup::Unreadable(_) => Err(BlockerState::Unreadable),
-        TicketLookup::Shared(_) => Err(BlockerState::Shared),
-        TicketLookup::Missing => Err(BlockerState::Missing),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::SystemTime;
 
-    use tempfile::TempDir;
-
-    use super::{BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, ready_slices};
+    use super::{Hold, ReadyEffects, ReadyQueue, ReadyScope, ready_slices};
     use crate::fact::{PrState, Timestamp};
+    use crate::store::test_support::store_with;
     use crate::store::{Store, StoreError};
     use crate::ticket::{Kind, ProjectName, TicketId};
 
@@ -411,23 +208,6 @@ mod tests {
             now: epoch,
             ..ReadyEffects::system()
         }
-    }
-
-    fn store_with(files: &[(&str, String)]) -> (TempDir, Store) {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        let folder = directory.path().join("tickets/personal");
-        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
-        fs::create_dir_all(&folder).expect("create the project folder");
-
-        for (name, text) in files {
-            fs::write(folder.join(name), text).expect("write a ticket");
-        }
-
-        let store = Store {
-            root: directory.path().to_path_buf(),
-        };
-
-        (directory, store)
     }
 
     fn reason(status: &str) -> &'static str {
@@ -503,14 +283,6 @@ mod tests {
         fs::write(folder.join("2026-11.jsonl"), lines).expect("write the PR facts");
     }
 
-    fn blocked(blocker: &str, via: Option<&str>, state: BlockerState) -> Hold {
-        Hold::BlockedBy {
-            blocker: id(blocker),
-            via: via.map(id),
-            state,
-        }
-    }
-
     #[test]
     fn a_slice_blocked_only_by_slices_with_open_prs_stacks_on_the_smallest_blocker() {
         let (directory, store) = store_with(&[
@@ -551,80 +323,6 @@ mod tests {
                 .iter()
                 .filter(|candidate| candidate.ticket.id != id("personal-kkkk"))
                 .all(|candidate| candidate.stack_parent.is_none())
-        );
-    }
-
-    #[test]
-    fn only_a_slices_own_blocker_slice_with_an_open_pr_clears() {
-        let (directory, store) = store_with(&[
-            ("personal-pppp-plan.md", plan("open", "personal-qqqq")),
-            ("personal-qqqq-s.md", slice("personal-pppp", "open", "")),
-            ("personal-mmmm-m.md", slice("personal-pppp", "open", "")),
-            ("personal-cccc-c.md", slice("personal-pppp", "open", "")),
-            ("personal-nnnn-n.md", slice("personal-pppp", "open", "")),
-            (
-                "personal-tttt-t.md",
-                task("open", "blockedBy: [personal-qqqq]\n"),
-            ),
-            (
-                "personal-kkkk-k.md",
-                slice(
-                    "personal-pppp",
-                    "open",
-                    "personal-mmmm, personal-cccc, personal-nnnn, personal-tttt",
-                ),
-            ),
-        ]);
-        pr_facts(
-            directory.path(),
-            &[
-                ("personal-qqqq", 1, "open"),
-                ("personal-mmmm", 2, "merged"),
-                ("personal-cccc", 3, "closed"),
-                ("personal-tttt", 4, "open"),
-            ],
-        );
-
-        let queue = ready_under(&store, "personal-pppp").expect("the queue is read");
-
-        let held = skipped(&queue)
-            .into_iter()
-            .find(|(slice, _)| slice == "personal-kkkk")
-            .expect("the slice is skipped");
-        assert_eq!(
-            held.1,
-            vec![
-                blocked("personal-mmmm", None, BlockerState::Open),
-                blocked("personal-cccc", None, BlockerState::Open),
-                blocked("personal-nnnn", None, BlockerState::Open),
-                blocked("personal-tttt", None, BlockerState::Open),
-                blocked("personal-qqqq", Some("personal-pppp"), BlockerState::Open),
-            ]
-        );
-    }
-
-    #[test]
-    fn each_blocker_state_has_its_contract_name() {
-        let names = [
-            BlockerState::Open,
-            BlockerState::Draft,
-            BlockerState::Canceled,
-            BlockerState::Missing,
-            BlockerState::Unreadable,
-            BlockerState::Shared,
-        ]
-        .map(BlockerState::as_str);
-
-        assert_eq!(
-            names,
-            [
-                "open",
-                "draft",
-                "canceled",
-                "missing",
-                "unreadable",
-                "shared"
-            ]
         );
     }
 
@@ -679,91 +377,6 @@ mod tests {
             skipped(&queue),
             [("personal-dddd".to_owned(), vec![Hold::Draft])]
         );
-    }
-
-    #[test]
-    fn a_slice_is_held_once_by_each_open_blocker_of_its_own_and_of_its_plan() {
-        let (_directory, store) = store_with(&[
-            (
-                "personal-pppp-plan.md",
-                plan("open", "personal-xxxx, personal-yyyy"),
-            ),
-            (
-                "personal-kkkk-slice.md",
-                slice(
-                    "personal-pppp",
-                    "open",
-                    "personal-xxxx, personal-zzzz, personal-mmmm, personal-rrrr",
-                ),
-            ),
-            ("personal-xxxx-x.md", task("open", "")),
-            ("personal-yyyy-y.md", task("open", "")),
-            ("personal-zzzz-z.md", task("done", "")),
-            ("personal-rrrr-r.md", task("canceled", "")),
-        ]);
-
-        let queue = ready_under(&store, "personal-pppp").expect("the queue is read");
-
-        let blocked = |blocker: &str, via: Option<&str>, state| Hold::BlockedBy {
-            blocker: id(blocker),
-            via: via.map(id),
-            state,
-        };
-        assert_eq!(candidate_ids(&queue), Vec::<String>::new());
-        assert_eq!(
-            skipped(&queue),
-            [(
-                "personal-kkkk".to_owned(),
-                vec![
-                    blocked("personal-xxxx", None, BlockerState::Open),
-                    blocked("personal-mmmm", None, BlockerState::Missing),
-                    blocked("personal-yyyy", Some("personal-pppp"), BlockerState::Open),
-                ]
-            )]
-        );
-    }
-
-    #[test]
-    fn a_slice_is_held_by_a_draft_or_canceled_plan_and_not_by_an_open_one() {
-        let (_directory, store) = store_with(&[
-            ("personal-dddd-plan.md", plan("draft", "")),
-            ("personal-cccc-plan.md", plan("canceled", "")),
-            ("personal-nnnn-plan.md", plan("open", "")),
-            ("personal-aaaa-a.md", slice("personal-dddd", "open", "")),
-            ("personal-bbbb-b.md", slice("personal-cccc", "open", "")),
-            ("personal-eeee-e.md", slice("personal-nnnn", "open", "")),
-        ]);
-        let cases = [
-            ("personal-dddd", "personal-aaaa", Some(BlockerState::Draft)),
-            (
-                "personal-cccc",
-                "personal-bbbb",
-                Some(BlockerState::Canceled),
-            ),
-            ("personal-nnnn", "personal-eeee", None),
-        ];
-
-        for (plan, slice, state) in cases {
-            let queue = ready_under(&store, plan).expect("the queue is read");
-
-            match state {
-                Some(state) => {
-                    assert_eq!(
-                        skipped(&queue),
-                        [(
-                            slice.to_owned(),
-                            vec![Hold::Parent {
-                                parent: id(plan),
-                                state
-                            }]
-                        )],
-                        "case {plan}"
-                    );
-                    assert!(queue.candidates.is_empty(), "case {plan}");
-                }
-                None => assert_eq!(candidate_ids(&queue), [slice], "case {plan}"),
-            }
-        }
     }
 
     #[test]

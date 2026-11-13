@@ -30,6 +30,10 @@ private GitHub repository.
   exclusive. A command that reads takes it shared, so readers do not block each other and never
   read while a write or a sync changes files. A command waits for the lock at most five seconds,
   then fails with the code `locked`.
+- Shell completion is the one read without the lock. It lists ticket IDs and titles for the shell,
+  so it must never wait or create the lock file. It reads only the ticket files, writes nothing,
+  and may miss or show a stale ticket while a write changes the store. See [ADR
+  0034](./0034-shell-completion-calls-back-into-tikk.md).
 - A ticket file is written to a temporary file in the same folder and renamed onto the old one, so
   no reader sees half a file. A hash-checked write compares the hash again right before the
   rename, under the exclusive lock.

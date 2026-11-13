@@ -4,7 +4,7 @@ use crate::fact::{PrState, ShownPr, last_audits};
 use crate::store::audit_check::{AuditCheck, check_audit};
 use crate::store::fact_files::FactScan;
 use crate::store::ticket_files::{StoredTicket, TicketScan};
-use crate::store::ticket_queries::{TicketIndex, TicketLookup};
+use crate::store::ticket_index::{TicketIndex, TicketLookup};
 use crate::ticket::{Kind, Status, TicketId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

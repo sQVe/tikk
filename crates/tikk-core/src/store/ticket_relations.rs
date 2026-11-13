@@ -1,6 +1,6 @@
 use crate::store::ticket_files::StoredTicket;
+use crate::store::ticket_index::find_ticket;
 use crate::store::ticket_link_checks::check_written_links;
-use crate::store::ticket_queries::find_ticket;
 use crate::store::ticket_write::{WriteEffects, change_ticket, refuse_other_project};
 use crate::store::{Store, StoreError};
 use crate::ticket::TicketId;

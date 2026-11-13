@@ -8,7 +8,7 @@ impl TicketFields {
         if let Some(parent) = self.parent() {
             let parent_kind = kind_of(parent).ok_or_else(|| missing("parent", parent))?;
 
-            if !allows_parent(self.kind(), parent_kind) {
+            if !self.kind().can_sit_under(parent_kind) {
                 return Err(TicketError::invalid(
                     "parent",
                     format!(
@@ -44,7 +44,7 @@ impl TicketFields {
         child: &TicketId,
         child_kind: Kind,
     ) -> Result<(), TicketError> {
-        if allows_parent(child_kind, self.kind()) {
+        if child_kind.can_sit_under(self.kind()) {
             return Ok(());
         }
 
@@ -65,13 +65,6 @@ impl TicketFields {
             .chain(self.discovered_from())
             .chain(self.related())
     }
-}
-
-fn allows_parent(kind: Kind, parent: Kind) -> bool {
-    matches!(
-        (kind, parent),
-        (Kind::Slice, Kind::Plan) | (Kind::Instruction, Kind::Slice) | (Kind::Task, Kind::Plan)
-    )
 }
 
 fn missing(field: &str, target: &TicketId) -> TicketError {

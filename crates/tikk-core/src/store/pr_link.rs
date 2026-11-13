@@ -7,7 +7,7 @@ use crate::store::identity::Identity;
 use crate::store::pr_github::{self, PrFailure, RunGh, read_pull_request};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_files::{TicketScan, read_tickets};
-use crate::store::ticket_queries::find_ticket;
+use crate::store::ticket_index::find_ticket;
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, TicketId};
 

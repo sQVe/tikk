@@ -3,7 +3,7 @@
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
 `tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `block`, `unblock`,
 `move`, `rank`, `claim`, `release`, `ready`, `sync`, `pr link`, `pr refresh`, `audit`, `ask`,
-`answer`, `needs`, `--help`, and `--version`, and `tikk-desktop`
+`answer`, `needs`, `completions`, `--help`, and `--version`, and `tikk-desktop`
 is a stub. A mock scene of the UI
 opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
 folder under `/tmp`.
@@ -131,6 +131,15 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
 `TIKK_AGENT` names the agent that runs a command, `TIKK_SESSION` its session, and
 `TIKK_SESSION_LOG` the path of the session's log. An empty value counts as unset. Without
 `TIKK_AGENT`, the caller is a person. Unset all three before a check that runs as a person.
+
+### Completion callback
+
+The completion script that `tikk completions <shell>` prints starts `tikk` again on each Tab, with
+`COMPLETE` set to the shell's name and the command line after `--`. With `COMPLETE` set, tikk
+prints candidates instead of running a command. bash and zsh also pass `_CLAP_COMPLETE_INDEX`, the
+index of the word to complete, and `_CLAP_IFS`, the separator of the candidates. fish passes
+neither and completes the last word. No real shell is needed to probe it. Unset `COMPLETE` before
+every other check.
 
 ### What to check
 
@@ -410,6 +419,24 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   fetched, the `fetch` problem shows. Without `--json`, it prints one line per item, such as
   `<task>  blockingTask: blocks <slice>`, then one `problem <code>: <path>: <message>` line per
   problem, or `Nothing waits on you.` when both lists are empty.
+- `target/debug/tikk completions bash`, `zsh`, and `fish` exit with 0 and print a script on
+  standard output that `bash -n`, `zsh -n`, and `fish -n` accept. Each script is the same text that
+  `COMPLETE=<shell> target/debug/tikk` prints. With `--json`, it prints `{"script":...}`. Without a
+  shell, it exits with 2. `tikk completions --help` says how to load the script in bash, zsh, and
+  fish. Started from a copy at a path with a space, such as `/tmp/a b/tikk`, the bash script calls
+  `'/tmp/a b/tikk'` without double quotes around it. Started through a path that is not valid
+  Unicode, it prints no script and exits with 1 and `programPathNotUnicode`.
+- ID completion: in a store with a plan, slices A and B under it, an instruction under A, and a
+  loose task, `COMPLETE=fish target/debug/tikk -- tikk block <task> ""` prints every ID with a tab
+  and its title, then the flags. `COMPLETE=fish target/debug/tikk -- tikk move <instruction>
+  --parent ""` prints only the two slices, and `COMPLETE=fish target/debug/tikk -- tikk rank <A>
+  --before ""` prints only B. `COMPLETE=fish target/debug/tikk -- tikk new instruction T --parent
+  ""` prints only the two slices, and `tikk ls --parent ""` and `tikk ready --parent ""` print
+  the plan and the two slices. `COMPLETE=bash _CLAP_COMPLETE_INDEX=3 target/debug/tikk -- tikk block
+  <task> ""` prints the IDs without titles, then the flags. After `rm "$TIKK_HOME/.git/tikk.lock"`,
+  a completion creates no lock file and changes no file. A `TIKK_HOME` with no store prints only
+  the flags, nothing on standard error, and exits with 0. `COMPLETE=tcsh` exits with 2 and names
+  the shells it knows.
 - `target/debug/tikk init --remote <remote> --machine laptop --json`, with an empty local bare
   remote made by `git init --bare --initial-branch=main /tmp/tikk-qa-remote.git`, exits with 0,
   prints `{"created":true,"store":"<TIKK_HOME>"}`, and pushes the first commit

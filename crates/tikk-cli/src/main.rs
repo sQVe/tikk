@@ -2,6 +2,7 @@ mod app;
 mod audit;
 mod claim;
 mod command;
+mod completion;
 mod edit;
 mod init;
 mod ls;
@@ -19,6 +20,8 @@ mod ticket_row;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
+    completion::complete_when_asked();
+
     let response = app::run(std::env::args_os().collect(), app::Environment::system());
 
     output::write(&response)

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use serde::{Serialize, Serializer};
+
 const ORIGIN_STARTS: [&str; 3] = [
     "https://github.com/",
     "git@github.com:",
@@ -27,6 +29,12 @@ impl Repository {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl Serialize for Repository {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.0)
     }
 }
 

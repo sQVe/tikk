@@ -101,11 +101,7 @@ fn trouble() {
     let slice_bytes = std::fs::read(&slice_path).expect("read the slice");
     let claim = home.tikk_as("manager", &["claim", &slice, "--json"]);
     assert_eq!(claim.exit_code, 0, "step 4, claim: {}", claim.stderr);
-    let claim_line = home.fact_lines().pop().expect("the claim is the last fact");
-    let mut lease_ended = claim_line.clone();
-    lease_ended["leaseEnd"] = json!("2020-01-01T04:00:00Z");
-    let month = claim_line["at"].as_str().expect("a fact has a time")[..7].to_owned();
-    home.append_fact_line(&format!("{month}.jsonl"), &lease_ended.to_string());
+    home.end_the_last_claim_lease();
     assert_eq!(
         home.show_json(&slice)["claim"]["state"],
         json!("staleClaim"),

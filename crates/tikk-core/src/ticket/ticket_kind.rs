@@ -13,6 +13,8 @@ pub enum Kind {
 }
 
 impl Kind {
+    const ALL: [Kind; 4] = [Self::Plan, Self::Slice, Self::Instruction, Self::Task];
+
     pub fn parse(text: &str) -> Result<Self, TicketError> {
         match text {
             "plan" => Ok(Self::Plan),
@@ -32,6 +34,17 @@ impl Kind {
             Self::Instruction => "instruction",
             Self::Task => "task",
         }
+    }
+
+    pub fn can_sit_under(self, parent: Kind) -> bool {
+        matches!(
+            (self, parent),
+            (Self::Slice, Self::Plan) | (Self::Instruction, Self::Slice) | (Self::Task, Self::Plan)
+        )
+    }
+
+    pub fn can_hold_children(self) -> bool {
+        Self::ALL.iter().any(|child| child.can_sit_under(self))
     }
 
     pub(crate) fn allows(self, status: Status) -> bool {
@@ -143,6 +156,20 @@ mod tests {
 
         for (status, name) in statuses {
             assert_eq!(status.to_string(), name, "case {name}");
+        }
+    }
+
+    #[test]
+    fn only_plans_and_slices_hold_children() {
+        let cases = [
+            (Kind::Plan, true),
+            (Kind::Slice, true),
+            (Kind::Instruction, false),
+            (Kind::Task, false),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(kind.can_hold_children(), expected, "case {kind}");
         }
     }
 

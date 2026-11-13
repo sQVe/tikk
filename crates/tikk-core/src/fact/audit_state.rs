@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use serde::{Serialize, Serializer};
+
 use crate::fact::{FactEvent, FactLine, Repository, Timestamp};
 use crate::ticket::TicketId;
 
@@ -11,7 +13,7 @@ pub enum Verdict {
     Deferred,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AuditVerdict {
     pub criterion: String,
     pub check: String,
@@ -20,7 +22,8 @@ pub struct AuditVerdict {
     pub evidence: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Audit {
     pub repository: Repository,
     pub head: String,
@@ -32,6 +35,12 @@ pub struct Audit {
 pub struct ShownAudit {
     pub audit: Audit,
     pub at: Timestamp,
+}
+
+impl Serialize for Verdict {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
 }
 
 impl Verdict {

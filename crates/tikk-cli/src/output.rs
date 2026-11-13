@@ -1,6 +1,8 @@
 use std::process::ExitCode;
 
+use serde::Serialize;
 use serde_json::{Value, json};
+use tikk_core::TicketId;
 
 pub(crate) struct Output {
     pub(crate) json: Value,
@@ -24,13 +26,31 @@ impl Exit {
     }
 }
 
+// The keys print in field order where serde_json keeps insertion order, which a workspace build
+// turns on through GPUI, and sorted otherwise. Reordering the fields changes the output there.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Failure {
     pub(crate) code: &'static str,
     pub(crate) message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) field: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) files: Option<Vec<String>>,
-    pub(crate) pull_requests: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) pull_requests: Option<Vec<PullRequestFailure>>,
+    #[serde(skip)]
     pub(crate) exit: Exit,
+}
+
+// Field order matters as for `Failure`.
+#[derive(Serialize)]
+pub(crate) struct PullRequestFailure {
+    pub(crate) id: TicketId,
+    pub(crate) repository: String,
+    pub(crate) number: u64,
+    pub(crate) url: String,
+    pub(crate) message: String,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -57,21 +77,7 @@ impl Response {
 
     pub(crate) fn failure(json: bool, failure: &Failure) -> Self {
         let stderr = if json {
-            let mut error = json!({ "code": failure.code, "message": failure.message });
-
-            if let Some(field) = &failure.field {
-                error["field"] = json!(field);
-            }
-
-            if let Some(files) = &failure.files {
-                error["files"] = json!(files);
-            }
-
-            if let Some(pull_requests) = &failure.pull_requests {
-                error["pullRequests"] = pull_requests.clone();
-            }
-
-            format!("{}\n", json!({ "error": error }))
+            format!("{}\n", json!({ "error": failure }))
         } else {
             format!("error: {}\n", failure.message)
         };
@@ -107,8 +113,10 @@ fn write_stderr(text: &str) {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use tikk_core::{PrFailure, PullRequest, StoreError, TicketId};
 
     use super::{Exit, Failure, Output, Response};
+    use crate::store_error;
 
     #[test]
     fn exit_codes_follow_the_contract() {
@@ -176,6 +184,42 @@ mod tests {
                 exit: Exit::Refused,
             }
         );
+    }
+
+    #[test]
+    fn failure_with_every_detail_prints_the_keys_as_the_built_error_object() {
+        let gh = store_error::failure(&StoreError::Gh {
+            failures: vec![PrFailure {
+                slice: TicketId::parse("personal-abcd").expect("a valid ID"),
+                pull_request: PullRequest::from_url("https://github.com/owner/app/pull/7")
+                    .expect("a valid PR URL"),
+                message: "gh failed".to_owned(),
+            }],
+        });
+        let failure = Failure {
+            code: "conflict",
+            message: "Sync stopped.".to_owned(),
+            field: Some("parent".to_owned()),
+            files: Some(vec!["tickets/personal/personal-abcd-a.md".to_owned()]),
+            pull_requests: gh.pull_requests,
+            exit: Exit::Refused,
+        };
+        // Built key by key, as the error object was built before `Failure` derived `Serialize`,
+        // so the bytes match in a build with and without serde_json's `preserve_order`.
+        let mut error = json!({ "code": "conflict", "message": "Sync stopped." });
+        error["field"] = json!("parent");
+        error["files"] = json!(["tickets/personal/personal-abcd-a.md"]);
+        error["pullRequests"] = json!([{
+            "id": "personal-abcd",
+            "repository": "owner/app",
+            "number": 7,
+            "url": "https://github.com/owner/app/pull/7",
+            "message": "gh failed",
+        }]);
+
+        let response = Response::failure(true, &failure);
+
+        assert_eq!(response.stderr, format!("{}\n", json!({ "error": error })));
     }
 
     #[test]

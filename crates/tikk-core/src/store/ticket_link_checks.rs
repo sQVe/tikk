@@ -3,8 +3,8 @@ use std::fmt;
 
 use crate::store::StoreError;
 use crate::store::ticket_files::TicketScan;
-use crate::store::ticket_queries::ticket_path;
-use crate::ticket::{Kind, TicketFields, TicketId};
+use crate::store::ticket_index::{TicketIndex, TicketLookup, shared};
+use crate::ticket::{TicketFields, TicketId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WaitLink {
@@ -34,7 +34,7 @@ pub(crate) fn check_ticket_links(
     fields: &TicketFields,
     scan: &TicketScan,
 ) -> Result<(), StoreError> {
-    check_links_with(fields, scan, None)
+    check_links_with(fields, &TicketIndex::new(scan), None)
 }
 
 // The scan holds the ticket as it was, so the ticket's new kind and parent replace its old ones.
@@ -43,8 +43,10 @@ pub(crate) fn check_written_links(
     fields: &TicketFields,
     scan: &TicketScan,
 ) -> Result<(), StoreError> {
-    refuse_cycle(id, fields, scan)?;
-    check_links_with(fields, scan, Some(id))?;
+    let index = TicketIndex::new(scan);
+
+    refuse_cycle(id, fields, &index)?;
+    check_links_with(fields, &index, Some(id))?;
 
     let children = scan
         .tickets
@@ -60,39 +62,31 @@ pub(crate) fn check_written_links(
 
 fn check_links_with(
     fields: &TicketFields,
-    scan: &TicketScan,
+    index: &TicketIndex<'_>,
     written: Option<&TicketId>,
 ) -> Result<(), StoreError> {
     for id in fields.linked_ids() {
-        if let Err(error @ StoreError::IdShared { .. }) = ticket_path(scan, id) {
-            return Err(error);
+        refuse_shared(index, id)?;
+    }
+
+    fields.check_links(|id| {
+        if written == Some(id) {
+            return Some(fields.kind());
         }
-    }
 
-    let mut kinds: HashMap<&TicketId, Kind> = scan
-        .tickets
-        .iter()
-        .map(|ticket| (&ticket.id, ticket.document.fields.kind()))
-        .collect();
-
-    if let Some(id) = written {
-        kinds.insert(id, fields.kind());
-    }
-
-    fields.check_links(|id| kinds.get(id).copied())?;
+        found_fields(index, id).map(TicketFields::kind)
+    })?;
 
     Ok(())
 }
 
-fn refuse_cycle(id: &TicketId, fields: &TicketFields, scan: &TicketScan) -> Result<(), StoreError> {
-    let waits: HashMap<&TicketId, &TicketFields> = scan
-        .tickets
-        .iter()
-        .map(|ticket| (&ticket.id, &ticket.document.fields))
-        .collect();
-
+fn refuse_cycle(
+    id: &TicketId,
+    fields: &TicketFields,
+    index: &TicketIndex<'_>,
+) -> Result<(), StoreError> {
     for (field, link, target) in wait_edges(fields) {
-        if let Some(path) = find_wait_path(target, id, &waits, scan)? {
+        if let Some(path) = find_wait_path(target, id, index)? {
             let mut steps = vec![WaitStep {
                 waiter: id.clone(),
                 link,
@@ -124,8 +118,7 @@ fn wait_edges(fields: &TicketFields) -> impl Iterator<Item = (&'static str, Wait
 fn find_wait_path<'a>(
     start: &'a TicketId,
     goal: &TicketId,
-    waits: &HashMap<&'a TicketId, &'a TicketFields>,
-    scan: &TicketScan,
+    index: &TicketIndex<'a>,
 ) -> Result<Option<Vec<WaitStep>>, StoreError> {
     let mut reached_from: HashMap<&TicketId, (&TicketId, WaitLink)> = HashMap::new();
     let mut queue = VecDeque::from([start]);
@@ -136,14 +129,9 @@ fn find_wait_path<'a>(
             return Ok(Some(walk_back(start, goal, &reached_from)));
         }
 
-        if let Err(error @ StoreError::IdShared { .. }) = ticket_path(scan, ticket) {
-            return Err(error);
-        }
+        refuse_shared(index, ticket)?;
 
-        let edges = waits
-            .get(ticket)
-            .into_iter()
-            .flat_map(|fields| wait_edges(fields));
+        let edges = found_fields(index, ticket).into_iter().flat_map(wait_edges);
 
         for (_, link, next) in edges {
             if seen.insert(next) {
@@ -154,6 +142,20 @@ fn find_wait_path<'a>(
     }
 
     Ok(None)
+}
+
+fn refuse_shared(index: &TicketIndex<'_>, id: &TicketId) -> Result<(), StoreError> {
+    match index.look_up(id) {
+        TicketLookup::Shared(paths) => Err(shared(id, &paths)),
+        _ => Ok(()),
+    }
+}
+
+fn found_fields<'a>(index: &TicketIndex<'a>, id: &TicketId) -> Option<&'a TicketFields> {
+    match index.look_up(id) {
+        TicketLookup::Found(ticket) => Some(&ticket.document.fields),
+        _ => None,
+    }
 }
 
 fn walk_back(
@@ -184,10 +186,10 @@ fn walk_back(
 mod tests {
     use std::path::PathBuf;
 
-    use super::{WaitLink, WaitStep, check_written_links};
+    use super::{WaitLink, WaitStep, check_ticket_links, check_written_links};
     use crate::store::StoreError;
-    use crate::store::ticket_files::{StoredTicket, TicketScan};
-    use crate::ticket::{TicketDocument, TicketFields, TicketId};
+    use crate::store::ticket_files::{StoredTicket, TicketScan, UnreadableTicket};
+    use crate::ticket::{TicketDocument, TicketError, TicketFields, TicketId};
 
     fn id(text: &str) -> TicketId {
         TicketId::parse(text).expect("a valid ID")
@@ -223,6 +225,57 @@ mod tests {
             link,
             target: id(target),
         }
+    }
+
+    #[test]
+    fn a_link_to_an_unreadable_ticket_names_no_ticket() {
+        let mut store = scan(&[("personal-aaaa", "---\nkind: task\ntitle: A\n---\n")]);
+        store.errors.push(UnreadableTicket {
+            path: PathBuf::from("personal-bbbb.md"),
+            id: Some(id("personal-bbbb")),
+            message: "the document does not parse".to_owned(),
+        });
+        let linked =
+            fields("---\nkind: task\ntitle: N\nrelated: [personal-aaaa, personal-bbbb]\n---\n");
+
+        let error =
+            check_ticket_links(&linked, &store).expect_err("the second link names no ticket");
+
+        assert!(
+            matches!(&error, StoreError::Ticket(TicketError::Invalid { field, problem })
+                if field == "related" && problem == "names personal-bbbb, but no ticket has that ID"),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_link_to_an_id_that_two_files_hold_is_refused_as_shared() {
+        let store = scan(&[
+            ("personal-pppp", "---\nkind: plan\ntitle: P\n---\n"),
+            ("personal-pppp", "---\nkind: plan\ntitle: P again\n---\n"),
+        ]);
+        let linked = fields("---\nkind: task\ntitle: N\nparent: personal-pppp\n---\n");
+
+        let error = check_ticket_links(&linked, &store).expect_err("the parent ID is shared");
+
+        assert!(
+            matches!(&error, StoreError::IdShared { id, paths } if id == "personal-pppp" && paths.len() == 2),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_parent_of_a_kind_that_cannot_hold_the_ticket_is_refused() {
+        let store = scan(&[("personal-aaaa", "---\nkind: task\ntitle: A\n---\n")]);
+        let linked = fields("---\nkind: slice\ntitle: N\nparent: personal-aaaa\n---\n");
+
+        let error =
+            check_ticket_links(&linked, &store).expect_err("a slice cannot sit under a task");
+
+        assert!(
+            matches!(&error, StoreError::Ticket(TicketError::Invalid { field, .. }) if field == "parent"),
+            "{error:?}"
+        );
     }
 
     #[test]

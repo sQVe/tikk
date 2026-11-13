@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::store::ticket_files::TicketScan;
-use crate::store::ticket_queries::TicketIndex;
+use crate::store::ticket_index::TicketIndex;
 use crate::ticket::TicketId;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

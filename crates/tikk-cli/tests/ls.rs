@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use support::{Home, parse_json};
+use support::{Home, numbered_id, parse_json};
 
 fn listed_ids(run_stdout: &str) -> Vec<String> {
     let listing = parse_json(run_stdout);
@@ -202,24 +202,17 @@ fn ls_without_json_prints_a_row_per_ticket() {
 )]
 fn ls_json_of_two_thousand_tickets_reports_its_time() {
     let home = Home::initialized();
-    let alphabet: Vec<char> = "346789abcdefghijkmnpqrtwxyz".chars().collect();
     let folder = home.store().join("tickets/personal");
     std::fs::create_dir_all(&folder).expect("create the project folder");
 
     for index in 0..2_000 {
-        let code: String = [index / 729, index / 27 % 27, index % 27, 0]
-            .iter()
-            .map(|digit| alphabet[*digit])
-            .collect();
+        let id = numbered_id(index);
         let text = format!(
             "---\nkind: task\ntitle: Ticket {index}\nstatus: open\n---\nThe body of ticket {index}.\n"
         );
 
-        std::fs::write(
-            folder.join(format!("personal-{code}-ticket-{index}.md")),
-            text,
-        )
-        .expect("write a ticket");
+        std::fs::write(folder.join(format!("{id}-ticket-{index}.md")), text)
+            .expect("write a ticket");
     }
 
     let started = Instant::now();

@@ -53,6 +53,7 @@ the commit in its row.
 ### Agent interface
 
 - [0010: The CLI for agents is non-interactive and matches the desktop app](./0010-cli-contract-for-agents.md)
+- [0034: Shell completion calls back into tikk](./0034-shell-completion-calls-back-into-tikk.md)
 
 ### Domain and storage
 
