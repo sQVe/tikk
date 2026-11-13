@@ -13,10 +13,8 @@ use crate::output::Output;
 
 const COMPLETE_VARIABLE: &str = "COMPLETE";
 
-// Flags whose next word is their value, not the subject ID.
 const VALUE_FLAGS: &[&str] = &["--parent", "--before", "--after"];
 
-// Answers the shell and exits the process when `COMPLETE` names a shell, and returns otherwise.
 pub(crate) fn complete_when_asked() {
     CompleteEnv::with_factory(callback_tree)
         .var(COMPLETE_VARIABLE)
@@ -50,8 +48,6 @@ pub(crate) fn script_output(shell: Shell, program: &OsStr, working_directory: &P
     }
 }
 
-// The program is found the way `CompleteEnv` finds it, so the script equals the one that
-// `COMPLETE=<shell> tikk` prints.
 fn callback_program(program: &OsStr, working_directory: &Path) -> String {
     let mut path = PathBuf::from(program);
 
@@ -140,7 +136,6 @@ fn with_candidates(
     arguments: &[&str],
     candidates: &ArgValueCandidates,
 ) -> clap::Command {
-    // `mut_arg` would move the argument to the end, and so change the order of the positionals.
     tree.mut_subcommand(subcommand, |command| {
         command.mut_args(|arg| {
             if arguments.contains(&arg.get_id().as_str()) {
@@ -173,7 +168,6 @@ fn offered_tickets(lookup: &Lookup, offer: Offer) -> Vec<CompletionCandidate> {
         .collect()
 }
 
-// Without a known subject, every ticket is offered, because the command checks the kind itself.
 fn offers(offer: Offer, subject: Option<&StoredTicket>, ticket: &StoredTicket) -> bool {
     let Some(subject) = subject else {
         return true;
@@ -190,14 +184,12 @@ fn offers(offer: Offer, subject: Option<&StoredTicket>, ticket: &StoredTicket) -
     }
 }
 
-// Reads without the store lock and without a sync, so completion never waits and never writes.
 fn readable_tickets(store: Option<&Path>) -> Vec<StoredTicket> {
     let Some(store) = store else {
         return Vec::new();
     };
     let read = tikk_core::open(store).and_then(|store| tikk_core::read_tickets_unlocked(&store));
 
-    // A shell prompt has no place for an error, so a store that cannot be read offers no ID.
     read.unwrap_or_default()
 }
 

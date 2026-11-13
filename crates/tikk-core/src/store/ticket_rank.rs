@@ -73,8 +73,6 @@ fn anchors_itself(place: &RankPlace, id: &TicketId) -> bool {
     }
 }
 
-/// Returns whether the two tickets share a parent and a project, so a rank can order one against the
-/// other. A ticket is its own sibling.
 pub fn are_siblings(ticket: &StoredTicket, other: &StoredTicket) -> bool {
     other.document.fields.parent() == ticket.document.fields.parent()
         && other.id.project() == ticket.id.project()

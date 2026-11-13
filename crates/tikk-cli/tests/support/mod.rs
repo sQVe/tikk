@@ -30,7 +30,6 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
 
 const IDENTITY_ENVIRONMENT: &[&str] = &["TIKK_AGENT", "TIKK_SESSION", "TIKK_SESSION_LOG"];
 
-/// A shell sets these when it asks tikk for completions, and tikk then prints no command result.
 const COMPLETION_ENVIRONMENT: &[&str] = &["COMPLETE", "_CLAP_COMPLETE_INDEX", "_CLAP_IFS"];
 
 /// The `EILSEQ` code on macOS, where APFS refuses a file name that is not UTF-8.
@@ -149,7 +148,6 @@ impl Home {
         command
     }
 
-    /// Asks tikk, as fish does, for the candidates of the last word of `words`.
     pub(crate) fn complete(&self, words: &[&str]) -> Run {
         let mut arguments = vec!["--", "tikk"];
 

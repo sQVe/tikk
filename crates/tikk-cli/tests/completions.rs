@@ -6,8 +6,6 @@ use serde_json::json;
 
 use support::{Home, Run, finish, parse_json};
 
-/// The value candidates fish receives, as sorted `(ID, title)` pairs. An empty word also offers the
-/// flags, which are left out.
 fn candidates(run: &Run) -> Vec<(String, String)> {
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     assert_eq!(run.stderr, "");
@@ -260,7 +258,6 @@ fn commands_complete_without_a_store() {
     );
 }
 
-/// Runs `<shell> -n` on the script, and skips a shell that is not installed.
 #[expect(
     clippy::print_stderr,
     reason = "a test that skips a shell names the reason in its output"
