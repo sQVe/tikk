@@ -1,10 +1,8 @@
 use std::path::Path;
 
-use crate::fact::{
-    AgentName, Claim, FactEvent, FactLine, Timestamp, current_claims, write_fact_line,
-};
+use crate::fact::{AgentName, Claim, FactEvent, FactLine, Timestamp, current_claims};
 use crate::store::StoreError;
-use crate::store::fact_files::{self, fact_file, read_facts};
+use crate::store::fact_files::{self, append_fact, read_facts};
 use crate::store::identity::Identity;
 use crate::store::system;
 use crate::ticket::{Kind, TicketFields, TicketId};
@@ -56,7 +54,11 @@ pub(crate) fn write_for_slice<T>(
     let written = write()?;
 
     if let Some(claim) = claim.filter(|claim| claim.agent == *agent) {
-        append_fact(root, &claim_fact(slice, claim.renewed(now), now), effects)?;
+        append_fact(
+            root,
+            &claim_fact(slice, claim.renewed(now), now),
+            effects.append_line,
+        )?;
     }
 
     Ok(written)
@@ -85,14 +87,4 @@ pub(crate) fn claim_fact(slice: &TicketId, claim: Claim, now: Timestamp) -> Fact
         at: now,
         event: FactEvent::Claim(claim),
     }
-}
-
-pub(crate) fn append_fact(
-    root: &Path,
-    fact: &FactLine,
-    effects: &LeaseEffects,
-) -> Result<(), StoreError> {
-    let path = fact_file(root, fact.at)?;
-
-    (effects.append_line)(&path, &write_fact_line(fact))
 }

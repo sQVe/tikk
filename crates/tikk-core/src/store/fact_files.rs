@@ -2,7 +2,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
-use crate::fact::{FactLine, Timestamp, parse_fact_line};
+use crate::fact::{FactLine, Timestamp, parse_fact_line, write_fact_line};
 use crate::store::StoreError;
 use crate::store::machine::read_machine;
 use crate::store::ticket_files::{exists, io_error, is_folder, sorted_entries};
@@ -44,6 +44,16 @@ pub(crate) fn append_line(path: &Path, line: &str) -> Result<(), StoreError> {
 
     file.write_all(line.as_bytes())
         .map_err(|source| io_error("append to", path, source))
+}
+
+pub(crate) fn append_fact(
+    root: &Path,
+    fact: &FactLine,
+    append_line: fn(&Path, &str) -> Result<(), StoreError>,
+) -> Result<(), StoreError> {
+    let path = fact_file(root, fact.at)?;
+
+    append_line(&path, &write_fact_line(fact))
 }
 
 pub(crate) fn read_facts(root: &Path) -> Result<FactScan, StoreError> {

@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crate::fact::{Claim, ClaimState, FactEvent, FactLine, Timestamp, current_claims};
-use crate::store::claim_lease::{LeaseEffects, append_fact, claim_fact, refuse_other_holder};
-use crate::store::fact_files::read_facts;
+use crate::store::claim_lease::{LeaseEffects, claim_fact, refuse_other_holder};
+use crate::store::fact_files::{append_fact, read_facts};
 use crate::store::identity::Identity;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_files::{StoredTicket, TicketScan, read_tickets};
@@ -61,7 +61,7 @@ pub fn claim_slice(
     append_fact(
         store.root(),
         &claim_fact(id, claim.clone(), now),
-        &effects.lease,
+        effects.lease.append_line,
     )?;
 
     Ok(claim)
@@ -96,7 +96,7 @@ pub fn release_slice(
         },
     };
 
-    append_fact(store.root(), &release, &effects.lease)?;
+    append_fact(store.root(), &release, effects.lease.append_line)?;
 
     Ok(Some(current))
 }
