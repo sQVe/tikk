@@ -13,8 +13,6 @@ use crate::output::Output;
 
 const COMPLETE_VARIABLE: &str = "COMPLETE";
 
-const VALUE_FLAGS: &[&str] = &["--parent", "--before", "--after"];
-
 pub(crate) fn complete_when_asked() {
     CompleteEnv::with_factory(callback_tree)
         .var(COMPLETE_VARIABLE)
@@ -194,31 +192,17 @@ fn readable_tickets(store: Option<&Path>) -> Vec<StoredTicket> {
 }
 
 fn subject(words: &[OsString], command: &str) -> Option<TicketId> {
-    let mut positionals = Vec::new();
-    let mut skips_value = false;
+    let matches = Cli::command()
+        .ignore_errors(true)
+        .try_get_matches_from(words)
+        .ok()?;
+    let (name, arguments) = matches.subcommand()?;
 
-    for word in words.iter().skip(1) {
-        let word = word.to_str()?;
-
-        if skips_value {
-            skips_value = false;
-            continue;
-        }
-
-        if VALUE_FLAGS.contains(&word) {
-            skips_value = true;
-            continue;
-        }
-
-        if !word.starts_with('-') {
-            positionals.push(word);
-        }
+    if name != command {
+        return None;
     }
 
-    match positionals.as_slice() {
-        [name, id, ..] if *name == command => TicketId::parse(id).ok(),
-        _ => None,
-    }
+    arguments.try_get_one::<TicketId>("id").ok()?.cloned()
 }
 
 #[cfg(test)]
@@ -235,29 +219,58 @@ mod tests {
     }
 
     #[test]
-    fn the_subject_is_the_first_word_after_the_command_that_no_flag_takes() {
-        let moved = TicketId::parse("personal-kkkk").expect("a valid ID");
+    fn the_subject_is_the_id_argument_of_the_named_command() {
+        let id = TicketId::parse("personal-kkkk").expect("a valid ID");
         let cases = [
             (
                 &["tikk", "move", "personal-kkkk", "--parent", ""][..],
-                Some(&moved),
+                "move",
+                Some(&id),
             ),
             (
                 &["tikk", "--json", "move", "personal-kkkk", "--parent", ""][..],
-                Some(&moved),
+                "move",
+                Some(&id),
             ),
             (
                 &["tikk", "move", "--parent", "personal-pppp", "personal-kkkk"][..],
-                Some(&moved),
+                "move",
+                Some(&id),
             ),
-            (&["tikk", "move", "--parent", ""][..], None),
-            (&["tikk", "rank", "personal-kkkk", "--before", ""][..], None),
-            (&["tikk", "move", "personal"][..], None),
+            (&["tikk", "move", "--parent", ""][..], "move", None),
+            (
+                &["tikk", "rank", "personal-kkkk", "--before", ""][..],
+                "move",
+                None,
+            ),
+            (&["tikk", "move", "personal"][..], "move", None),
+            (
+                &["tikk", "rank", "personal-kkkk", "--before", ""][..],
+                "rank",
+                Some(&id),
+            ),
+            (
+                &["tikk", "rank", "personal-kkkk", "--after"][..],
+                "rank",
+                Some(&id),
+            ),
+            (
+                &["tikk", "move", "personal-kkkk", "--bogus", "--parent", ""][..],
+                "move",
+                Some(&id),
+            ),
+            (&["tikk", "ls", "--search", "move"][..], "move", None),
+            (
+                &["tikk", "ls", "--search", "move", "personal-kkkk"][..],
+                "move",
+                None,
+            ),
+            (&["tikk", "mo"][..], "move", None),
         ];
 
-        for (values, expected) in cases {
+        for (values, command, expected) in cases {
             assert_eq!(
-                subject(&words(values), "move").as_ref(),
+                subject(&words(values), command).as_ref(),
                 expected,
                 "case {values:?}"
             );
