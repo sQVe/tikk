@@ -335,7 +335,29 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use super::{StoreError, open, store_path};
+    use super::{PrFailure, StoreError, open, store_path};
+    use crate::fact::PullRequest;
+    use crate::ticket::TicketId;
+
+    #[test]
+    fn a_gh_error_names_each_failed_pr_its_slice_and_the_reason() {
+        let failure = |number: u64, slice: &str, message: &str| PrFailure {
+            slice: TicketId::parse(slice).expect("a valid ID"),
+            pull_request: PullRequest::new("owner/app", number).expect("a valid PR"),
+            message: message.to_owned(),
+        };
+        let error = StoreError::Gh {
+            failures: vec![
+                failure(7, "tikk-abcd", "HTTP 502"),
+                failure(8, "tikk-efgh", "timed out"),
+            ],
+        };
+
+        assert_eq!(
+            error.to_string(),
+            "gh could not read https://github.com/owner/app/pull/7 of tikk-abcd (HTTP 502); https://github.com/owner/app/pull/8 of tikk-efgh (timed out)."
+        );
+    }
 
     #[test]
     fn a_conflict_names_each_file() {

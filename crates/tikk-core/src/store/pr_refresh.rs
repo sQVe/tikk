@@ -151,8 +151,34 @@ mod tests {
     const MERGED: &str = "{\"number\":7,\"state\":\"MERGED\",\"baseRefName\":\"main\",\"headRefOid\":\"head\",\"mergeCommit\":{\"oid\":\"merge\"}}";
     const TRUNK: &str = "{\"defaultBranchRef\":{\"name\":\"main\"}}";
 
+    const OPEN: &str = "{\"number\":7,\"state\":\"OPEN\",\"baseRefName\":\"main\",\"headRefOid\":\"new-head\",\"mergeCommit\":null}";
+
     thread_local! {
         static ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
+        static CALLS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn open_gh(arguments: &[&str]) -> Result<Vec<u8>, String> {
+        CALLS.with(|calls| calls.borrow_mut().push(arguments.join(" ")));
+
+        Ok(OPEN.as_bytes().to_vec())
+    }
+
+    fn open_effects() -> PrEffects {
+        PrEffects {
+            run_gh: open_gh,
+            ..PrEffects::system()
+        }
+    }
+
+    fn link_ticket(root: &std::path::Path, ticket: &str, observation: PrObservation) {
+        let fact = FactLine {
+            ticket: id(ticket),
+            at: Timestamp::parse("2026-11-13T01:00:00Z").expect("a valid time"),
+            event: FactEvent::Pr(observation),
+        };
+
+        append_fact(root, &fact, append_line).expect("append the PR fact");
     }
 
     fn id(text: &str) -> TicketId {
@@ -209,6 +235,45 @@ mod tests {
         };
 
         (directory, store)
+    }
+
+    #[test]
+    fn refresh_appends_and_returns_the_state_gh_read_for_a_linked_slice() {
+        let (directory, store) = store_with_slice();
+        link(directory.path(), 7, "2026-11-13T01:00:00Z");
+
+        let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+
+        let facts = read_facts(store.root()).expect("read the facts").facts;
+        assert_eq!(CALLS.with(|calls| calls.take()).len(), 1);
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].slice, id("personal-kkkk"));
+        assert_eq!(refreshed[0].pr.observation.head, "new-head");
+        assert_eq!(facts.len(), 2);
+        assert!(
+            matches!(&facts[1].event, FactEvent::Pr(observation) if observation.head == "new-head")
+        );
+    }
+
+    #[test]
+    fn refresh_of_all_skips_a_pr_in_trunk_and_a_pr_fact_on_a_ticket_that_is_not_a_slice() {
+        let (directory, store) = store_with_slice();
+        let in_trunk = PrObservation {
+            state: PrState::Merged,
+            merge_commit: Some("merge".to_owned()),
+            in_trunk: true,
+            ..observation(7)
+        };
+        link_ticket(directory.path(), "personal-kkkk", in_trunk);
+        // Invalid data: `pr link` takes only slices, so this fact is written by hand.
+        link_ticket(directory.path(), "personal-pppp", observation(8));
+
+        let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+
+        let facts = read_facts(store.root()).expect("read the facts").facts;
+        assert_eq!(CALLS.with(|calls| calls.take()), Vec::<String>::new());
+        assert_eq!(refreshed, Vec::new());
+        assert_eq!(facts.len(), 2);
     }
 
     #[test]
