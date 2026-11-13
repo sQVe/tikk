@@ -3,7 +3,7 @@ use std::process::{Command, ExitCode};
 
 use thiserror::Error;
 
-use crate::{boundaries, module_table, raw_values};
+use crate::{adr_index, boundaries, module_table, raw_values};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
@@ -91,6 +91,7 @@ const STEPS: &[Step] = &[
 type SourceCheck = fn(&Path) -> anyhow::Result<()>;
 
 const SOURCE_CHECKS: &[(&str, SourceCheck)] = &[
+    ("adr-index", adr_index::check),
     ("crate-boundaries", boundaries::check),
     ("module-table", module_table::check),
     ("raw-values", raw_values::check),
@@ -403,6 +404,9 @@ mod tests {
     fn workspace_with_valid_metadata() -> tempfile::TempDir {
         let root = source_folders();
 
+        std::fs::create_dir_all(root.path().join("docs/adr")).expect("create ADR folder");
+        std::fs::write(root.path().join("docs/adr/README.md"), "## Index\n")
+            .expect("write empty ADR index");
         std::fs::create_dir(root.path().join("src")).expect("create source folder");
         std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
         std::fs::write(root.path().join("Cargo.toml"),
@@ -458,6 +462,20 @@ mod tests {
         assert_eq!(
             check_steps(root.path(), &[], &[Group::Tidy]),
             ExitCode::SUCCESS
+        );
+    }
+
+    #[test]
+    fn tidy_reports_adr_index_failures() {
+        let root = workspace_with_valid_metadata();
+        let path = root.path().join("docs/adr/0001-choice.md");
+        let source = "# ADR 0001: A choice\n";
+        std::fs::write(&path, source).expect("write unlisted ADR");
+
+        assert_eq!(failed_source_checks(root.path()), ["adr-index"]);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read unchanged ADR"),
+            source
         );
     }
 

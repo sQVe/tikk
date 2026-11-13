@@ -1,3 +1,4 @@
+mod adr_index;
 mod boundaries;
 mod check;
 mod mock;
