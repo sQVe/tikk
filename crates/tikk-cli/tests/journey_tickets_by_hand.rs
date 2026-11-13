@@ -128,10 +128,15 @@ fn tickets_by_hand() {
 
     let block = home.tikk(&["block", lease, import]);
     assert_eq!(block.exit_code, 0, "step 6, block: {}", block.stderr);
-    assert_eq!(
-        home.show_json(lease)["blockedBy"],
-        json!([import]),
-        "step 6, show lists the blocker"
+    let shown = home.tikk(&["show", lease]);
+    assert_eq!(shown.exit_code, 0, "step 6, show: {}", shown.stderr);
+    assert!(
+        shown
+            .stdout
+            .lines()
+            .any(|line| line == format!("blockedBy: {import}")),
+        "step 6, show lists the blocker: {}",
+        shown.stdout
     );
     let reverse = home.tikk(&["block", import, lease, "--json"]);
     assert_eq!(
