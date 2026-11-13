@@ -454,3 +454,39 @@ fn init_remote_with_a_relative_path_to_a_populated_remote_uses_the_working_direc
         laptop.git(&["rev-parse", "main"]).trim()
     );
 }
+
+#[test]
+fn init_remote_with_a_colon_free_git_rewrite_alias_reaches_the_remote() {
+    let remote = support::Remote::new();
+    let home = Home::new();
+    let setup = tempfile::tempdir().expect("create a temporary directory");
+    let global_config = setup.path().join("gitconfig");
+    std::fs::write(
+        &global_config,
+        format!("[url \"{}\"]\n\tinsteadOf = alias/remote\n", remote.url()),
+    )
+    .expect("write the global Git config");
+
+    let run = home.tikk_with_environment(
+        &home.work(),
+        &[("GIT_CONFIG_GLOBAL", &global_config)],
+        &[
+            "init",
+            "--remote",
+            "alias/remote",
+            "--machine",
+            "laptop",
+            "--json",
+        ],
+    );
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    assert_eq!(
+        home.git(&["remote", "get-url", "origin"]).trim(),
+        "alias/remote"
+    );
+    assert_eq!(
+        remote.git(&["rev-parse", "main"]).trim(),
+        home.git(&["rev-parse", "main"]).trim()
+    );
+}

@@ -23,20 +23,22 @@ pub(crate) fn run_remote(
         .map(|outcome| init_output(&outcome))
 }
 
-/// A remote as Git reads it, with a relative local path made absolute.
 pub(crate) struct RemoteLocation(String);
 
 impl RemoteLocation {
-    /// Git runs inside the store, so a relative local path would resolve from there instead of
-    /// from the caller. Git reads `scheme://` and `host:path`, with no slash before the colon, as
-    /// URLs.
+    // Git runs inside the store, so a relative local path would resolve from there instead of
+    // from the caller. A relative name that names no local folder stays as given, so Git can apply
+    // a `url.<base>.insteadOf` rewrite. Git reads `scheme://` and `host:path`, with no slash
+    // before the colon, as URLs.
     pub(crate) fn resolve(remote: &str, working_directory: &Path) -> Result<Self, StoreError> {
-        if is_url(remote) || Path::new(remote).is_absolute() {
+        let local_path = working_directory.join(remote);
+        let names_no_local_folder = !local_path.exists();
+
+        if is_url(remote) || Path::new(remote).is_absolute() || names_no_local_folder {
             return Ok(Self(remote.to_owned()));
         }
 
-        working_directory
-            .join(remote)
+        local_path
             .into_os_string()
             .into_string()
             .map(Self)
@@ -75,29 +77,49 @@ mod tests {
 
     use super::RemoteLocation;
 
-    fn resolved(remote: &str) -> String {
-        RemoteLocation::resolve(remote, Path::new("/home/user/work"))
+    fn resolved_in(remote: &str, working_directory: &Path) -> String {
+        RemoteLocation::resolve(remote, working_directory)
             .expect("the remote resolves")
             .0
     }
 
+    fn resolved(remote: &str) -> String {
+        resolved_in(remote, Path::new("/home/user/work"))
+    }
+
     #[test]
-    fn a_relative_local_path_resolves_from_the_working_directory() {
-        assert_eq!(resolved("../remote.git"), "/home/user/work/../remote.git");
-        assert_eq!(resolved("remote.git"), "/home/user/work/remote.git");
+    fn a_relative_path_to_a_local_folder_resolves_from_the_working_directory() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let work = directory.path().join("work");
+        std::fs::create_dir_all(&work).expect("create the working directory");
+        std::fs::create_dir_all(directory.path().join("remote.git")).expect("create the remote");
+        std::fs::create_dir_all(work.join("a:b/remote.git")).expect("create the remote");
+
         assert_eq!(
-            resolved("./a:b/remote.git"),
-            "/home/user/work/./a:b/remote.git"
+            resolved_in("../remote.git", &work),
+            format!("{}/../remote.git", work.display())
         );
+        assert_eq!(
+            resolved_in("./a:b/remote.git", &work),
+            format!("{}/./a:b/remote.git", work.display())
+        );
+    }
+
+    #[test]
+    fn a_relative_name_with_no_local_folder_stays_as_given_for_git_to_rewrite() {
+        assert_eq!(resolved("alias/remote.git"), "alias/remote.git");
+        assert_eq!(resolved("../remote.git"), "../remote.git");
     }
 
     #[test]
     fn a_working_directory_that_is_not_utf8_gives_a_git_error() {
         use std::os::unix::ffi::OsStrExt as _;
 
-        let working_directory = Path::new(std::ffi::OsStr::from_bytes(b"/home/\xff"));
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let working_directory = directory.path().join(std::ffi::OsStr::from_bytes(b"\xff"));
+        std::fs::create_dir_all(working_directory.join("remote.git")).expect("create the remote");
 
-        let result = RemoteLocation::resolve("remote.git", working_directory);
+        let result = RemoteLocation::resolve("remote.git", &working_directory);
 
         assert!(
             matches!(&result, Err(tikk_core::StoreError::Git { arguments, .. }) if arguments == "init --remote"),

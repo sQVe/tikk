@@ -109,7 +109,8 @@ Never:
 the author `tikk <tikk@localhost>`. Their local steps read no global or system Git config. Their
 network steps (`fetch`, `push`, `ls-remote`, and `clone`) keep it, so a credential helper or a
 `url.<base>.insteadOf` there applies, and they stop after 30 seconds. `tikk init --remote` resolves a relative
-local remote path from the working directory and saves it as an absolute `origin`. Without
+path that names a folder from the working directory and saves it as an absolute `origin`; any
+other relative name, such as an `insteadOf` alias, stays as given. Without
 `--machine`, it also starts `uname -n`. All run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
 and its arguments. It runs the program with no shell, with those arguments and then the ticket file
 path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
