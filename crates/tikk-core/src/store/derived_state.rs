@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use crate::fact::{FactLine, PrState, ShownAudit, ShownPr, Verdict, last_audits};
+use crate::fact::{FactLine, PrState, ShownPr, last_audits};
+use crate::store::audit_check::{AuditCheck, check_audit};
 use crate::store::ticket_files::{StoredTicket, TicketScan};
 use crate::store::ticket_queries::{TicketIndex, TicketLookup};
-use crate::ticket::{Criterion, Kind, Status, TicketId};
+use crate::ticket::{Kind, Status, TicketId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedStatus {
@@ -13,22 +14,6 @@ pub enum DerivedStatus {
     MergedUnverified,
     Done,
     Canceled,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AuditReason {
-    NotLinked,
-    RepositoryDiffers,
-    HeadDiffers,
-    CriterionMissing(String),
-    CriterionChanged(String),
-    NotMet(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuditCheck {
-    pub audit: ShownAudit,
-    pub reasons: Vec<AuditReason>,
 }
 
 #[derive(Debug, Default)]
@@ -56,34 +41,6 @@ impl DerivedStatus {
             Status::Done => Self::Done,
             Status::Canceled => Self::Canceled,
         }
-    }
-}
-
-impl AuditReason {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::NotLinked => "notLinked",
-            Self::RepositoryDiffers => "repositoryDiffers",
-            Self::HeadDiffers => "headDiffers",
-            Self::CriterionMissing(_) => "criterionMissing",
-            Self::CriterionChanged(_) => "criterionChanged",
-            Self::NotMet(_) => "notMet",
-        }
-    }
-
-    pub fn criterion(&self) -> Option<&str> {
-        match self {
-            Self::NotLinked | Self::RepositoryDiffers | Self::HeadDiffers => None,
-            Self::CriterionMissing(criterion)
-            | Self::CriterionChanged(criterion)
-            | Self::NotMet(criterion) => Some(criterion),
-        }
-    }
-}
-
-impl AuditCheck {
-    pub fn counts(&self) -> bool {
-        self.reasons.is_empty()
     }
 }
 
@@ -153,46 +110,6 @@ pub(crate) fn derive_states(
     states
 }
 
-fn check_audit(audit: ShownAudit, criteria: &[Criterion], pr: Option<&ShownPr>) -> AuditCheck {
-    let mut reasons = Vec::new();
-
-    match pr.map(|pr| &pr.observation) {
-        None => reasons.push(AuditReason::NotLinked),
-        Some(observation) => {
-            if observation.pull_request.repository() != audit.audit.repository.as_str() {
-                reasons.push(AuditReason::RepositoryDiffers);
-            }
-
-            if observation.head != audit.audit.head {
-                reasons.push(AuditReason::HeadDiffers);
-            }
-        }
-    }
-
-    for criterion in criteria {
-        let verdict = audit
-            .audit
-            .verdicts
-            .iter()
-            .find(|verdict| verdict.criterion == criterion.id);
-        let Some(verdict) = verdict else {
-            reasons.push(AuditReason::CriterionMissing(criterion.id.clone()));
-            continue;
-        };
-        let same_text = verdict.check == criterion.check && verdict.expected == criterion.expected;
-
-        if !same_text {
-            reasons.push(AuditReason::CriterionChanged(criterion.id.clone()));
-        }
-
-        if verdict.verdict != Verdict::Met {
-            reasons.push(AuditReason::NotMet(criterion.id.clone()));
-        }
-    }
-
-    AuditCheck { audit, reasons }
-}
-
 fn slice_status(pr: Option<&ShownPr>, check: Option<&AuditCheck>) -> DerivedStatus {
     let Some(pr) = pr else {
         return DerivedStatus::Open;
@@ -249,11 +166,12 @@ fn plan_status(plan: &TicketId, scan: &TicketScan, states: &DerivedStates) -> De
 mod tests {
     use std::path::PathBuf;
 
-    use super::{AuditReason, DerivedStates, DerivedStatus, derive_states};
+    use super::{DerivedStates, DerivedStatus, derive_states};
     use crate::fact::{
         Audit, AuditVerdict, FactEvent, FactLine, PrObservation, PrState, PullRequest, Repository,
         Timestamp, Verdict, current_prs,
     };
+    use crate::store::audit_check::AuditReason;
     use crate::store::ticket_files::{StoredTicket, TicketScan};
     use crate::ticket::{TicketDocument, TicketId};
 
@@ -410,65 +328,20 @@ mod tests {
     }
 
     #[test]
-    fn an_audit_lists_each_reason_it_does_not_count() {
-        let two = "criteria:\n  - id: s2\n    check: c\n    expected: e\n";
+    fn a_slice_keeps_the_check_of_its_last_audit() {
         let tickets = vec![
             plan(),
-            ticket(
-                "personal-kkkk",
-                &format!(
-                    "kind: slice\ntitle: Slice\nparent: personal-pppp\n{CRITERIA}{}",
-                    two.trim_start_matches("criteria:\n")
-                ),
-            ),
-        ];
-        let cases = [
-            (
-                "another repository and head",
-                audit(
-                    "personal-kkkk",
-                    "owner/other",
-                    "old",
-                    &[("s1", "e", Verdict::Met), ("s2", "e", Verdict::Met)],
-                ),
-                vec![AuditReason::RepositoryDiffers, AuditReason::HeadDiffers],
-            ),
-            (
-                "a changed, a missing, and a not-run criterion",
-                audit(
-                    "personal-kkkk",
-                    "owner/app",
-                    "head",
-                    &[("s1", "old", Verdict::NotRun), ("gone", "e", Verdict::Met)],
-                ),
-                vec![
-                    AuditReason::CriterionChanged("s1".to_owned()),
-                    AuditReason::NotMet("s1".to_owned()),
-                    AuditReason::CriterionMissing("s2".to_owned()),
-                ],
-            ),
+            slice("personal-kkkk", ""),
+            slice("personal-rrrr", ""),
         ];
 
-        for (name, audit, expected) in cases {
-            let states = derived(&scan(tickets.clone()), &[merged(), audit]);
-            let check = states
-                .audit(&id("personal-kkkk"))
-                .expect("the slice has an audit");
-
-            assert_eq!(check.reasons, expected, "case {name}");
-            assert!(!check.counts(), "case {name}");
-        }
-    }
-
-    #[test]
-    fn an_audit_of_a_slice_without_a_pr_does_not_count() {
-        let states = derived(&scan(vec![plan(), slice("personal-kkkk", "")]), &[met()]);
-
+        let states = derived(&scan(tickets), &[met()]);
         let check = states
             .audit(&id("personal-kkkk"))
             .expect("the slice has an audit");
 
         assert_eq!(check.reasons, vec![AuditReason::NotLinked]);
+        assert_eq!(states.audit(&id("personal-rrrr")), None);
     }
 
     #[test]
@@ -594,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn each_derived_status_and_reason_has_its_json_name_and_criterion() {
+    fn each_derived_status_has_its_json_name() {
         let statuses = [
             (DerivedStatus::Draft, "draft"),
             (DerivedStatus::Open, "open"),
@@ -603,31 +476,9 @@ mod tests {
             (DerivedStatus::Done, "done"),
             (DerivedStatus::Canceled, "canceled"),
         ];
-        let criterion = || "s1".to_owned();
-        let reasons = [
-            (AuditReason::NotLinked, "notLinked", None),
-            (AuditReason::RepositoryDiffers, "repositoryDiffers", None),
-            (AuditReason::HeadDiffers, "headDiffers", None),
-            (
-                AuditReason::CriterionMissing(criterion()),
-                "criterionMissing",
-                Some("s1"),
-            ),
-            (
-                AuditReason::CriterionChanged(criterion()),
-                "criterionChanged",
-                Some("s1"),
-            ),
-            (AuditReason::NotMet(criterion()), "notMet", Some("s1")),
-        ];
 
         for (status, name) in statuses {
             assert_eq!(status.as_str(), name, "case {status:?}");
-        }
-
-        for (reason, name, expected) in reasons {
-            assert_eq!(reason.as_str(), name, "case {reason:?}");
-            assert_eq!(reason.criterion(), expected, "case {reason:?}");
         }
     }
 }

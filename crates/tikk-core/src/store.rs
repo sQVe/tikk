@@ -1,4 +1,5 @@
 mod audit;
+mod audit_check;
 mod claim_lease;
 mod claim_sync;
 mod derived_state;
@@ -44,9 +45,10 @@ use std::time::Duration;
 use thiserror::Error;
 
 pub use audit::{AuditEffects, AuditRequest, audit_slice};
+pub use audit_check::{AuditCheck, AuditReason};
 pub use claim_lease::LeaseEffects;
 pub use claim_sync::Synced;
-pub use derived_state::{AuditCheck, AuditReason, DerivedStates, DerivedStatus};
+pub use derived_state::{DerivedStates, DerivedStatus};
 pub use fact_files::UnreadableFact;
 pub use id_clash::IdClash;
 pub use identity::Identity;
