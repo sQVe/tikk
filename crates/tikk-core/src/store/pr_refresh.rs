@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::fact::{PrObservation, PullRequest, ShownPr, current_prs};
+use crate::store::derived_state::{DerivedStates, DerivedStatus, derive_states};
 use crate::store::fact_files::read_facts;
 use crate::store::pr_github::{PrFailure, read_pull_request};
 use crate::store::pr_link::{PrEffects, append_pr, check_linkable};
@@ -17,11 +18,18 @@ pub struct RefreshedPr {
     pub pr: ShownPr,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshOutcome {
+    pub refreshed: Vec<RefreshedPr>,
+    /// The refreshed slices whose open PR has another head than their last audit.
+    pub audit_behind: Vec<TicketId>,
+}
+
 pub fn refresh_prs(
     store: &Store,
     slice: Option<&TicketId>,
     effects: &PrEffects,
-) -> Result<Vec<RefreshedPr>, StoreError> {
+) -> Result<RefreshOutcome, StoreError> {
     let root = store.root();
     let targets = {
         let _lock = (effects.lock_store)(root, LockAccess::Shared)?;
@@ -42,13 +50,13 @@ pub fn refresh_prs(
         }
     }
 
-    let refreshed = append_observed(root, observed, effects)?;
+    let outcome = append_observed(root, observed, effects)?;
 
     if !failures.is_empty() {
         return Err(StoreError::Gh { failures });
     }
 
-    Ok(refreshed)
+    Ok(outcome)
 }
 
 // The caller holds the store lock.
@@ -102,9 +110,12 @@ fn append_observed(
     root: &Path,
     observed: Vec<(TicketId, PrObservation)>,
     effects: &PrEffects,
-) -> Result<Vec<RefreshedPr>, StoreError> {
+) -> Result<RefreshOutcome, StoreError> {
     if observed.is_empty() {
-        return Ok(Vec::new());
+        return Ok(RefreshOutcome {
+            refreshed: Vec::new(),
+            audit_behind: Vec::new(),
+        });
     }
 
     let _lock = (effects.lock_store)(root, LockAccess::Exclusive)?;
@@ -125,7 +136,26 @@ fn append_observed(
         refreshed.push(RefreshedPr { slice, pr });
     }
 
-    Ok(refreshed)
+    let facts = read_facts(root)?.facts;
+    let derived = derive_states(&scan, &facts, &current_prs(&facts));
+    let audit_behind = refreshed
+        .iter()
+        .map(|refreshed| refreshed.slice.clone())
+        .filter(|slice| is_audit_behind(&index, &derived, slice))
+        .collect();
+
+    Ok(RefreshOutcome {
+        refreshed,
+        audit_behind,
+    })
+}
+
+fn is_audit_behind(index: &TicketIndex<'_>, derived: &DerivedStates, slice: &TicketId) -> bool {
+    let TicketLookup::Found(ticket) = index.look_up(slice) else {
+        return false;
+    };
+
+    derived.effective(ticket) == DerivedStatus::AuditBehind
 }
 
 fn still_linked(
@@ -255,7 +285,9 @@ mod tests {
         let (directory, store) = store_with_slice();
         link(directory.path(), 7, "2026-11-13T01:00:00Z");
 
-        let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+        let refreshed = refresh_prs(&store, None, &open_effects())
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(CALLS.with(|calls| calls.take()).len(), 1);
@@ -280,7 +312,9 @@ mod tests {
         link_ticket(directory.path(), "personal-kkkk", in_trunk);
         link_ticket(directory.path(), "personal-pppp", observation(8));
 
-        let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+        let refreshed = refresh_prs(&store, None, &open_effects())
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(CALLS.with(|calls| calls.take()), Vec::<String>::new());
@@ -300,7 +334,8 @@ mod tests {
         link_ticket(directory.path(), "personal-kkkk", in_trunk.clone());
 
         let refreshed = refresh_prs(&store, Some(&id("personal-kkkk")), &open_effects())
-            .expect("the refresh runs");
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         CALLS.with(|calls| calls.take());
@@ -333,7 +368,9 @@ mod tests {
             ..PrEffects::system()
         };
 
-        let refreshed = refresh_prs(&store, None, &effects).expect("the refresh runs");
+        let refreshed = refresh_prs(&store, None, &effects)
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(refreshed, Vec::new());

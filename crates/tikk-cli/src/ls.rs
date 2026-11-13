@@ -3,7 +3,7 @@ use tikk_core::{IdClash, QueryEffects, Store, StoreError, TicketFilter, TicketLi
 
 use crate::command::LsArguments;
 use crate::output::Output;
-use crate::ticket_row::{row_json, row_text};
+use crate::ticket_row::{read_row_json, read_row_text};
 
 pub(crate) fn run(
     store: &Store,
@@ -26,7 +26,11 @@ pub(crate) fn run(
 }
 
 fn listing_json(listing: &TicketListing) -> Value {
-    let tickets: Vec<Value> = listing.tickets.iter().map(row_json).collect();
+    let tickets: Vec<Value> = listing
+        .tickets
+        .iter()
+        .map(|ticket| read_row_json(ticket, &listing.derived))
+        .collect();
     let unreadable = listing
         .errors
         .iter()
@@ -45,7 +49,10 @@ fn listing_json(listing: &TicketListing) -> Value {
 }
 
 fn listing_text(listing: &TicketListing) -> String {
-    let rows = listing.tickets.iter().map(row_text);
+    let rows = listing
+        .tickets
+        .iter()
+        .map(|ticket| read_row_text(ticket, &listing.derived));
     let errors = listing
         .errors
         .iter()

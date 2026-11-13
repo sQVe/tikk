@@ -2,7 +2,7 @@ mod support;
 
 use serde_json::json;
 
-use support::{FakeGh, Home, parse_json};
+use support::{FakeGh, Home, parse_json, run_git};
 
 #[test]
 fn manager_runs_a_slice() {
@@ -178,12 +178,102 @@ fn manager_runs_a_slice() {
     assert_eq!(
         slice["claim"]["agent"],
         json!("manager"),
-        "end state, the manager holds the first slice"
+        "step 5, the manager holds the first slice"
     );
     assert!(
         slice["claim"]["leaseEnd"].as_str() > done_end.as_str(),
-        "end state, pr link moves leaseEnd from {done_end}"
+        "step 5, pr link moves leaseEnd from {done_end}"
     );
+
+    run_git(&home.work(), &["init", "--quiet"]);
+    run_git(
+        &home.work(),
+        &["remote", "add", "origin", "git@github.com:owner/app.git"],
+    );
+    let verdicts = home.document(
+        "verdicts.json",
+        &json!([{ "criterion": "s1", "verdict": "met", "evidence": "tikk init --json created the store." }])
+            .to_string(),
+    );
+    let hash = slice["hash"].as_str().expect("show prints the hash");
+
+    let audit = home.tikk_as(
+        "manager",
+        &[
+            "audit",
+            &first,
+            "--hash",
+            hash,
+            "--head",
+            head,
+            "--file",
+            verdicts.to_str().expect("a UTF-8 path"),
+            "--json",
+        ],
+    );
+
+    assert_eq!(audit.exit_code, 0, "step 6, audit: {}", audit.stderr);
+    let slice = home.show_json(&first);
+    assert_eq!(
+        slice["audit"]["repository"],
+        json!("owner/app"),
+        "step 6, the repository"
+    );
+    assert_eq!(slice["audit"]["head"], json!(head), "step 6, the head");
+    assert_eq!(
+        slice["audit"]["counts"],
+        json!(true),
+        "step 6, the audit counts: {slice}"
+    );
+    assert_eq!(
+        slice["derivedStatus"],
+        json!("open"),
+        "step 6, open until the merge"
+    );
+
+    gh.merged_pr(
+        "owner/app",
+        12,
+        support::TRUNK,
+        head,
+        "2222222222222222222222222222222222222222",
+    );
+    let refresh = home.tikk_with_gh(&gh, Some("manager"), &["pr", "refresh", "--json"]);
+
+    assert_eq!(
+        refresh.exit_code, 0,
+        "step 7, pr refresh: {}",
+        refresh.stderr
+    );
+    let slice = home.show_json(&first);
+    assert_eq!(
+        slice["pr"]["inTrunk"],
+        json!(true),
+        "step 7, the PR is in trunk"
+    );
+    assert_eq!(slice["status"], json!("open"), "step 7, the stored status");
+    assert_eq!(
+        slice["derivedStatus"],
+        json!("done"),
+        "step 7, done: {slice}"
+    );
+
+    let ready = home.tikk(&["ready", "--parent", &plan, "--json"]);
+    assert_eq!(ready.exit_code, 0, "end state, ready: {}", ready.stderr);
+    let queue = parse_json(&ready.stdout);
+    assert_eq!(
+        queue["candidates"],
+        json!([{
+            "id": second,
+            "title": "Add ticket files",
+            "kind": "slice",
+            "status": "open",
+            "parent": plan,
+            "stackParent": null,
+        }]),
+        "end state, ready offers only the second slice, with no stack parent"
+    );
+    assert_eq!(queue["skipped"], json!([]), "end state, nothing is skipped");
     assert_eq!(
         home.show_json(&second)["blockedBy"],
         json!([first]),

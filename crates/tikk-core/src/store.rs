@@ -1,5 +1,7 @@
+mod audit;
 mod claim_lease;
 mod claim_sync;
+mod derived_state;
 mod fact_files;
 mod git;
 mod id_clash;
@@ -41,15 +43,17 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+pub use audit::{AuditEffects, AuditRequest, audit_slice};
 pub use claim_lease::LeaseEffects;
 pub use claim_sync::Synced;
+pub use derived_state::{AuditCheck, AuditReason, DerivedStates, DerivedStatus};
 pub use fact_files::UnreadableFact;
 pub use id_clash::IdClash;
 pub use identity::Identity;
 pub use machine::MachineName;
 pub use pr_github::PrFailure;
 pub use pr_link::{PrEffects, link_pr};
-pub use pr_refresh::{RefreshedPr, refresh_prs};
+pub use pr_refresh::{RefreshOutcome, RefreshedPr, refresh_prs};
 pub use ready::{
     BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, ReadySlice, SkippedSlice,
     StackParent, ready_slices,
@@ -204,6 +208,12 @@ pub enum StoreError {
     MachineInUse { machine: String },
     #[error("gh could not read {}.", describe_pr_failures(failures))]
     Gh { failures: Vec<PrFailure> },
+    #[error("{} is not a verdict file: {message}.", path.display())]
+    InvalidVerdicts { path: PathBuf, message: String },
+    #[error("{id} has no criterion `{criterion}`. Run `tikk show {id}` for its criteria.")]
+    UnknownCriterion { id: String, criterion: String },
+    #[error("{}", describe_no_repository(origin.as_deref()))]
+    NoRepository { origin: Option<String> },
     #[error("{id} has no linked PR. Run `tikk pr link {id} <url>` first.")]
     NotLinked { id: String },
     #[error("{error} Then the sync result could not be saved: {save}")]
@@ -219,6 +229,13 @@ fn describe_cycle(steps: &[WaitStep]) -> String {
         .map(ToString::to_string)
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn describe_no_repository(origin: Option<&str>) -> String {
+    match origin {
+        None => "The working directory has no Git `origin`, so the audit has no repository. Pass --repository <owner/name>.".to_owned(),
+        Some(url) => format!("The origin URL `{url}` names no GitHub repository. Pass --repository <owner/name>."),
+    }
 }
 
 fn describe_pr_failures(failures: &[PrFailure]) -> String {

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::fact::{AgentName, Claim, FactError, PrObservation, PrState, PullRequest, Timestamp};
+use crate::fact::{
+    AgentName, Audit, AuditVerdict, Claim, FactError, PrObservation, PrState, PullRequest,
+    Repository, Timestamp, Verdict,
+};
 use crate::ticket::TicketId;
 
 const VERSION: u32 = 1;
@@ -17,6 +20,7 @@ pub(crate) enum FactEvent {
     Claim(Claim),
     Release { agent: Option<AgentName> },
     Pr(PrObservation),
+    Audit(Audit),
 }
 
 // Fields beyond these are ignored, so a later version may add some.
@@ -38,6 +42,17 @@ struct RawFact {
     head: Option<String>,
     merge_commit: Option<String>,
     in_trunk: Option<bool>,
+    ticket_hash: Option<String>,
+    verdicts: Option<Vec<RawVerdict>>,
+}
+
+#[derive(Deserialize)]
+struct RawVerdict {
+    criterion: String,
+    check: String,
+    expected: String,
+    verdict: String,
+    evidence: String,
 }
 
 #[derive(Serialize)]
@@ -78,6 +93,28 @@ struct PrText<'a> {
     in_trunk: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditText<'a> {
+    v: u32,
+    kind: &'static str,
+    ticket: String,
+    at: String,
+    repository: &'a str,
+    head: &'a str,
+    ticket_hash: &'a str,
+    verdicts: Vec<VerdictText<'a>>,
+}
+
+#[derive(Serialize)]
+struct VerdictText<'a> {
+    criterion: &'a str,
+    check: &'a str,
+    expected: &'a str,
+    verdict: &'static str,
+    evidence: &'a str,
+}
+
 pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
     let raw: RawFact = serde_json::from_str(text)
         .map_err(|error| FactError::new(format!("the line is not a fact: {error}")))?;
@@ -97,9 +134,10 @@ pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
             agent: raw.agent.as_deref().and_then(AgentName::parse),
         },
         "pr" => FactEvent::Pr(parse_pr(raw)?),
+        "audit" => FactEvent::Audit(parse_audit(raw)?),
         other => {
             return Err(FactError::new(format!(
-                "`{other}` is not a fact kind; use claim, release, or pr"
+                "`{other}` is not a fact kind; use claim, release, pr, or audit"
             )));
         }
     };
@@ -141,9 +179,29 @@ pub(crate) fn write_fact_line(fact: &FactLine) -> String {
             merge_commit: observation.merge_commit.as_deref(),
             in_trunk: observation.in_trunk,
         }),
+        FactEvent::Audit(audit) => serde_json::to_string(&AuditText {
+            v: VERSION,
+            kind: "audit",
+            ticket,
+            at,
+            repository: audit.repository.as_str(),
+            head: &audit.head,
+            ticket_hash: &audit.ticket_hash,
+            verdicts: audit.verdicts.iter().map(verdict_text).collect(),
+        }),
     };
 
     format!("{}\n", text.expect("a fact serializes to JSON"))
+}
+
+fn verdict_text(verdict: &AuditVerdict) -> VerdictText<'_> {
+    VerdictText {
+        criterion: &verdict.criterion,
+        check: &verdict.check,
+        expected: &verdict.expected,
+        verdict: verdict.verdict.as_str(),
+        evidence: &verdict.evidence,
+    }
 }
 
 fn parse_claim(raw: RawFact) -> Result<Claim, FactError> {
@@ -191,10 +249,53 @@ fn parse_pr(raw: RawFact) -> Result<PrObservation, FactError> {
     })
 }
 
+fn parse_audit(raw: RawFact) -> Result<Audit, FactError> {
+    let missing = |field: &str| FactError::new(format!("an audit fact needs `{field}`"));
+    let repository = raw.repository.ok_or_else(|| missing("repository"))?;
+    let repository = Repository::parse(&repository).ok_or_else(|| {
+        FactError::new(format!(
+            "`{repository}` is not a repository; use `owner/name`"
+        ))
+    })?;
+    let verdicts = raw
+        .verdicts
+        .ok_or_else(|| missing("verdicts"))?
+        .into_iter()
+        .map(parse_verdict)
+        .collect::<Result<_, _>>()?;
+
+    Ok(Audit {
+        repository,
+        head: raw.head.ok_or_else(|| missing("head"))?,
+        ticket_hash: raw.ticket_hash.ok_or_else(|| missing("ticketHash"))?,
+        verdicts,
+    })
+}
+
+fn parse_verdict(raw: RawVerdict) -> Result<AuditVerdict, FactError> {
+    let verdict = Verdict::parse(&raw.verdict).ok_or_else(|| {
+        FactError::new(format!(
+            "`{}` is not a verdict; use met, not-met, not-run, or deferred",
+            raw.verdict
+        ))
+    })?;
+
+    Ok(AuditVerdict {
+        criterion: raw.criterion,
+        check: raw.check,
+        expected: raw.expected,
+        verdict,
+        evidence: raw.evidence,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::{FactEvent, FactLine, parse_fact_line, write_fact_line};
-    use crate::fact::{AgentName, Claim, PrObservation, PrState, PullRequest, Timestamp};
+    use crate::fact::{
+        AgentName, Audit, AuditVerdict, Claim, PrObservation, PrState, PullRequest, Repository,
+        Timestamp, Verdict,
+    };
     use crate::ticket::TicketId;
 
     fn at(text: &str) -> Timestamp {
@@ -266,6 +367,72 @@ mod tests {
             "{\"v\":1,\"kind\":\"pr\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00.000Z\",\"repository\":\"owner/app\",\"number\":7,\"state\":\"merged\",\"base\":\"main\",\"head\":\"abc\",\"mergeCommit\":\"def\",\"inTrunk\":true}\n"
         );
         assert_eq!(parse_fact_line(text.trim_end()), Ok(fact));
+    }
+
+    #[test]
+    fn an_audit_line_has_its_fields_in_order_and_parses_back() {
+        let fact = FactLine {
+            ticket: slice(),
+            at: at("2026-11-13T01:00:00Z"),
+            event: FactEvent::Audit(Audit {
+                repository: Repository::parse("owner/app").expect("a valid repository"),
+                head: "abc".to_owned(),
+                ticket_hash: "hash".to_owned(),
+                verdicts: vec![AuditVerdict {
+                    criterion: "s1".to_owned(),
+                    check: "c".to_owned(),
+                    expected: "e".to_owned(),
+                    verdict: Verdict::NotMet,
+                    evidence: "It failed.".to_owned(),
+                }],
+            }),
+        };
+
+        let text = write_fact_line(&fact);
+
+        assert_eq!(
+            text,
+            "{\"v\":1,\"kind\":\"audit\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00.000Z\",\"repository\":\"owner/app\",\"head\":\"abc\",\"ticketHash\":\"hash\",\"verdicts\":[{\"criterion\":\"s1\",\"check\":\"c\",\"expected\":\"e\",\"verdict\":\"not-met\",\"evidence\":\"It failed.\"}]}\n"
+        );
+        assert_eq!(parse_fact_line(text.trim_end()), Ok(fact));
+    }
+
+    #[test]
+    fn parse_names_what_is_wrong_with_an_audit_line() {
+        let start =
+            "{\"v\":1,\"kind\":\"audit\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00Z\"";
+        let verdict = "{\"criterion\":\"s1\",\"check\":\"c\",\"expected\":\"e\",\"verdict\":\"met\",\"evidence\":\"x\"}";
+        let whole = format!(
+            "\"repository\":\"owner/app\",\"head\":\"abc\",\"ticketHash\":\"hash\",\"verdicts\":[{verdict}]"
+        );
+        let cases = [
+            (
+                whole.replace("\"repository\":\"owner/app\",", ""),
+                "`repository`",
+            ),
+            (whole.replace("\"head\":\"abc\",", ""), "`head`"),
+            (
+                whole.replace("\"ticketHash\":\"hash\",", ""),
+                "`ticketHash`",
+            ),
+            (
+                whole.replace(&format!(",\"verdicts\":[{verdict}]"), ""),
+                "`verdicts`",
+            ),
+            (whole.replace("owner/app", "owner"), "not a repository"),
+            (whole.replace("\"met\"", "\"passed\""), "not a verdict"),
+        ];
+
+        assert!(parse_fact_line(&format!("{start},{whole}}}")).is_ok());
+        for (fields, expected) in cases {
+            let error =
+                parse_fact_line(&format!("{start},{fields}}}")).expect_err("the line is refused");
+
+            assert!(
+                error.to_string().contains(expected),
+                "case {fields}: {error}"
+            );
+        }
     }
 
     #[test]

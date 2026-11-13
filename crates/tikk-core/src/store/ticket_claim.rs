@@ -167,12 +167,24 @@ fn check_claimable(ticket: &StoredTicket, scan: &TicketScan) -> Result<(), Store
         .into());
     }
 
+    check_strictly(ticket, scan, "a claim")
+}
+
+// The strict checks that a claim and an audit share: the slice's links pass the checks of
+// `tikk write`, and it has at least one criterion.
+pub(crate) fn check_strictly(
+    ticket: &StoredTicket,
+    scan: &TicketScan,
+    action: &str,
+) -> Result<(), StoreError> {
+    let fields = &ticket.document.fields;
+
     check_written_links(&ticket.id, fields, scan)?;
 
     if fields.criteria().is_empty() {
         return Err(TicketError::invalid(
             "criteria",
-            "is empty, and a slice needs at least one criterion before a claim",
+            format!("is empty, and a slice needs at least one criterion before {action}"),
         )
         .into());
     }
@@ -180,7 +192,7 @@ fn check_claimable(ticket: &StoredTicket, scan: &TicketScan) -> Result<(), Store
     Ok(())
 }
 
-fn refuse_other_kinds(ticket: &StoredTicket) -> Result<(), StoreError> {
+pub(crate) fn refuse_other_kinds(ticket: &StoredTicket) -> Result<(), StoreError> {
     let kind = ticket.document.fields.kind();
 
     if kind == Kind::Slice {

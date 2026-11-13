@@ -27,11 +27,15 @@ Take a slice from ready to done, with no step that marks it done by hand.
 5. `tikk pr link <first> <url>` with an open PR. `tikk show <first> --json` has the PR number,
    state, and `prCheckedAt`. `tikk ready --json` offers the second slice with that PR as its
    stack parent.
+6. In a working directory whose `origin` is the PR's GitHub repository,
+   `tikk audit <first> --hash <hash> --head <PR head> --file verdicts.json` with `met` for the
+   criterion. `tikk show <first> --json` reports the audit with `"counts":true`.
+7. The fake `gh` reports the PR merged into trunk, and the agent runs `tikk pr refresh`.
+   `tikk show <first> --json` keeps the stored `status` `open` and reports `derivedStatus` `done`.
 
 ## End state
 
-The store holds the plan, its two slices, and the done instruction under the first slice.
-`tikk show <first> --json` returns a `claim` held by the manager in the state `claimed`, with a
-`leaseEnd` later than the one `tikk claim` returned, and a `pr` in the state `open`.
-`tikk show <second> --json` returns the first slice in `blockedBy`, and `tikk ready --json` offers
-the second slice with the first slice's PR as its `stackParent`.
+The store holds the plan, its two slices, the done instruction under the first slice, and an audit
+of the first slice. `tikk show <first> --json` returns a `claim` held by the manager, a `pr` in the
+state `merged` and in trunk, and `derivedStatus` `done`. `tikk show <second> --json` returns the
+first slice in `blockedBy`, and `tikk ready --json` offers the second slice with no `stackParent`.

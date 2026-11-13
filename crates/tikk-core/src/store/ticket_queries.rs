@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::fact::{ShownPr, Timestamp, current_prs};
+use crate::store::derived_state::{DerivedStates, derive_states};
 use crate::store::fact_files::read_facts;
 use crate::store::id_clash::{IdClash, id_clashes};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
@@ -45,6 +46,7 @@ pub struct TicketListing {
     pub tickets: Vec<StoredTicket>,
     pub errors: Vec<UnreadableTicket>,
     pub clashes: Vec<IdClash>,
+    pub derived: DerivedStates,
 }
 
 #[derive(Debug)]
@@ -54,6 +56,7 @@ pub struct ShownTicket {
     pub files: Vec<String>,
     pub claim: Option<ShownClaim>,
     pub pr: Option<ShownPr>,
+    pub derived: DerivedStates,
 }
 
 pub fn list_tickets(
@@ -61,13 +64,14 @@ pub fn list_tickets(
     filter: &TicketFilter,
     effects: &QueryEffects,
 ) -> Result<TicketListing, StoreError> {
-    let scan = {
+    let (scan, facts) = {
         let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
 
-        read_tickets(store.root())?
+        (read_tickets(store.root())?, read_facts(store.root())?)
     };
     let search = filter.search.as_deref().map(str::to_lowercase);
     let clashes = id_clashes(&scan);
+    let derived = derive_states(&scan, &facts.facts, &current_prs(&facts.facts));
     let mut tickets: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -80,6 +84,7 @@ pub fn list_tickets(
         tickets,
         errors: scan.errors,
         clashes,
+        derived,
     })
 }
 
@@ -96,11 +101,14 @@ pub fn show_ticket(
     let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
     let scan = read_tickets(store.root())?;
     let ticket = find_ticket(&scan, id)?.clone();
+    let facts = read_facts(store.root())?.facts;
+    let prs = current_prs(&facts);
+    let derived = derive_states(&scan, &facts, &prs);
     let (claim, pr) = if ticket.document.fields.kind() == Kind::Slice {
-        let facts = read_facts(store.root())?.facts;
-        let pr = current_prs(&facts).remove(id);
-
-        (shown_claim(&facts, id, (effects.now)()), pr)
+        (
+            shown_claim(&facts, id, (effects.now)()),
+            prs.get(id).cloned(),
+        )
     } else {
         (None, None)
     };
@@ -118,6 +126,7 @@ pub fn show_ticket(
         files: folder_files(&folder)?,
         claim,
         pr,
+        derived,
     })
 }
 
