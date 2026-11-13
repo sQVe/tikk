@@ -318,7 +318,7 @@ mod tests {
     use super::{BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, ready_slices};
     use crate::fact::Timestamp;
     use crate::store::{Store, StoreError};
-    use crate::ticket::{Kind, TicketId};
+    use crate::ticket::{Kind, ProjectName, TicketId};
 
     const CRITERIA: &str = "criteria:\n  - id: s1\n    check: c\n    expected: e\n";
 
@@ -412,6 +412,56 @@ mod tests {
             .iter()
             .map(|skipped| (skipped.ticket.id.to_string(), skipped.holds.clone()))
             .collect()
+    }
+
+    #[test]
+    fn each_blocker_state_has_its_contract_name() {
+        let names = [
+            BlockerState::Open,
+            BlockerState::Draft,
+            BlockerState::Canceled,
+            BlockerState::Missing,
+            BlockerState::Unreadable,
+            BlockerState::Shared,
+        ]
+        .map(BlockerState::as_str);
+
+        assert_eq!(
+            names,
+            [
+                "open",
+                "draft",
+                "canceled",
+                "missing",
+                "unreadable",
+                "shared"
+            ]
+        );
+    }
+
+    #[test]
+    fn ready_in_a_project_offers_only_the_slices_of_that_project() {
+        let (directory, store) = store_with(&[
+            ("personal-pppp-plan.md", plan("open", "")),
+            ("personal-aaaa-open.md", slice("personal-pppp", "open", "")),
+        ]);
+        let other = directory.path().join("tickets/tikk");
+        fs::create_dir_all(&other).expect("create the other project folder");
+        fs::write(other.join("tikk-qqqq-plan.md"), plan("open", "")).expect("write a plan");
+        fs::write(
+            other.join("tikk-bbbb-open.md"),
+            slice("tikk-qqqq", "open", ""),
+        )
+        .expect("write a slice");
+        let scope = ReadyScope {
+            parent: None,
+            project: Some(ProjectName::parse("tikk").expect("a valid project")),
+            working_directory: PathBuf::from("/work"),
+        };
+
+        let queue = ready_slices(&store, scope, &effects()).expect("the queue is read");
+
+        assert_eq!(candidate_ids(&queue), ["tikk-bbbb"]);
     }
 
     #[test]
