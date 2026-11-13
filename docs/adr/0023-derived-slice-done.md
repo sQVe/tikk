@@ -11,20 +11,36 @@ must never close silently.
 
 ## Decision
 
-A slice is done when its PR merged into trunk and its criteria are met for the merged head. Done is
-derived from facts and is never written to the file. A slice whose PR merged with no current audit
-shows as merged but unverified.
+A slice is done when its PR merged into trunk and its last audit counts. Done is derived from the
+ticket files and the facts, and is never written to a file. The stored `status` stays as written, and
+`tikk done` still refuses a plan or a slice. Only an open plan or slice derives a state; a draft or
+canceled one keeps its stored status.
 
-Open instructions and open tasks at merge stay open. A slice whose PR merged into trunk with a
-passing audit is `flagged`, not done, while it has an open instruction or an open task. An
-instruction counts until it is accepted or canceled with a reason. A task counts while its status is
-`open`. Archived instructions and tasks count too, because archive hides a ticket but does not
-complete it. A flagged slice does not clear the tickets it blocks.
+An open slice derives one of these states, with no `flagged` and no `unknown` state:
 
-A plan's completion is derived the same way. An open plan is done when it has at least one slice or
-task that is not canceled, every slice that is not canceled is done, and every direct task is done
-or canceled. A draft or canceled plan keeps its stored status. A done plan clears the tickets it
-blocks.
+- `done`: its PR is in trunk and its last audit counts.
+- `mergedUnverified`: its PR is in trunk, and it has no audit or its last audit does not count.
+- `auditBehind`: its PR is open, and its last audit saw another head. The manager audits again
+  before the merge, while it still holds the slice.
+- `open`: any other case.
+
+An open instruction holds nothing back, because the audit already judges every criterion of the
+slice.
+
+A plan's completion is derived from its children. An open plan is done when it has at least one
+slice or task that is not canceled, every slice that is not canceled is done, and every direct task
+is done or canceled. A canceled child never counts. A done slice or plan clears the tickets it
+blocks in `tikk ready`, by direct and by inherited edges, and a done slice is no longer listed
+there. A `mergedUnverified` slice is skipped with that hold and does not clear the tickets it blocks.
+A slice whose ID two files share derives nothing, because tikk cannot tell which file a fact
+belongs to.
+
+Done fails closed on input that tikk cannot read. While any fact line does not parse, no slice
+derives `done`: a slice that would be done reads `mergedUnverified`, because the unreadable line may
+be a newer audit of it. Plans then cannot be done either. While any ticket file does not parse or
+cannot be read, no plan derives `done` and each open plan reads `open`, because the file may be an
+unfinished child. Slices are unaffected by unreadable ticket files, and the other derived states
+are unchanged. `show`, `ls`, `ready`, and `pr refresh` share this one derivation.
 
 Only `tikk pr link` and `tikk pr refresh` run `gh`, and each read appends a `pr` fact
 ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)). `pr link <slice> <url>` reads the PR and makes
@@ -41,26 +57,42 @@ output that shows a PR state shows `prCheckedAt` beside it, the time of the newe
 that PR, so the caller can tell how old the state is. There is no `unknown` state: a failed read
 leaves the last recorded state in place.
 
-`tikk audit <slice> --hash <hash> --repository <owner/name> --head <sha> --base <sha> --change-hash
-<hash> --verdicts-file <path>` records one verdict for each criterion of the slice. The audit
-refuses a ticket changed since the given hash. An audit counts only when its repository and head
-match the PR at merge, and it has a `met` verdict for every current criterion. A verdict counts only
-for the criterion's current `check` and `expected` text, so an edit to either text voids it until a
-new audit runs.
+`tikk audit <slice> --hash <hash> --head <sha> --file <path> [--repository <owner/name>]` appends
+an `audit` fact with a verdict for criteria of the slice. The repository is the GitHub repository of
+the working directory's `origin` unless `--repository` names one. The audit refuses a ticket changed
+since the given hash with `changedOnDisk`, and checks the hash and appends the fact in one hold of
+the store lock. It runs the strict checks of a claim except the open-only rule
+([ADR 0021](./0021-validation-levels.md)), so an audit after the merge works. It refuses another
+agent's live claim with `claimed`, renews the holder's lease ([ADR
+0022](./0022-claims-leases-and-ready-queue.md)), and runs no `gh` and no sync.
+
+A slice's last audit is its newest `audit` fact. It counts only when its repository and head match
+the PR state that the rules above select, with owner and name compared without letter case as
+GitHub does, the slice still has at least one criterion, every current criterion has a `met` verdict, and each
+criterion's `check` and `expected` text is the text the audit saw. An edit to either text voids the
+verdict until a new audit runs. `tikk show` lists each reason the last audit does not count:
+`headDiffers`, `repositoryDiffers`, `criterionChanged`, `criterionMissing`, or `notMet`, with the
+criterion where one applies, `noCriteria` when the slice has no criterion left, and `notLinked`
+when the slice has no PR. `tikk pr refresh` lists the
+refreshed slices that are `auditBehind`.
 
 ## Consequences
 
 ### Positive
 
 - Done means merged and verified against the merged code.
-- Open instructions and tasks never disappear at merge, and a plan is not done while work under it
-  is open.
+- A plan is not done while a slice or a task under it is open.
+- A broken fact line or ticket file never makes a slice or a plan read done.
+- An audit made before the merge still counts for the merged code when the PR head did not move.
 
 ### Negative
 
 - Derived done depends on fresh `gh` facts. A slice reads as open until a `tikk pr refresh`
   records its merge.
 - A slice sits as merged but unverified until an audit runs.
+- An instruction left open under a done slice stays open until someone closes or cancels it.
+- One broken fact line holds back done for every slice in the store, and one broken ticket file
+  holds back done for every plan, until someone fixes or removes it.
 
 ## Alternatives considered
 
@@ -73,6 +105,12 @@ show that the criteria are met.
 
 End unfinished instructions when the slice merges. Rejected because unfinished instructions never
 close silently.
+
+### A `flagged` state while an instruction is open
+
+Keep a slice that merged with a counting audit as `flagged`, not done, while it has an open
+instruction. Rejected because the audit already judges every criterion, so an open instruction adds
+no check, and a flagged slice would hold back the tickets it blocks.
 
 ### Read PR states through `gh` on each query
 

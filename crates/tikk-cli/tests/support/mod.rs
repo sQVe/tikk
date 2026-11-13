@@ -3,6 +3,7 @@
     reason = "each test file uses a different part of the shared helper"
 )]
 
+pub(crate) mod audit;
 mod gh;
 
 use std::ffi::OsString;

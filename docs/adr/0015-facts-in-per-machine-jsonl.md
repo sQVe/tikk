@@ -31,9 +31,12 @@ A `pr` fact records what `gh` showed of a slice's PR: `repository` as `owner/nam
 Each read appends a new line, even when nothing changed, so the time of the newest line shows when
 tikk last checked the PR.
 
-Evidence records carry the code state they saw: repository, head, base, and a change hash. Large
-logs and screenshots are stored by content hash. Secrets and raw session dumps never enter the
-store.
+Evidence records carry the code state they saw: repository, head, base, and a change hash. An
+`audit` fact is the one exception. It records `repository`, the PR `head` it saw, and `ticketHash`,
+the hash of the ticket file it audited, with each verdict and the criterion's `check` and `expected`
+text at that time. It needs no base or change hash, because it counts against the slice's PR head
+and current criteria ([ADR 0023](./0023-derived-slice-done.md)). Large logs and screenshots are
+stored by content hash. Secrets and raw session dumps never enter the store.
 
 ## Consequences
 

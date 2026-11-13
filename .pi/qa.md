@@ -2,8 +2,8 @@
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
 `tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `block`, `unblock`,
-`move`, `rank`, `claim`, `release`, `ready`, `sync`, `pr link`, `pr refresh`, `--help`, and
-`--version`, and `tikk-desktop`
+`move`, `rank`, `claim`, `release`, `ready`, `sync`, `pr link`, `pr refresh`, `audit`, `--help`,
+and `--version`, and `tikk-desktop`
 is a stub. A mock scene of the UI
 opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
 folder under `/tmp`.
@@ -45,7 +45,7 @@ test runs them against the built binary.
 | Journey                                                     | Goal                                                                            | Run it when the change touches                                                                                                | Test                                                    |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                               | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                                                               | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
-| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand.       | `tikk new --file`, `show`, `ready`, `claim`, `done`, `pr link`, ticket validation                                             | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand.       | `tikk new --file`, `show`, `ready`, `claim`, `done`, `pr link`, `pr refresh`, `audit`, derived states, ticket validation      | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
 | [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.                  | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, `sync`, `claim`, `pr refresh`, ID clashes, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
 | [two-machines](qa/journeys/two-machines.md)                 | See the same tickets on both machines, and never let two agents hold one slice. | `tikk init --remote`, `sync`, `claim`, `release`, Git calls of sync                                                           | `crates/tikk-cli/tests/journey_two_machines.rs`         |
 
@@ -104,8 +104,8 @@ Never:
 ### External programs
 
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
-`--parent` and `--project`, and `tikk ready` without them, start
-`git config --get remote.origin.url` in the working directory. `tikk sync` and
+`--parent` and `--project`, `tikk ready` without them, and `tikk audit` without `--repository`
+start `git config --get remote.origin.url` in the working directory. `tikk sync` and
 `tikk init --remote` start `git` in the store with no hook, no signing, and no terminal prompt, as
 the author `tikk <tikk@localhost>`. Their local steps read no global or system Git config. Their
 network steps (`fetch`, `push`, `ls-remote`, and `clone`) keep it, so a credential helper or a
@@ -312,17 +312,66 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   `  stacks on <url> of <linked slice> at abc123, checked <time>`. `tikk ready` and `tikk show`
   add no line to `calls.log`.
 - `target/debug/tikk pr refresh --json` reads every linked PR not yet in trunk and prints
-  `{"refreshed":[{"id":<slice>,"pr":{...}}]}`. A PR answered as `"state":"MERGED"` with
-  `"baseRefName":"feature"` and `"mergeCommit":{"oid":"def456"}` logs a `repo view` and an
-  `api --hostname github.com repos/owner/app/compare/main...def456` call, and has `"inTrunk":false` while the compare
-  answer is `{"status":"ahead"}` and `"inTrunk":true` after it is `{"status":"behind"}`. The next
-  `tikk pr refresh --json` prints `{"refreshed":[]}` and logs no call. `tikk pr refresh <slice>`
-  reads that slice's PR even when it is in trunk, and a slice with no PR exits with 1 and
-  `notLinked`. Without `--json`, it prints a line per PR, or `No PR to refresh.`
+  `{"auditBehind":[],"refreshed":[{"id":<slice>,"pr":{...}}]}`. A PR answered as
+  `"state":"MERGED"` with `"baseRefName":"feature"` and `"mergeCommit":{"oid":"def456"}` logs a
+  `repo view` and an `api --hostname github.com repos/owner/app/compare/main...def456` call, and
+  has `"inTrunk":false` while the compare answer is `{"status":"ahead"}` and `"inTrunk":true` after
+  it is `{"status":"behind"}`. The next `tikk pr refresh --json` prints
+  `{"auditBehind":[],"refreshed":[]}` and logs no call. `tikk pr refresh <slice>` reads that
+  slice's PR even when it is in trunk, and a slice with no PR exits with 1 and `notLinked`. Without
+  `--json`, it prints a line per PR, or `No PR to refresh.`
 - When the fake `gh` fails for one of two linked PRs, `target/debug/tikk pr refresh --json` exits
   with 1, records the other PR, and prints
   `{"error":{"code":"ghError","message":"gh could not read <url> of <slice> (...)","pullRequests":[...]}}`
   that names only the failed PR. `tikk ready` then still exits with 0.
+- `target/debug/tikk audit <slice> --hash <hash> --head <sha> --file <path> --repository owner/app
+  --json`, with the `hash` of `tikk show <slice> --json` and a file that holds
+  `[{"criterion":"s1","verdict":"met","evidence":"seen"}]`, exits with 0 and prints
+  `{"audit":{"at":...,"head":<sha>,"repository":"owner/app","ticketHash":<hash>,"verdicts":[{"check":...,"criterion":"s1","evidence":"seen","expected":...,"verdict":"met"}]},"id":<slice>}`.
+  It appends a `{"v":1,"kind":"audit",...}` line with those fields to the fact file and runs no
+  `gh`. Without `--json`, it prints `<slice>  audit of owner/app at <sha>: 1 of 1 met, at <time>`.
+  Without `--repository`, it reads the GitHub repository from `origin` of the working directory,
+  such as a folder with `git init` and `git remote add origin https://github.com/owner/app.git`.
+  Outside a repository, or with an `origin` that is not on `github.com`, it exits with 1 and
+  `noRepository`. An old hash exits with 1 and `changedOnDisk`, a criterion the slice does not have
+  exits with 1 and `unknownCriterion` and names it, and a verdict such as `passed`, an empty
+  evidence, a criterion named twice, or a file that is not a JSON list exits with 2 and
+  `invalidArguments`. A slice with no criteria exits with 1, `invalidTicket`, and the field
+  `criteria`, and a plan exits with 1 and `wrongKind`. With another agent's `TIKK_AGENT` on a live
+  claim, it exits with 1 and `claimed`; with the holder's, it moves `leaseEnd` forward. Each refused
+  audit appends no line.
+- `target/debug/tikk show <id> --json` of a plan or a slice keeps the stored `status` and adds
+  `derivedStatus`: `open`, `auditBehind`, `mergedUnverified`, `done`, or the stored `draft` or
+  `canceled`. A slice also has `audit`: `null`, or the last audit with `counts` and `reasons`, such
+  as `[{"reason":"notMet","criterion":"s1"}]`. The reasons are `headDiffers`,
+  `repositoryDiffers` (owner and name compare without letter case), `criterionChanged`,
+  `criterionMissing`, `notMet`, `noCriteria` for a slice with no criterion left, and `notLinked`
+  for a slice with no PR. To give a slice a PR state without `gh`, append a line such as
+  `{"v":1,"kind":"pr","ticket":<slice>,"at":"2026-11-13T01:00:00Z","repository":"owner/app","number":7,"state":"merged","base":"main","head":<sha>,"mergeCommit":"def","inTrunk":true}`
+  to the fact file. With that line and no audit, the slice is `mergedUnverified`; after an audit
+  with `met` for each criterion at that head and repository, it is `done`, and the plan is `done`
+  once each slice and task under it that is not canceled is done. An open PR (`"state":"open"`,
+  `"inTrunk":false`) with another head than the audit gives `auditBehind` and `headDiffers`.
+  Without `--json`, the row prints `open (done)`, and a line
+  `audit of owner/app at <sha>: 1 of 1 met, at <time>, counts` follows the `pr:` line.
+- `target/debug/tikk ls --json` rows and the `children` of `tikk show` add `derivedStatus` for
+  plans and slices, and keep `status`. `tikk ls --status open` still lists a done slice. Without
+  `--json`, the status column prints `open (done)`. `tikk done <slice>` still exits with 1 and
+  `wrongKind`.
+- In `target/debug/tikk ready --parent <plan> --json`, a done slice is neither a candidate nor
+  skipped, and a slice it blocks is a candidate with `"stackParent":null`. A `mergedUnverified`
+  slice is skipped with `{"reason":"mergedUnverified"}`, and a slice it blocks has
+  `{"reason":"blockedBy",...,"state":"mergedUnverified"}`.
+- Append a line that does not parse, such as `{"v":1,"kind":"audit"`, to a fact file. While it is
+  there, a slice that was `done` reads `mergedUnverified` in `show`, `ls`, and `ready`, its plan
+  reads `open`, a plan whose only members are done tasks reads `open`, and `ready --json` lists
+  the line in `errors`. An audit line with two verdicts for one criterion is such a line. Replace a ticket file of the store
+  with `---\nkind: [\n---\n`. While it is there, no plan reads `done`; an open plan reads `open`,
+  slices keep their derived state, and `ls --json` lists the file in `errors`.
+- With the fake `gh` answering an open PR with a new `headRefOid`,
+  `target/debug/tikk pr refresh --json` prints `"auditBehind":[<slice>]` beside `refreshed` for a
+  slice whose last audit saw another head, and `"auditBehind":[]` after an audit of the new head.
+  Without `--json`, it adds the line `<slice>  auditBehind: the PR head differs from the last audit`.
 - `target/debug/tikk init --remote <remote> --machine laptop --json`, with an empty local bare
   remote made by `git init --bare --initial-branch=main /tmp/tikk-qa-remote.git`, exits with 0,
   prints `{"created":true,"store":"<TIKK_HOME>"}`, and pushes the first commit

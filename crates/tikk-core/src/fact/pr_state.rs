@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::fact::{FactEvent, FactLine, Timestamp};
+use crate::fact::{FactEvent, FactLine, Repository, Timestamp};
 use crate::ticket::TicketId;
 
 const URL_START: &str = "https://github.com/";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PullRequest {
-    repository: String,
+    repository: Repository,
     number: u64,
 }
 
@@ -37,13 +37,9 @@ pub struct ShownPr {
 
 impl PullRequest {
     pub(crate) fn new(repository: &str, number: u64) -> Option<Self> {
-        let (owner, name) = repository.split_once('/')?;
-        let valid = is_name(owner) && is_name(name) && number > 0;
+        let repository = Repository::parse(repository)?;
 
-        valid.then(|| Self {
-            repository: repository.to_owned(),
-            number,
-        })
+        (number > 0).then_some(Self { repository, number })
     }
 
     pub fn from_url(url: &str) -> Option<Self> {
@@ -61,7 +57,7 @@ impl PullRequest {
     }
 
     pub fn repository(&self) -> &str {
-        &self.repository
+        self.repository.as_str()
     }
 
     pub fn number(&self) -> u64 {
@@ -102,12 +98,6 @@ impl ShownPr {
     pub fn state(&self) -> PrState {
         self.observation.state
     }
-}
-
-fn is_name(text: &str) -> bool {
-    let allowed = |character: char| character.is_ascii_alphanumeric() || "-_.".contains(character);
-
-    !text.is_empty() && text.chars().all(allowed)
 }
 
 pub(crate) fn current_prs<'a>(

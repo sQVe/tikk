@@ -2,9 +2,10 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::fact::{PrObservation, PullRequest, ShownPr, current_prs};
+use crate::store::derived_state::{DerivedStates, DerivedStatus, derive_states};
 use crate::store::fact_files::read_facts;
 use crate::store::pr_github::{PrFailure, read_pull_request};
-use crate::store::pr_link::{PrEffects, append_pr, check_linkable};
+use crate::store::pr_link::{PrEffects, append_pr_fact, check_linkable};
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::read_tickets;
 use crate::store::ticket_queries::{TicketIndex, TicketLookup, shared};
@@ -17,11 +18,17 @@ pub struct RefreshedPr {
     pub pr: ShownPr,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefreshOutcome {
+    pub refreshed: Vec<RefreshedPr>,
+    pub audit_behind: Vec<TicketId>,
+}
+
 pub fn refresh_prs(
     store: &Store,
     slice: Option<&TicketId>,
     effects: &PrEffects,
-) -> Result<Vec<RefreshedPr>, StoreError> {
+) -> Result<RefreshOutcome, StoreError> {
     let root = store.root();
     let targets = {
         let _lock = (effects.lock_store)(root, LockAccess::Shared)?;
@@ -42,13 +49,13 @@ pub fn refresh_prs(
         }
     }
 
-    let refreshed = append_observed(root, observed, effects)?;
+    let outcome = append_observed(root, observed, effects)?;
 
     if !failures.is_empty() {
         return Err(StoreError::Gh { failures });
     }
 
-    Ok(refreshed)
+    Ok(outcome)
 }
 
 // The caller holds the store lock.
@@ -102,16 +109,19 @@ fn append_observed(
     root: &Path,
     observed: Vec<(TicketId, PrObservation)>,
     effects: &PrEffects,
-) -> Result<Vec<RefreshedPr>, StoreError> {
+) -> Result<RefreshOutcome, StoreError> {
     if observed.is_empty() {
-        return Ok(Vec::new());
+        return Ok(RefreshOutcome {
+            refreshed: Vec::new(),
+            audit_behind: Vec::new(),
+        });
     }
 
     let _lock = (effects.lock_store)(root, LockAccess::Exclusive)?;
     let scan = read_tickets(root)?;
     let index = TicketIndex::new(&scan);
     let current = current_prs(&read_facts(root)?.facts);
-    let mut refreshed = Vec::new();
+    let mut appended = Vec::new();
 
     refuse_shared_ids(&index, observed.iter().map(|(slice, _)| slice))?;
 
@@ -120,12 +130,42 @@ fn append_observed(
             continue;
         }
 
-        let pr = append_pr(root, &slice, observation, &effects.lease)?;
-
-        refreshed.push(RefreshedPr { slice, pr });
+        append_pr_fact(root, &slice, observation, &effects.lease)?;
+        appended.push(slice);
     }
 
-    Ok(refreshed)
+    // One read after all appends, so a tie in time orders by file and line, as `show` does.
+    let facts = read_facts(root)?;
+    let mut prs = current_prs(&facts.facts);
+    let derived = derive_states(&scan, &facts, &prs);
+    let audit_behind = appended
+        .iter()
+        .filter(|slice| is_audit_behind(&index, &derived, slice))
+        .cloned()
+        .collect();
+    let refreshed = appended
+        .into_iter()
+        .map(|slice| {
+            let pr = prs
+                .remove(&slice)
+                .expect("the slice has the pr fact just appended");
+
+            RefreshedPr { slice, pr }
+        })
+        .collect();
+
+    Ok(RefreshOutcome {
+        refreshed,
+        audit_behind,
+    })
+}
+
+fn is_audit_behind(index: &TicketIndex<'_>, derived: &DerivedStates, slice: &TicketId) -> bool {
+    let TicketLookup::Found(ticket) = index.look_up(slice) else {
+        return false;
+    };
+
+    derived.effective(ticket) == DerivedStatus::AuditBehind
 }
 
 fn still_linked(
@@ -154,7 +194,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::refresh_prs;
-    use crate::fact::{FactEvent, FactLine, PrObservation, PrState, PullRequest, Timestamp};
+    use crate::fact::{
+        Audit, FactEvent, FactLine, PrObservation, PrState, PullRequest, Repository, Timestamp,
+    };
     use crate::store::fact_files::{append_fact, append_line, read_facts};
     use crate::store::pr_link::PrEffects;
     use crate::store::{MachineName, Store, StoreEffects, StoreError, init};
@@ -255,7 +297,9 @@ mod tests {
         let (directory, store) = store_with_slice();
         link(directory.path(), 7, "2026-11-13T01:00:00Z");
 
-        let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+        let refreshed = refresh_prs(&store, None, &open_effects())
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(CALLS.with(|calls| calls.take()).len(), 1);
@@ -280,7 +324,9 @@ mod tests {
         link_ticket(directory.path(), "personal-kkkk", in_trunk);
         link_ticket(directory.path(), "personal-pppp", observation(8));
 
-        let refreshed = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+        let refreshed = refresh_prs(&store, None, &open_effects())
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(CALLS.with(|calls| calls.take()), Vec::<String>::new());
@@ -300,7 +346,8 @@ mod tests {
         link_ticket(directory.path(), "personal-kkkk", in_trunk.clone());
 
         let refreshed = refresh_prs(&store, Some(&id("personal-kkkk")), &open_effects())
-            .expect("the refresh runs");
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         CALLS.with(|calls| calls.take());
@@ -333,10 +380,55 @@ mod tests {
             ..PrEffects::system()
         };
 
-        let refreshed = refresh_prs(&store, None, &effects).expect("the refresh runs");
+        let refreshed = refresh_prs(&store, None, &effects)
+            .expect("the refresh runs")
+            .refreshed;
 
         let facts = read_facts(store.root()).expect("read the facts").facts;
         assert_eq!(refreshed, Vec::new());
         assert_eq!(facts.len(), 2);
+    }
+
+    fn audit_head(root: &std::path::Path, head: &str) {
+        let fact = FactLine {
+            ticket: id("personal-kkkk"),
+            at: Timestamp::parse("2026-11-13T01:30:00Z").expect("a valid time"),
+            event: FactEvent::Audit(Audit {
+                repository: Repository::parse("owner/app").expect("a valid repository"),
+                head: head.to_owned(),
+                ticket_hash: "hash".to_owned(),
+                verdicts: Vec::new(),
+            }),
+        };
+
+        append_fact(root, &fact, append_line).expect("append the audit fact");
+    }
+
+    #[test]
+    fn refresh_lists_a_slice_as_audit_behind_only_when_its_last_audit_saw_another_head() {
+        let cases = [
+            ("no audit", None, Vec::new()),
+            (
+                "an audit of the old head",
+                Some("head"),
+                vec![id("personal-kkkk")],
+            ),
+            ("an audit of the new head", Some("new-head"), Vec::new()),
+        ];
+
+        for (name, audited, expected) in cases {
+            let (directory, store) = store_with_slice();
+            link(directory.path(), 7, "2026-11-13T01:00:00Z");
+
+            if let Some(head) = audited {
+                audit_head(directory.path(), head);
+            }
+
+            let outcome = refresh_prs(&store, None, &open_effects()).expect("the refresh runs");
+
+            CALLS.with(|calls| calls.take());
+            assert_eq!(outcome.refreshed.len(), 1, "case {name}");
+            assert_eq!(outcome.audit_behind, expected, "case {name}");
+        }
     }
 }

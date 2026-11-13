@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::fact::{Claim, PrState, ShownPr, Timestamp, current_claims, current_prs};
+use crate::store::derived_state::{DerivedStates, DerivedStatus, derive_states};
 use crate::store::fact_files::{UnreadableFact, read_facts};
 use crate::store::git;
 use crate::store::project_choice::choose_project;
@@ -65,6 +66,7 @@ pub struct SkippedSlice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hold {
     Draft,
+    MergedUnverified,
     BlockedBy {
         blocker: TicketId,
         via: Option<TicketId>,
@@ -85,6 +87,7 @@ pub enum BlockerState {
     Open,
     Draft,
     Canceled,
+    MergedUnverified,
     Missing,
     Unreadable,
     Shared,
@@ -96,6 +99,7 @@ impl BlockerState {
             Self::Open => "open",
             Self::Draft => "draft",
             Self::Canceled => "canceled",
+            Self::MergedUnverified => "mergedUnverified",
             Self::Missing => "missing",
             Self::Unreadable => "unreadable",
             Self::Shared => "shared",
@@ -118,6 +122,7 @@ pub fn ready_slices(
     let lookups = TicketIndex::new(&scan);
     let claims = current_claims(&facts.facts);
     let prs = current_prs(&facts.facts);
+    let derived = derive_states(&scan, &facts, &prs);
     let mut slices: Vec<&StoredTicket> = scan
         .tickets
         .iter()
@@ -130,6 +135,12 @@ pub fn ready_slices(
     let mut skipped = Vec::new();
 
     for slice in slices {
+        let status = derived.effective(slice);
+
+        if status == DerivedStatus::Done {
+            continue;
+        }
+
         if let TicketLookup::Shared(paths) = lookups.look_up(&slice.id) {
             skipped.push(SkippedSlice {
                 ticket: slice.clone(),
@@ -140,7 +151,11 @@ pub fn ready_slices(
             continue;
         }
 
-        let (mut holds, stack_parent) = blocking_holds(slice, &lookups, &prs);
+        let (mut holds, stack_parent) = blocking_holds(slice, &lookups, &prs, &derived);
+
+        if status == DerivedStatus::MergedUnverified {
+            holds.insert(0, Hold::MergedUnverified);
+        }
 
         if let Some(claim) = claims.get(&slice.id).filter(|claim| claim.is_live(now)) {
             holds.push(Hold::Claimed(claim.clone()));
@@ -224,12 +239,13 @@ fn blocking_holds(
     slice: &StoredTicket,
     lookups: &TicketIndex<'_>,
     prs: &HashMap<TicketId, ShownPr>,
+    derived: &DerivedStates,
 ) -> (Vec<Hold>, Option<StackParent>) {
     let (mut holds, edges) = own_holds_and_edges(slice, lookups);
     let mut stack_parents = Vec::new();
 
     for (blocker, via) in edges {
-        match classify_edge(blocker, via, lookups, prs) {
+        match classify_edge(blocker, via, lookups, prs, derived) {
             BlockerEdge::Holds(hold) => holds.push(hold),
             BlockerEdge::Stacks(parent) => stack_parents.push(parent),
             BlockerEdge::Cleared => {}
@@ -298,6 +314,7 @@ fn classify_edge(
     via: Option<&TicketId>,
     lookups: &TicketIndex<'_>,
     prs: &HashMap<TicketId, ShownPr>,
+    derived: &DerivedStates,
 ) -> BlockerEdge {
     let lookup = lookups.look_up(blocker);
 
@@ -310,7 +327,7 @@ fn classify_edge(
         });
     }
 
-    match blocker_state(lookup) {
+    match blocker_state(lookup, derived) {
         Some(state) => BlockerEdge::Holds(Hold::BlockedBy {
             blocker: blocker.clone(),
             via: via.cloned(),
@@ -344,12 +361,13 @@ fn plan_hold(status: Status) -> Option<BlockerState> {
     }
 }
 
-fn blocker_state(lookup: TicketLookup<'_>) -> Option<BlockerState> {
+fn blocker_state(lookup: TicketLookup<'_>, derived: &DerivedStates) -> Option<BlockerState> {
     match found(lookup) {
-        Ok(ticket) => match ticket.document.fields.status() {
-            Status::Done | Status::Canceled => None,
-            Status::Open => Some(BlockerState::Open),
-            Status::Draft => Some(BlockerState::Draft),
+        Ok(ticket) => match derived.effective(ticket) {
+            DerivedStatus::Done | DerivedStatus::Canceled => None,
+            DerivedStatus::Open | DerivedStatus::AuditBehind => Some(BlockerState::Open),
+            DerivedStatus::MergedUnverified => Some(BlockerState::MergedUnverified),
+            DerivedStatus::Draft => Some(BlockerState::Draft),
         },
         Err(state) => Some(state),
     }

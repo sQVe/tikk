@@ -530,6 +530,7 @@ fn a_claim_and_a_release_whose_commit_fails_keep_their_fact_save_the_problem_and
             FactEvent::Claim(_) => "claim",
             FactEvent::Release { .. } => "release",
             FactEvent::Pr(_) => "pr",
+            FactEvent::Audit(_) => "audit",
         })
         .collect();
     assert_eq!(kinds, ["claim", "release"], "both facts stay");

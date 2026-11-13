@@ -63,19 +63,13 @@ pub fn link_pr(
 }
 
 // The caller holds the exclusive lock.
-pub(crate) fn append_pr(
+fn append_pr(
     root: &Path,
     slice: &TicketId,
     observation: PrObservation,
     lease: &LeaseEffects,
 ) -> Result<ShownPr, StoreError> {
-    let fact = FactLine {
-        ticket: slice.clone(),
-        at: (lease.now)(),
-        event: FactEvent::Pr(observation),
-    };
-
-    append_fact(root, &fact, lease.append_line)?;
+    append_pr_fact(root, slice, observation, lease)?;
 
     // Read the facts again so a tie in time orders by file and line, as `show` does.
     let facts = read_facts(root)?.facts;
@@ -83,6 +77,22 @@ pub(crate) fn append_pr(
     Ok(current_prs(&facts)
         .remove(slice)
         .expect("the slice has the pr fact just appended"))
+}
+
+// The caller holds the exclusive lock.
+pub(crate) fn append_pr_fact(
+    root: &Path,
+    slice: &TicketId,
+    observation: PrObservation,
+    lease: &LeaseEffects,
+) -> Result<(), StoreError> {
+    let fact = FactLine {
+        ticket: slice.clone(),
+        at: (lease.now)(),
+        event: FactEvent::Pr(observation),
+    };
+
+    append_fact(root, &fact, lease.append_line)
 }
 
 pub(crate) fn check_linkable(scan: &TicketScan, slice: &TicketId) -> Result<(), StoreError> {
