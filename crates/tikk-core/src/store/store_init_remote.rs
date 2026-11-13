@@ -12,8 +12,6 @@ const FACTS_FOLDER: &str = "facts";
 #[derive(Clone, Copy)]
 pub struct RemoteInitEffects {
     pub run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
-    /// Reads the remote's branches, clones, and pushes. The system function stops Git after the
-    /// network timeout.
     pub run_network_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
     pub read_host_name: fn() -> Result<String, StoreError>,
 }
@@ -34,8 +32,6 @@ enum RemoteState {
     WithoutMain,
 }
 
-/// Clones the store from a remote with `main`, or creates a store and pushes it to an empty
-/// remote. An existing store is reported as `init` reports it, and is not attached to the remote.
 pub fn init_from_remote(
     root: &Path,
     url: &str,
@@ -74,7 +70,6 @@ pub fn init_from_remote(
     init(root, machine, &local)
 }
 
-/// A failed read is an error, so a remote that cannot be reached never counts as empty.
 fn read_remote(
     staging: &Path,
     url: &str,

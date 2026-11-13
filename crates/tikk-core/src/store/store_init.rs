@@ -210,7 +210,6 @@ fn create_store(root: &Path, effects: &StoreEffects) -> Result<bool, StoreError>
     publish(staging, root)
 }
 
-/// A staging folder beside the store, removed when it is dropped before `publish`.
 pub(crate) fn create_staging(root: &Path) -> Result<TempDir, StoreError> {
     let parent = root.parent().ok_or_else(|| StoreError::FolderNotEmpty {
         store: root.to_path_buf(),
@@ -233,7 +232,6 @@ pub(crate) fn create_staging(root: &Path) -> Result<TempDir, StoreError> {
         })
 }
 
-/// Gives the empty staging folder the files and the first commit of a new store.
 pub(crate) fn fill_new_store(
     staging: &Path,
     run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
@@ -247,8 +245,6 @@ pub(crate) fn fill_new_store(
     Ok(())
 }
 
-/// Renames the staging folder onto the store path. Returns false, and removes the staging folder,
-/// when another `init` put a store there first.
 pub(crate) fn publish(staging: TempDir, root: &Path) -> Result<bool, StoreError> {
     let staging = staging.keep();
     let Err(source) = fs::rename(&staging, root) else {

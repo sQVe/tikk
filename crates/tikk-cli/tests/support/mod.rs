@@ -75,7 +75,6 @@ impl Home {
         home
     }
 
-    /// A store made with `tikk init --remote` on the remote, as the machine.
     pub(crate) fn on_remote(remote: &Remote, machine: &str) -> Self {
         let home = Self::new();
         let run = home.tikk(&["init", "--remote", &remote.url(), "--machine", machine]);
@@ -214,7 +213,6 @@ impl Home {
         parse_json(&run.stdout)
     }
 
-    /// The IDs that `tikk ls --json` lists, sorted.
     pub(crate) fn listed_ids(&self) -> Vec<String> {
         let run = self.tikk(&["ls", "--json"]);
 
@@ -300,13 +298,10 @@ impl Home {
         run_git(&self.store(), arguments)
     }
 
-    /// Moves the change time of every store file outside `.git` a minute back, so `tikk sync`
-    /// counts each one as settled and does not wait.
     pub(crate) fn settle_files(&self) {
         settle_folder(&self.store());
     }
 
-    /// Each file of the store outside `.git`, relative to the store, with its bytes.
     pub(crate) fn store_files(&self) -> Vec<(PathBuf, Vec<u8>)> {
         let mut files = Vec::new();
 
@@ -362,7 +357,6 @@ fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>
     }
 }
 
-/// A bare Git repository that stands in for the private remote of the store.
 pub(crate) struct Remote {
     directory: TempDir,
 }

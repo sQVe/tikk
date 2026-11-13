@@ -131,7 +131,6 @@ fn read_ticket(
     Ok(parse_ticket(path, project, &bytes))
 }
 
-/// Parses the bytes of the ticket file at `path`, in the folder of `project`.
 pub(crate) fn parse_ticket(
     path: &Path,
     project: &ProjectName,

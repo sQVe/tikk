@@ -14,9 +14,6 @@ use crate::store::StoreError;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 const NETWORK_POLL: Duration = Duration::from_millis(20);
 
-/// Settings for every Git call of sync and `init --remote`. Hooks, signing, and an autostash could
-/// run a program, prompt, or move local changes, so each one is off. They override the global
-/// config that the network steps keep for credential helpers and URL rewrites.
 const STORE_SETTINGS: &[&str] = &[
     "-c",
     "core.hooksPath=/dev/null",
@@ -117,8 +114,6 @@ fn read_origin_url_with(program: &str, directory: &Path) -> Result<Option<String
     }
 }
 
-/// Runs a local Git step of sync or `init --remote` in the store, with no hook, prompt, or config
-/// outside the repository.
 pub(crate) fn run_store_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     let git_error = |message: String| StoreError::Git {
         arguments: arguments.join(" "),
@@ -137,12 +132,10 @@ pub(crate) fn run_store_git(directory: &Path, arguments: &[&str]) -> Result<Vec<
     Ok(output.stdout)
 }
 
-/// Runs a Git step that reaches the remote, and stops it after the network timeout.
 pub(crate) fn run_network_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     run_git_within("git", directory, arguments, NETWORK_TIMEOUT)
 }
 
-/// Reads the store's own `origin`. Git exits with 1 when the key is missing.
 pub(crate) fn read_store_origin(root: &Path) -> Result<Option<String>, StoreError> {
     let arguments = ["config", "--get", "remote.origin.url"];
     let git_error = |message: String| StoreError::Git {
@@ -164,7 +157,6 @@ pub(crate) fn read_store_origin(root: &Path) -> Result<Option<String>, StoreErro
     }
 }
 
-/// A local step reads only the repository's own config.
 fn store_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     let mut command = network_git_command(program, directory, arguments);
 
@@ -175,8 +167,6 @@ fn store_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Com
     command
 }
 
-/// A network step keeps the global and system config, so the user's credential helper reaches a
-/// private remote.
 fn network_git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     let mut command = Command::new(program);
 
@@ -380,7 +370,6 @@ mod tests {
     };
     use crate::store::StoreError;
 
-    /// Writes an executable script that stands in for Git and ignores its arguments.
     fn fake_git(folder: &Path, body: &str) -> String {
         use std::os::unix::fs::PermissionsExt as _;
 
@@ -392,7 +381,6 @@ mod tests {
         path.to_str().expect("a UTF-8 path").to_owned()
     }
 
-    /// What a fake Git sees: its arguments, then the config and prompt variables.
     fn seen_by_git(command: &mut Command) -> String {
         let output = command.output().expect("start the script");
 

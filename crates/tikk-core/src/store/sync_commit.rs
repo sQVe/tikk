@@ -9,9 +9,6 @@ use crate::store::ticket_files::io_error;
 const COMMIT_MESSAGE: &str = "Sync the tikk store";
 const GIT_FOLDER: &str = ".git";
 
-/// Stages the checked bytes of the plan, not the files as they are now, and commits them. A plan
-/// with nothing to commit changes nothing. Sync refuses an index with staged changes before this
-/// runs, so when staging or the commit fails, every staged path is its own, and it unstages them.
 pub(crate) fn commit_plan(
     root: &Path,
     plan: &SyncPlan,

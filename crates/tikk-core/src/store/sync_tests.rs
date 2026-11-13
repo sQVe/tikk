@@ -35,7 +35,6 @@ thread_local! {
     static CHECKED: RefCell<Option<(PathBuf, Vec<u8>)>> = const { RefCell::new(None) };
 }
 
-/// Two stores cloned from one bare remote, as the laptop and the desktop.
 struct Machines {
     _remote: TempDir,
     laptop: TempDir,
@@ -93,7 +92,6 @@ fn git(root: &Path, arguments: &[&str]) -> String {
     String::from_utf8(run_store_git(root, arguments).expect("git runs")).expect("UTF-8 output")
 }
 
-/// HEAD, the index, every worktree file outside `.git`, and whether a merge is in progress.
 fn snapshot(root: &Path) -> (String, String, Vec<(PathBuf, Vec<u8>)>, bool) {
     let mut files = Vec::new();
     collect(root, root, &mut files);
@@ -200,7 +198,6 @@ fn fake_network(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreEr
     run_store_git(directory, arguments)
 }
 
-/// The fake clock reads the real time until a test sets it.
 fn fake_now() -> SystemTime {
     CLOCK.get().unwrap_or_else(SystemTime::now)
 }
@@ -234,8 +231,6 @@ fn sync(root: &Path, effects: &SyncEffects) -> Result<SyncOutcome, StoreError> {
     sync_store(&open(root).expect("the store opens"), effects)
 }
 
-/// The laptop pushes a ticket and a fact. The desktop gets them, then the laptop pushes one more
-/// ticket, so a desktop sync has a merge to do.
 fn machines_with_work() -> Machines {
     let machines = Machines::new();
     let (laptop, desktop) = (machines.laptop(), machines.desktop());

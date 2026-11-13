@@ -45,7 +45,6 @@ impl Setup {
             .to_owned()
     }
 
-    /// Pushes a commit with the files to the remote branch, from a scratch repository.
     fn push_to_remote(&self, branch: &str, files: &[(&str, &str)]) {
         let scratch = self.directory.path().join(format!("scratch-{branch}"));
         let git = |arguments: &[&str]| run_store_git(&scratch, arguments).expect("git runs");
@@ -64,7 +63,6 @@ impl Setup {
         git(&["push", "--quiet", &self.remote(), branch]);
     }
 
-    /// The names in the store's parent other than the remote and scratch folders.
     fn leftovers(&self) -> Vec<String> {
         let mut names: Vec<String> = fs::read_dir(self.directory.path())
             .expect("list the parent")

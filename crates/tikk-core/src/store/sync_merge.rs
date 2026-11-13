@@ -8,8 +8,6 @@ use crate::store::sync_read::MERGE_HEAD;
 
 const MERGE_MESSAGE: &str = "Merge the remote tikk store";
 
-/// Merges the pinned commit with a normal merge, so `facts/` uses the `union` driver. A failed
-/// merge is aborted before this returns, and no merge stays in progress.
 pub(crate) fn merge_fetched(
     root: &Path,
     commit: &str,
@@ -31,8 +29,6 @@ pub(crate) fn merge_fetched(
     }
 }
 
-/// Git refuses a merge that would overwrite a local file before it starts, and leaves no
-/// `MERGE_HEAD`. Any other failure leaves a merge to abort, even when a read here fails.
 fn merge_failure(root: &Path, merge: StoreError, effects: &SyncEffects) -> StoreError {
     let cause = match (effects.read_entry)(&root.join(MERGE_HEAD)) {
         Ok(None) => {

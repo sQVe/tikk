@@ -28,7 +28,6 @@ pub(crate) struct Failure {
     pub(crate) code: &'static str,
     pub(crate) message: String,
     pub(crate) field: Option<String>,
-    /// The files an error names, such as each file of a merge conflict.
     pub(crate) files: Option<Vec<String>>,
     pub(crate) exit: Exit,
 }

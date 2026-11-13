@@ -44,7 +44,6 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::RemoteWithoutMain { .. } => ("remoteWithoutMain", Exit::Refused),
         StoreError::RemoteNotAStore { .. } => ("remoteNotAStore", Exit::Refused),
         StoreError::MachineInUse { .. } => ("machineInUse", Exit::Refused),
-        // It keeps the code of the sync error, so a caller still branches on it.
         StoreError::ResultNotSaved { error: inner, .. } => {
             return Failure {
                 message: error.to_string(),

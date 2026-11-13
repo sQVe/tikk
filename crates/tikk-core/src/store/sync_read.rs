@@ -10,12 +10,10 @@ use crate::store::sync::{FileEntry, FileKind, PendingFile, PendingReason, SyncEf
 use crate::store::ticket_files::{TICKETS_FOLDER, io_error, parse_ticket};
 use crate::ticket::ProjectName;
 
-/// A changed file is committed only when it has not changed for this long.
 const SETTLE_TIME: Duration = Duration::from_secs(2);
 const FACTS_FOLDER: &str = "facts";
 pub(crate) const MERGE_HEAD: &str = ".git/MERGE_HEAD";
 
-/// Everything sync read under the lock, before it changes anything.
 #[derive(Debug, Default)]
 pub(crate) struct SyncPlan {
     /// The `main` of `origin` from the fetch, pinned so a later fetch cannot change the merge.
@@ -40,7 +38,6 @@ impl SyncPlan {
     }
 }
 
-/// The checked bytes of a file, which sync stages instead of reading the path again.
 #[derive(Debug)]
 pub(crate) struct StagedFile {
     pub(crate) path: String,
@@ -56,7 +53,6 @@ enum Change {
     NameNotUtf8(String),
 }
 
-/// The time when the youngest changed file outside `facts/` has settled, if any is changed.
 pub(crate) fn settle_deadline(
     root: &Path,
     effects: &SyncEffects,
@@ -80,7 +76,6 @@ pub(crate) fn settle_deadline(
     Ok(latest.map(|modified| modified + SETTLE_TIME))
 }
 
-/// Runs every read of sync. A failed read is an error, so sync never acts on a partial view.
 pub(crate) fn read_plan(
     root: &Path,
     fetched: bool,
@@ -207,7 +202,6 @@ fn read_fetched(
     Ok(has_new_commits.then_some(commit))
 }
 
-/// Lists the changed files, and refuses an index with staged changes that sync did not make.
 fn read_changes(
     root: &Path,
     run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
@@ -314,8 +308,6 @@ fn plan_change(
     Ok(())
 }
 
-/// Facts are append-only, so the committed bytes of a fact file must stay its start. The index
-/// holds no staged change here, so `HEAD` is the committed version.
 fn plan_fact(
     root: &Path,
     path: String,
@@ -358,8 +350,6 @@ fn is_fact(path: &str) -> bool {
     Path::new(path).starts_with(FACTS_FOLDER)
 }
 
-/// A ticket file is a `.md` file right inside a project folder. Files deeper down belong to a
-/// ticket's folder and are not parsed.
 fn is_ticket_file(path: &str) -> bool {
     let parts: Vec<&str> = path.split('/').collect();
 

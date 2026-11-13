@@ -19,7 +19,6 @@ const RESULT_FILE: &str = ".git/tikk-sync.json";
 #[derive(Clone, Copy)]
 pub struct SyncEffects {
     pub run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
-    /// Fetch and push. The system function stops Git after the network timeout.
     pub run_network_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
     pub read_origin: fn(&Path) -> Result<Option<String>, StoreError>,
     /// Reads a file of the store without following a symlink. A missing file is `None`.
@@ -61,7 +60,6 @@ pub enum FileKind {
 #[serde(rename_all = "camelCase")]
 pub struct SyncOutcome {
     pub committed: bool,
-    /// The paths of the sync commit, relative to the store.
     pub committed_paths: Vec<String>,
     pub pending: Vec<PendingFile>,
     pub fetched: bool,
@@ -78,11 +76,8 @@ pub struct PendingFile {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PendingReason {
-    /// The file changed less than two seconds ago.
     Settling,
-    /// The ticket file does not parse.
     Unparsed,
-    /// Git names the file with bytes that are not UTF-8, which sync cannot pass to Git.
     NameNotUtf8,
 }
 
@@ -131,8 +126,6 @@ impl Serialize for SyncStep {
     }
 }
 
-/// Commits the settled files, merges the fetched `main`, and pushes. A network failure is a
-/// problem in the result, not an error. The last result is saved in `.git/tikk-sync.json`.
 pub fn sync_store(store: &Store, effects: &SyncEffects) -> Result<SyncOutcome, StoreError> {
     let root = store.root();
     let outcome = run_sync(root, effects);
