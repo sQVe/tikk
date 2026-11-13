@@ -107,8 +107,9 @@ pub(crate) fn derive_states(
 
     for plan in scan.tickets.iter().filter(only_file) {
         if plan.document.fields.kind() == Kind::Plan {
-            // An unreadable ticket file may be an unfinished child of this plan.
-            let status = if scan.errors.is_empty() {
+            // An unreadable ticket file may be an unfinished child of this plan, and an unreadable
+            // fact line may be a newer audit of one of its slices.
+            let status = if scan.errors.is_empty() && facts.errors.is_empty() {
                 plan_status(&plan.id, scan, &states)
             } else {
                 DerivedStatus::Open
@@ -390,6 +391,27 @@ mod tests {
             states.status(&slice("personal-rrrr", "")),
             Some(DerivedStatus::AuditBehind)
         );
+        assert_eq!(states.status(&plan()), Some(DerivedStatus::Open));
+    }
+
+    #[test]
+    fn a_plan_of_done_tasks_is_not_done_while_a_fact_line_is_unreadable() {
+        let done_task = ticket(
+            "personal-tttt",
+            "kind: task\ntitle: Task\nparent: personal-pppp\nstatus: done\n",
+        );
+        let tickets = scan(vec![plan(), done_task]);
+        let facts = FactScan {
+            facts: Vec::new(),
+            errors: vec![UnreadableFact {
+                path: PathBuf::from("facts/2026-11.jsonl"),
+                line: 1,
+                message: "the line is not JSON".to_owned(),
+            }],
+        };
+
+        let states = derive_states(&tickets, &facts, &current_prs(&facts.facts));
+
         assert_eq!(states.status(&plan()), Some(DerivedStatus::Open));
     }
 
