@@ -170,8 +170,6 @@ fn check_claimable(ticket: &StoredTicket, scan: &TicketScan) -> Result<(), Store
     check_strictly(ticket, scan, "a claim")
 }
 
-// The strict checks that a claim and an audit share: the slice's links pass the checks of
-// `tikk write`, and it has at least one criterion.
 pub(crate) fn check_strictly(
     ticket: &StoredTicket,
     scan: &TicketScan,

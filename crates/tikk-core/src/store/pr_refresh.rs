@@ -21,7 +21,6 @@ pub struct RefreshedPr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefreshOutcome {
     pub refreshed: Vec<RefreshedPr>,
-    /// The refreshed slices whose open PR has another head than their last audit.
     pub audit_behind: Vec<TicketId>,
 }
 

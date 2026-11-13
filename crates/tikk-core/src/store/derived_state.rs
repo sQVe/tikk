@@ -5,8 +5,6 @@ use crate::store::ticket_files::{StoredTicket, TicketScan};
 use crate::store::ticket_queries::{TicketIndex, TicketLookup};
 use crate::ticket::{Criterion, Kind, Status, TicketId};
 
-/// The state of a plan or a slice that tikk derives from its file and the facts. Only an open plan
-/// or slice derives a state of its own; the others keep their stored status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DerivedStatus {
     Draft,
@@ -27,7 +25,6 @@ pub enum AuditReason {
     NotMet(String),
 }
 
-/// A slice's last audit and each reason it does not count. It counts when there is no reason.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditCheck {
     pub audit: ShownAudit,
@@ -91,7 +88,6 @@ impl AuditCheck {
 }
 
 impl DerivedStates {
-    /// The derived state of a plan or a slice, or `None` for a task or an instruction.
     pub fn status(&self, ticket: &StoredTicket) -> Option<DerivedStatus> {
         matches!(ticket.document.fields.kind(), Kind::Plan | Kind::Slice)
             .then(|| self.effective(ticket))
@@ -101,7 +97,6 @@ impl DerivedStates {
         self.audits.get(slice)
     }
 
-    // A shared ID derives nothing, since tikk cannot tell which file a fact belongs to.
     pub(crate) fn effective(&self, ticket: &StoredTicket) -> DerivedStatus {
         let stored = ticket.document.fields.status();
 
@@ -221,7 +216,6 @@ fn slice_status(pr: Option<&ShownPr>, check: Option<&AuditCheck>) -> DerivedStat
     DerivedStatus::Open
 }
 
-// The caller derives the slices first.
 fn plan_status(plan: &TicketId, scan: &TicketScan, states: &DerivedStates) -> DerivedStatus {
     let mut has_member = false;
 

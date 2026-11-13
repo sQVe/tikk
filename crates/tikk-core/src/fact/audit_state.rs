@@ -11,7 +11,6 @@ pub enum Verdict {
     Deferred,
 }
 
-/// One verdict as the audit saw it, with the criterion's `check` and `expected` text at that time.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditVerdict {
     pub criterion: String,

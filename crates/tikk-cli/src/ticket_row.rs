@@ -27,7 +27,6 @@ pub(crate) fn row_json(ticket: &StoredTicket) -> Value {
     })
 }
 
-// A read row adds the derived state of a plan or a slice; a write response keeps the stored row.
 pub(crate) fn read_row_json(ticket: &StoredTicket, derived: &DerivedStates) -> Value {
     let mut row = row_json(ticket);
 
@@ -42,7 +41,6 @@ pub(crate) fn row_text(ticket: &StoredTicket) -> String {
     row_text_with(ticket, ticket.document.fields.status().as_str())
 }
 
-// The status column holds the stored status, and the derived state after it when they differ.
 pub(crate) fn read_row_text(ticket: &StoredTicket, derived: &DerivedStates) -> String {
     let stored = ticket.document.fields.status().as_str();
 

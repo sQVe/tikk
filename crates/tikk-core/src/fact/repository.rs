@@ -6,7 +6,6 @@ const ORIGIN_STARTS: [&str; 3] = [
     "ssh://git@github.com/",
 ];
 
-/// A GitHub repository as `owner/name`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Repository(String);
 
@@ -17,7 +16,6 @@ impl Repository {
         (is_name(owner) && is_name(name)).then(|| Self(text.to_owned()))
     }
 
-    /// Reads an `origin` URL in the HTTPS or SSH form of `github.com`.
     pub fn from_origin_url(url: &str) -> Option<Self> {
         let trimmed = url.trim().trim_end_matches('/');
         let path = ORIGIN_STARTS

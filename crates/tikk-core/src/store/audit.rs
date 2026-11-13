@@ -39,7 +39,6 @@ pub struct AuditRequest {
     pub hash: String,
     pub head: String,
     pub file: PathBuf,
-    /// The default is the repository of the working directory's `origin`.
     pub repository: Option<Repository>,
     pub working_directory: PathBuf,
 }
@@ -57,10 +56,6 @@ struct RawVerdictInput {
     evidence: String,
 }
 
-/// Appends an `audit` fact with a verdict for each criterion in the file. The hash check, the
-/// strict checks of the slice, and the append run in one hold of the exclusive store lock. An agent
-/// is refused while another agent holds a live claim on the slice, and the holder's audit renews
-/// its lease. The audit runs no `gh` and no sync.
 pub fn audit_slice(
     store: &Store,
     request: &AuditRequest,
@@ -263,7 +258,6 @@ mod tests {
         })
     }
 
-    // The first append, the audit, goes through, and each later one fails.
     fn second_append_fails(path: &Path, line: &str) -> Result<(), StoreError> {
         let count = APPENDS.with(|appends| appends.replace(appends.get() + 1));
 

@@ -361,7 +361,6 @@ fn plan_hold(status: Status) -> Option<BlockerState> {
     }
 }
 
-// A done plan or slice clears its edges, as a done task does; a merged slice that is not done holds.
 fn blocker_state(lookup: TicketLookup<'_>, derived: &DerivedStates) -> Option<BlockerState> {
     match found(lookup) {
         Ok(ticket) => match derived.effective(ticket) {
