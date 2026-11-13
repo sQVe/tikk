@@ -8,65 +8,96 @@
 
 ## Context
 
-Several agents on several machines take work at once. Two agents claiming one instruction at once
-must give exactly one winner. An agent that dies must not hold an instruction forever. An agent also
-needs to know why it was not given the first item.
+Several agents on several machines take work at once. A manager agent takes a slice and runs its
+instructions. Two managers claiming one slice at once must give exactly one winner. A manager that
+dies must not hold a slice forever, and the user must be able to free it. A manager also needs to
+know why it was not given the first slice.
 
-Two offline machines can claim the same instruction, and reconcile must show the clash.
+Two offline machines can claim the same slice.
 
 ## Decision
 
-A `claim` is a fact with a lease. `ready` returns ordered candidates and names what blocks each
-skipped item. Before a claim, tikk fetches when the network is up, and merges what it fetched under
-the store lock. A failed fetch or a conflicting merge does not stop the claim.
+A manager claims a slice with a `claim` fact that has a lease of 4 hours. `ready` returns ordered
+candidate slices and names what holds each skipped one. Before a claim, tikk fetches when the
+network is up, and merges what it fetched under the store lock. A failed fetch or a conflicting
+merge does not stop the claim.
 
 ### Claims
 
-- A claim runs under the store lock, so it is atomic ([ADR
-  0012](./0012-one-git-store-with-one-lock.md)). Of two simultaneous claims on one instruction,
-  exactly one succeeds.
-- A claim has a lease. A claim whose lease ended is stale, and stale claims show in `tikk needs`.
-- `release` ends a claim. Both are facts ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
-- A claim records the agent session that took it, such as the session ID and its log path, so `tikk
-  show` points at the log of the work. The log stays outside the store, since raw session dumps
-  never enter it.
-- Fetching before a claim narrows the window for two machines to claim one instruction. Offline, the
-  clash is possible, and reconcile shows it.
+- Only a slice is claimed. An instruction has no claim of its own, because its slice's claim covers
+  it ([ADR 0018](./0018-work-model-and-kinds.md)).
+- A claim runs under the exclusive store lock, which covers the check of the current claim and the
+  append of the claim fact ([ADR 0012](./0012-one-git-store-with-one-lock.md)). Of two simultaneous
+  claims on one slice, exactly one succeeds, and the other exits with 1 and the code `claimed`.
+- The lease is 4 hours, and no command sets another length. A claim whose lease ended is stale.
+  Another agent may then claim the slice, and stale claims show in `tikk needs`.
+- A claim by the holder renews its lease. A write by the holder to its slice's work renews it too:
+  `tikk new`, `done`, and `cancel` on the slice's instructions, and `pr link`, `ask`, and `audit`.
+  One shared function appends a `claim` fact with the new lease end after the command's own write,
+  in the same hold of the lock. The write and the fact append are not one transaction: when the
+  append fails, the command reports the error, and its write stays.
+- When `TIKK_AGENT` is set and another agent holds a live claim on the slice, `claim`, `release`,
+  and `new`, `done`, and `cancel` on the slice's instructions refuse with the code `claimed`. The
+  refusal writes nothing. A person, with no `TIKK_AGENT`, is never refused.
+- `release` ends a claim. An agent ends its own claim or a stale one. A person ends any claim, so
+  the user can free the slice of a dead manager. Claims and releases are facts
+  ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).
+- A claim records the agent session that took it, from `TIKK_SESSION` and `TIKK_SESSION_LOG`, so
+  `tikk show` points at the log of the work. The log stays outside the store, since raw session
+  dumps never enter it.
+- Fetching before a claim narrows the window for two machines to claim one slice. Offline, the
+  clash is possible, and tikk does not report it.
 
 ### Ready queue
 
-- `ready` returns the ordered candidates, by `rank`, that no `blockedBy` edge holds back ([ADR
-  0020](./0020-edges.md)).
-- For each higher-ranked item it skipped, `ready` names what blocks it.
-- An instruction is also held back by the `blockedBy` edges of its slice and of that slice's plan. A
-  slice is held back by the `blockedBy` edges of its plan. A blocker that a closer level names is
-  listed once, at that level. A blocker from a slice or plan names the ticket that holds it.
+- `ready` lists every slice that can start, in `rank` order, then by ID. It lists every other slice
+  in its scope as skipped, and names what holds it.
+- The scope is a plan, or a project. Without a plan, it is the project that `tikk new` would choose
+  in the working directory, unless the caller names another.
+- Only an `open` slice can start. A `draft` slice is skipped as a draft. Done and canceled slices
+  are not listed.
+- A slice is held back by its own `blockedBy` edges and by those of its plan ([ADR
+  0020](./0020-edges.md)). A blocker that both levels name is listed once, at the slice. A blocker
+  from the plan names the plan that holds it. A blocker that is missing or does not parse holds the
+  slice and is named as such, because tikk cannot tell that it is done.
+- A slice with a live claim is skipped, and names its holder.
 - The stacking exception: a slice's own `blockedBy` may name a slice whose PR is open. That blocker
-  counts as cleared for the slice and for the instructions that inherit it. The ready slice names
-  that PR as its stack parent. A task, instruction, or plan blocker never clears this way, and an
-  instruction's own `blockedBy` does not either.
-- `ready` takes a scope, such as a plan or a slice. Within a plan it returns the next slice to
-  start; within a slice, the next instruction. It weighs order, `blockedBy` edges, and merge state,
-  so Tau asks tikk what comes next instead of working out the order itself.
+  counts as cleared for the slice, and the ready slice names that PR as its stack parent. A task or
+  plan blocker never clears this way.
+- `ready` weighs order, `blockedBy` edges, claims, and merge state, so Tau asks tikk what comes next
+  instead of working out the order itself.
 
 ## Consequences
 
 ### Positive
 
-- One winner per claim on a machine, and a dead agent's claim can be seen and cleared.
-- An agent or the user can see why an item is not ready.
+- One winner per claim on a machine, and a dead manager's claim can be seen and cleared.
+- An active manager keeps its claim through its own writes, with no separate renewal call.
+- An agent or the user can see why a slice is not ready.
 
 ### Negative
 
 - A fetch before each claim adds network time when the network is up.
-- Offline machines can still claim the same instruction.
+- Offline machines can still claim the same slice, and nothing reports it.
+- A manager that writes nothing for 4 hours loses its claim to the next agent that asks.
+- A failed fact append after a write leaves the write in place with the old lease end.
 
 ## Alternatives considered
 
+### Claims on instructions
+
+Let each worker claim its instruction. Rejected because the manager runs the slice and its
+instructions as one branch and one PR, so one claim per slice is the unit that must not be shared.
+
+### A lease length per claim
+
+Let `claim` take a lease length. Rejected because an agent would ask for long leases, and a dead
+one would then hold its slice longer. Renewal on the holder's writes keeps an active claim alive.
+
 ### Claims without a lease
 
-Hold a claim until `release`. Rejected because a dead agent would hold an instruction forever, and
-nothing would show it as stale.
+Hold a claim until `release`. Rejected because a dead agent would hold a slice forever, and nothing
+would show it as stale.
 
 ### Tau works out the next item itself
 

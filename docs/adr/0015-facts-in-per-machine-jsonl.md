@@ -15,7 +15,10 @@ the user's text.
 Observed facts live in append-only JSONL under `facts/<machine>/`. Each machine writes only its own
 folder, so two machines never edit one file.
 
-Each line is one versioned JSON observation and is never edited. A correction is one more line, and
+Each line is one versioned JSON observation and is never edited. It holds `v`, `kind`, `ticket`, and
+`at`, an RFC 3339 time in UTC, plus the fields of its kind. A machine writes into
+`facts/<machine>/<yyyy-mm>.jsonl`, with one write of a whole line to a file opened for append. A
+line that does not parse is reported, and it never stops a read. A correction is one more line, and
 the newest line wins. Across machines, facts are ordered by timestamp, then file path in lexical
 order, then line number, all ascending. The last fact in that order wins when observations replace
 the same state. File path and line number break timestamp ties deterministically; they do not

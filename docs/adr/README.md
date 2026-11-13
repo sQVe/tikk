@@ -65,7 +65,7 @@ the commit in its row.
 - [0018: Plans, slices, instructions, and tasks](./0018-work-model-and-kinds.md)
 - [0019: Short random IDs and stable file names](./0019-ids-and-file-names.md)
 - [0020: Edges are `blockedBy`, `discoveredFrom`, and `related`](./0020-edges.md)
-- [0021: Strict validation at claim, submit, and audit](./0021-validation-levels.md)
+- [0021: Strict validation at claim and audit](./0021-validation-levels.md)
 - [0022: Claims with leases and a ready queue that names what it skipped](./0022-claims-leases-and-ready-queue.md)
 - [0023: A slice is done when its PR merged and its criteria are met](./0023-derived-slice-done.md)
 - [0024: Archive is a field](./0024-archive-as-a-field.md)

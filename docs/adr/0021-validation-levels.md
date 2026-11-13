@@ -1,4 +1,4 @@
-# ADR 0021: Strict validation at claim, submit, and audit
+# ADR 0021: Strict validation at claim and audit
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
@@ -12,15 +12,20 @@ effort fighting the validator. A hand edit can break front matter at any time.
 
 ## Decision
 
-tikk validates strictly at `claim`, `submit`, and the audit. Prose gets warnings, not errors. Ticket
+tikk validates strictly at `claim` and the audit. Prose gets warnings, not errors. Ticket
 validation gates never block a `log` line, so a worker can always report progress, questions, and
-discoveries. No flag overrides a validation gate.
+discoveries. No flag, such as `--force`, overrides a validation gate. There is no `submit` command,
+so no gate sits between a worker's report and the manager.
 
 ### Levels
 
 - Strict: front matter fields, the tree, edges, and criteria on plans and slices must be valid at
-  claim, submit, and the audit. A command that fails strict validation exits with an error. The
-  audit holds the strict check of a slice's criteria.
+  claim and the audit. A command that fails strict validation exits with 1 and the code
+  `invalidTicket`, and its `field` names the field to fix. The audit holds the strict check of a
+  slice's criteria.
+- At `tikk claim`, the slice must parse and have the status `open`. Its links must pass the checks
+  that `tikk write` runs: the kinds of linked tickets, cycles through `parent` and `blockedBy`, and
+  IDs that two files share. It must hold at least one criterion, and the field is `criteria`.
 - Kind only: `tikk done` on a task or an instruction checks only the ticket's kind, and refuses a
   plan or a slice, which has no stored `done` status.
 - Warning: prose in the body, and the criteria coverage report. A warning does not stop a command.
@@ -51,6 +56,11 @@ Refuse any command on any violation. Rejected because agents would fight the val
 ### Validate nothing
 
 Accept any ticket. Rejected because the design needs tickets that machines can check.
+
+### An override flag
+
+Let `--force` skip a failed gate. Rejected because an agent stuck on a gate would reach for the
+flag, and the store would then hold tickets that machines cannot check.
 
 ### Gate log lines like other writes
 

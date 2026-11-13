@@ -22,6 +22,11 @@ both.
 ### Commands
 
 - Every value a prompt would ask for is an argument. A command never waits for input.
+- The caller's identity is the one exception, and it comes from the environment. `TIKK_AGENT`
+  names the agent, `TIKK_SESSION` its session, and `TIKK_SESSION_LOG` the path of the session's
+  log. tikk reads them once per command, and an empty value counts as unset. Without
+  `TIKK_AGENT`, the caller is a person. A command that needs an agent, such as `tikk claim`, exits
+  with 1 and the code `noTikkAgent`.
 - `--json` is a global flag. Without it, a command prints short text.
 - Agent skills and tools call `tikk ... --json` and never read or write the store files.
 
@@ -80,6 +85,12 @@ because the CLI falls behind, and an agent finds the gap only when it gets stuck
 
 Let agents send keys and read the screen. Rejected because it depends on shortcuts and layout, which
 change often, and it breaks without a clear error.
+
+### Identity as arguments
+
+Pass the agent and its session as flags, such as `--agent`, on each command. Rejected because the
+program that starts an agent sets its environment once for every command. With flags, the agent
+would have to repeat them on each call, and a call that forgot one would act as a person.
 
 ### Commands that prompt
 
