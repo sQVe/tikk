@@ -1,6 +1,7 @@
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::{StoredTicket, TicketScan, read_tickets};
-use crate::store::ticket_queries::{find_ticket, list_order, ticket_path};
+use crate::store::ticket_index::{find_ticket, ticket_path};
+use crate::store::ticket_queries::list_order;
 use crate::store::ticket_write::{WriteEffects, replace_ticket};
 use crate::store::{Store, StoreError};
 use crate::ticket::{TicketDocument, TicketId};
@@ -125,6 +126,7 @@ mod tests {
 
     use super::{RankPlace, rank_ticket};
     use crate::store::store_lock::{LockAccess, StoreLock};
+    use crate::store::test_support::store_with;
     use crate::store::ticket_file_write::replace_ticket_file;
     use crate::store::ticket_write::WriteEffects;
     use crate::store::{Store, StoreError};
@@ -217,23 +219,6 @@ mod tests {
             path: path.to_path_buf(),
             source: std::io::Error::other("disk full"),
         })
-    }
-
-    fn store_with(files: &[(&str, &str)]) -> (TempDir, Store) {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        let folder = directory.path().join("tickets/personal");
-        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
-        fs::create_dir_all(&folder).expect("create the project folder");
-
-        for (name, text) in files {
-            fs::write(folder.join(name), text).expect("write a ticket");
-        }
-
-        let store = Store {
-            root: directory.path().to_path_buf(),
-        };
-
-        (directory, store)
     }
 
     fn rank_of(directory: &TempDir, name: &str) -> Option<String> {

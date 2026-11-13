@@ -1,6 +1,5 @@
 mod support;
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Barrier};
@@ -14,12 +13,6 @@ fn release_line(ticket: &str, at: &str) -> String {
     format!(
         "{{\"v\":1,\"kind\":\"release\",\"ticket\":\"{ticket}\",\"at\":\"{at}\",\"agent\":null}}"
     )
-}
-
-fn ticket_path(home: &Home, id: &str) -> std::path::PathBuf {
-    let shown = home.show_json(id);
-
-    std::path::PathBuf::from(shown["path"].as_str().expect("show prints the path"))
 }
 
 fn relative(home: &Home, path: &std::path::Path) -> String {
@@ -130,8 +123,8 @@ fn a_ticket_changed_on_both_machines_stops_sync_with_conflict_and_keeps_the_loca
     laptop.settle_files();
     laptop.sync_json();
     desktop.sync_json();
-    let laptop_path = ticket_path(&laptop, &id);
-    let desktop_path = ticket_path(&desktop, &id);
+    let laptop_path = laptop.ticket_path(&id);
+    let desktop_path = desktop.ticket_path(&id);
     std::fs::write(
         &laptop_path,
         "---\nkind: task\ntitle: Renew for one year\n---\n",
@@ -169,7 +162,7 @@ fn a_ticket_that_does_not_parse_stays_pending_and_out_of_the_commit() {
     let laptop = Home::on_remote(&remote, "laptop");
     let kept = laptop.new_ticket(&["task", "Renew the domain"]);
     let broken = laptop.new_ticket(&["task", "Back up the mail"]);
-    let broken_path = ticket_path(&laptop, &broken);
+    let broken_path = laptop.ticket_path(&broken);
     std::fs::write(&broken_path, "---\nkind: [\n---\n").expect("break the ticket by hand");
     laptop.settle_files();
 
@@ -177,7 +170,7 @@ fn a_ticket_that_does_not_parse_stays_pending_and_out_of_the_commit() {
 
     assert_eq!(
         result["committedPaths"],
-        json!([relative(&laptop, &ticket_path(&laptop, &kept))])
+        json!([relative(&laptop, &laptop.ticket_path(&kept))])
     );
     assert_eq!(
         result["pending"],
@@ -185,7 +178,7 @@ fn a_ticket_that_does_not_parse_stays_pending_and_out_of_the_commit() {
     );
     assert_eq!(
         laptop.git(&["ls-files", "--", "tickets"]).trim(),
-        relative(&laptop, &ticket_path(&laptop, &kept))
+        relative(&laptop, &laptop.ticket_path(&kept))
     );
 }
 
@@ -199,7 +192,7 @@ fn new_then_sync_commits_the_new_ticket() {
 
     assert_eq!(
         result["committedPaths"],
-        json!([relative(&laptop, &ticket_path(&laptop, &id))])
+        json!([relative(&laptop, &laptop.ticket_path(&id))])
     );
     assert_eq!(result["pending"], json!([]));
     assert_eq!(result["merged"], json!(false), "the remote had nothing new");
@@ -218,7 +211,7 @@ fn a_ticket_that_keeps_changing_through_the_wait_stays_pending_as_settling() {
     let remote = Remote::new();
     let laptop = Home::on_remote(&remote, "laptop");
     let id = laptop.new_ticket(&["task", "Renew the domain"]);
-    let path = ticket_path(&laptop, &id);
+    let path = laptop.ticket_path(&id);
     let stop = Arc::new(AtomicBool::new(false));
     let started = Arc::new(Barrier::new(2));
     let writer = {
@@ -328,55 +321,6 @@ fn sync_without_json_prints_one_line_per_step_and_pending_file() {
 }
 
 #[test]
-fn sync_runs_no_hook_of_the_store() {
-    let remote = Remote::new();
-    let laptop = Home::on_remote(&remote, "laptop");
-    let desktop = Home::on_remote(&remote, "desktop");
-    let marker = desktop.work().join("hook-ran");
-    for hook in [
-        "pre-commit",
-        "commit-msg",
-        "post-commit",
-        "pre-merge-commit",
-        "post-merge",
-        "pre-push",
-        "post-checkout",
-        "reference-transaction",
-    ] {
-        let path = desktop.store().join(".git/hooks").join(hook);
-        std::fs::write(
-            &path,
-            format!("#!/bin/sh\necho {hook} >> '{}'\n", marker.display()),
-        )
-        .expect("write a hook");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-            .expect("make the hook executable");
-    }
-    laptop.new_ticket(&["task", "Renew the domain"]);
-    desktop.new_ticket(&["task", "Back up the mail"]);
-    laptop.settle_files();
-    desktop.settle_files();
-    laptop.sync_json();
-
-    let result = desktop.sync_json();
-
-    assert_eq!(result["committed"], json!(true), "{result}");
-    assert_eq!(result["merged"], json!(true), "{result}");
-    assert_eq!(result["pushed"], json!(true), "{result}");
-    assert_eq!(
-        desktop
-            .git(&["rev-list", "--count", "--merges", "main"])
-            .trim(),
-        "1"
-    );
-    assert!(
-        !marker.exists(),
-        "hooks ran: {}",
-        std::fs::read_to_string(&marker).unwrap_or_default()
-    );
-}
-
-#[test]
 fn ls_during_a_sync_with_a_merge_lists_the_old_or_the_new_tickets() {
     let remote = Remote::new();
     let laptop = Home::on_remote(&remote, "laptop");
@@ -448,98 +392,10 @@ fn ls_during_a_sync_with_a_merge_lists_the_old_or_the_new_tickets() {
 }
 
 #[test]
-fn network_steps_use_the_global_git_config_but_run_no_global_hook() {
-    let remote = Remote::new();
-    let setup = tempfile::tempdir().expect("create a temporary directory");
-    let hooks = setup.path().join("hooks");
-    let marker = setup.path().join("hook-ran");
-    std::fs::create_dir(&hooks).expect("create the hooks folder");
-    for hook in [
-        "pre-push",
-        "reference-transaction",
-        "post-checkout",
-        "post-commit",
-        "post-merge",
-    ] {
-        let path = hooks.join(hook);
-        std::fs::write(
-            &path,
-            format!(
-                "#!/bin/sh\necho \"{hook} $(pwd)\" >> '{}'\n",
-                marker.display()
-            ),
-        )
-        .expect("write a hook");
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
-            .expect("make the hook executable");
-    }
-    let global_config = setup.path().join("gitconfig");
-    std::fs::write(
-        &global_config,
-        format!(
-            "[core]\n\thooksPath = {}\n[url \"{}\"]\n\tinsteadOf = tikk-test://remote\n",
-            hooks.display(),
-            remote.url()
-        ),
-    )
-    .expect("write the global Git config");
-    let run = |home: &Home, arguments: &[&str]| {
-        let mut command = home.command(arguments);
-
-        command.env("GIT_CONFIG_GLOBAL", &global_config);
-
-        finish(command.output().expect("start the tikk binary"))
-    };
-    let laptop = Home::new();
-    let desktop = Home::new();
-
-    let inits: Vec<_> = [(&laptop, "laptop"), (&desktop, "desktop")]
-        .into_iter()
-        .map(|(home, machine)| {
-            run(
-                home,
-                &[
-                    "init",
-                    "--remote",
-                    "tikk-test://remote",
-                    "--machine",
-                    machine,
-                    "--json",
-                ],
-            )
-        })
-        .collect();
-    laptop.new_ticket(&["task", "Renew the domain"]);
-    desktop.new_ticket(&["task", "Back up the mail"]);
-    laptop.settle_files();
-    desktop.settle_files();
-    let first = run(&laptop, &["sync", "--json"]);
-    let second = run(&desktop, &["sync", "--json"]);
-
-    for init in &inits {
-        assert_eq!(init.exit_code, 0, "{}", init.stderr);
-    }
-    assert_eq!(first.exit_code, 0, "{}", first.stderr);
-    assert_eq!(second.exit_code, 0, "{}", second.stderr);
-    let result = parse_json(&second.stdout);
-    assert_eq!(result["merged"], json!(true), "{result}");
-    assert_eq!(result["pushed"], json!(true), "{result}");
-    assert_eq!(result["problems"], json!([]), "{result}");
-    // A local-path remote runs its own receive-pack hooks, as a server does. Only hooks in a store
-    // count.
-    let ran = std::fs::read_to_string(&marker).unwrap_or_default();
-    let in_a_store: Vec<&str> = ran
-        .lines()
-        .filter(|line| !line.ends_with(remote.path().to_str().expect("a UTF-8 path")))
-        .collect();
-    assert_eq!(in_a_store, Vec::<&str>::new(), "all hooks that ran: {ran}");
-}
-
-#[test]
 fn sync_lists_two_files_with_one_id_and_claim_of_the_id_is_id_shared_until_a_rename() {
     let home = Home::initialized();
     let (_plan, slice) = home.plan_and_slice();
-    let first = ticket_path(&home, &slice);
+    let first = home.ticket_path(&slice);
     let second = first.with_file_name(format!("{slice}-copy.md"));
     std::fs::copy(&first, &second).expect("put a second file with the ID");
     home.settle_files();

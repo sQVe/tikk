@@ -4,7 +4,7 @@ use std::path::Path;
 
 use serde_json::json;
 
-use support::{Home, parse_json};
+use support::{Home, parse_json, run_git};
 
 #[test]
 fn init_json_creates_the_store_with_one_commit_on_main() {
@@ -146,50 +146,33 @@ fn init_through_a_symlink_to_an_empty_folder_creates_the_store_in_the_target() {
     }
 }
 
-fn parent_git(parent: &std::path::Path, arguments: &[&str]) -> String {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(parent)
-        .args(arguments)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
-        .expect("start git");
-
-    assert!(output.status.success(), "git {arguments:?} failed");
-
-    String::from_utf8(output.stdout).expect("git prints UTF-8")
-}
-
 #[test]
 fn init_with_a_relative_store_path_never_commits_a_parent_repository() {
     let home = Home::new();
     let parent = home.store();
-    parent_git(&parent, &["init", "--quiet"]);
+    run_git(&parent, &["init", "--quiet"]);
     std::fs::write(parent.join("unrelated.txt"), "parent work").expect("write a parent file");
-    parent_git(&parent, &["add", "unrelated.txt"]);
+    run_git(&parent, &["add", "unrelated.txt"]);
     let candidate = parent.join("candidate");
     std::fs::create_dir_all(candidate.join(".git")).expect("create an empty .git folder");
     std::fs::write(candidate.join("tikk.json"), "{\"version\":1}\n").expect("write tikk.json");
     std::fs::write(candidate.join(".gitattributes"), "facts/** merge=union\n")
         .expect("write .gitattributes");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tikk"))
-        .args(["init", "--json", "--machine", "laptop"])
+    let output = home
+        .command(&["init", "--json", "--machine", "laptop"])
         .current_dir(&parent)
         .env("TIKK_HOME", "candidate")
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("start the tikk binary");
 
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
-        parent_git(&parent, &["rev-list", "--all", "--count"]).trim(),
+        run_git(&parent, &["rev-list", "--all", "--count"]).trim(),
         "0"
     );
     assert_eq!(
-        parent_git(&parent, &["diff", "--cached", "--name-only"]).trim(),
+        run_git(&parent, &["diff", "--cached", "--name-only"]).trim(),
         "unrelated.txt"
     );
 }
@@ -215,12 +198,9 @@ fn init_runs_no_post_commit_hook_from_the_global_git_config() {
     )
     .expect("write the global Git config");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_tikk"))
-        .args(["init", "--json", "--machine", "laptop"])
-        .env("TIKK_HOME", home.store())
+    let output = home
+        .command(&["init", "--json", "--machine", "laptop"])
         .env("GIT_CONFIG_GLOBAL", &global_config)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_INDEX_FILE")
         .output()
         .expect("start the tikk binary");
 

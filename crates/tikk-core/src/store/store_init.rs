@@ -282,3 +282,7 @@ pub(crate) fn write_file(path: &Path, contents: &str) -> Result<(), StoreError> 
 #[cfg(test)]
 #[path = "store_init_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "store_init_race_tests.rs"]
+mod race_tests;

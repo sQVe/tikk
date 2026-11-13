@@ -17,6 +17,7 @@ mod project_choice;
 mod question_answer;
 mod question_ask;
 mod ready;
+mod ready_holds;
 mod store_init;
 mod store_init_remote;
 mod store_lock;
@@ -26,12 +27,15 @@ mod sync_merge;
 mod sync_read;
 mod sync_result;
 mod system;
+#[cfg(test)]
+mod test_support;
 mod ticket_claim;
 mod ticket_create;
 mod ticket_edit;
 mod ticket_file_write;
 mod ticket_files;
 mod ticket_id_draw;
+mod ticket_index;
 mod ticket_link_checks;
 mod ticket_new_file;
 mod ticket_queries;
@@ -63,10 +67,8 @@ pub use pr_link::{PrEffects, link_pr};
 pub use pr_refresh::{RefreshOutcome, RefreshedPr, refresh_prs};
 pub use question_answer::{AnswerEffects, answer_question};
 pub use question_ask::{AskEffects, ask_question};
-pub use ready::{
-    BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, ReadySlice, SkippedSlice,
-    StackParent, ready_slices,
-};
+pub use ready::{ReadyEffects, ReadyQueue, ReadyScope, ReadySlice, SkippedSlice, ready_slices};
+pub use ready_holds::{BlockerState, Hold, StackParent};
 pub use store_init::{InitOutcome, init};
 pub use store_init_remote::{RemoteInitEffects, init_from_remote};
 pub use store_lock::{LockAccess, StoreLock};

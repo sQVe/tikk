@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_files::read_tickets;
-use crate::store::ticket_queries::ticket_path;
+use crate::store::ticket_index::ticket_path;
 use crate::store::{Store, StoreError};
 use crate::ticket::TicketId;
 
@@ -63,15 +63,14 @@ fn split_on_whitespace(editor: &OsStr) -> Vec<OsString> {
 mod tests {
     use std::cell::RefCell;
     use std::ffi::{OsStr, OsString};
-    use std::fs;
+
     use std::path::{Path, PathBuf};
     use std::time::Duration;
 
-    use tempfile::TempDir;
-
     use super::{EditEffects, edit_ticket};
+    use crate::store::StoreError;
     use crate::store::store_lock::{LockAccess, lock_store_within};
-    use crate::store::{Store, StoreError};
+    use crate::store::test_support::store_with;
     use crate::ticket::TicketId;
 
     #[derive(Debug, PartialEq, Eq)]
@@ -106,23 +105,6 @@ mod tests {
         EDITED.with(|recorded| recorded.replace(Some(edited)));
 
         Ok(())
-    }
-
-    fn store_with(files: &[(&str, &str)]) -> (TempDir, Store) {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        let folder = directory.path().join("tickets/personal");
-        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
-        fs::create_dir_all(&folder).expect("create the project folder");
-
-        for (name, text) in files {
-            fs::write(folder.join(name), text).expect("write a ticket");
-        }
-
-        let store = Store {
-            root: directory.path().to_path_buf(),
-        };
-
-        (directory, store)
     }
 
     fn effects() -> EditEffects {

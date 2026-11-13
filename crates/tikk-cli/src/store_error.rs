@@ -1,7 +1,6 @@
-use serde_json::{Value, json};
 use tikk_core::{PrFailure, StoreError, TicketError};
 
-use crate::output::{Exit, Failure};
+use crate::output::{Exit, Failure, PullRequestFailure};
 
 pub(crate) fn failure(error: &StoreError) -> Failure {
     let (code, exit) = match error {
@@ -76,7 +75,7 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         _ => None,
     };
     let pull_requests = match error {
-        StoreError::Gh { failures } => Some(failures.iter().map(pr_failure_json).collect()),
+        StoreError::Gh { failures } => Some(failures.iter().map(pull_request_failure).collect()),
         _ => None,
     };
 
@@ -90,14 +89,14 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
     }
 }
 
-fn pr_failure_json(failure: &PrFailure) -> Value {
-    json!({
-        "id": failure.slice.to_string(),
-        "repository": failure.pull_request.repository(),
-        "number": failure.pull_request.number(),
-        "url": failure.pull_request.url(),
-        "message": failure.message,
-    })
+fn pull_request_failure(failure: &PrFailure) -> PullRequestFailure {
+    PullRequestFailure {
+        id: failure.slice.clone(),
+        message: failure.message.clone(),
+        number: failure.pull_request.number(),
+        repository: failure.pull_request.repository().to_owned(),
+        url: failure.pull_request.url(),
+    }
 }
 
 fn ticket_code(error: &TicketError) -> (&'static str, Exit) {

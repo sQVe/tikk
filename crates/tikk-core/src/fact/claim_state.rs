@@ -1,12 +1,15 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use serde::Serialize;
+
 use crate::fact::{AgentName, FactEvent, FactLine, Timestamp};
 use crate::ticket::TicketId;
 
 const LEASE: Duration = Duration::from_secs(4 * 60 * 60);
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Claim {
     pub agent: AgentName,
     pub session: Option<String>,

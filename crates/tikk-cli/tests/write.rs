@@ -40,19 +40,6 @@ fn write_with_an_old_hash_after_a_hand_edit_is_refused_and_keeps_the_edit() {
     );
 }
 
-fn every_field_slice(home: &Home) -> String {
-    let plan = home.new_ticket(&["plan", "Move to tikk"]);
-    let blocker = home.new_ticket(&["task", "Decide the lease length", "--parent", &plan]);
-    let document = home.document(
-        "slice.md",
-        &format!(
-            "---\nkind: slice\ntitle: Lock the store\nstatus: canceled\nreason: Out of scope\nparent: {plan}\nrank: 2\nblockedBy: [{blocker}]\ndiscoveredFrom: {blocker}\nrelated: [{plan}]\ncriteria:\n  - id: c1\n    check: cargo nextest run\n    expected: passes\n---\nBody\n"
-        ),
-    );
-
-    home.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")])
-}
-
 fn write_document(home: &Home, id: &str, text: &str, hash: &str) -> support::Run {
     let document = home.document("written.md", text);
 
@@ -70,7 +57,7 @@ fn write_document(home: &Home, id: &str, text: &str, hash: &str) -> support::Run
 #[test]
 fn write_of_the_shown_document_with_its_hash_keeps_the_file_bytes() {
     let home = Home::initialized();
-    let slice = every_field_slice(&home);
+    let slice = home.every_field_slice().slice;
     let shown = home.show_json(&slice);
     let path = shown["path"].as_str().expect("show prints the path");
     let before = std::fs::read(path).expect("read the ticket file");

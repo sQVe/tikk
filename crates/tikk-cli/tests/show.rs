@@ -3,7 +3,7 @@ mod support;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
-use support::{Home, parse_json};
+use support::{EveryFieldSlice, Home, parse_json};
 
 #[test]
 fn show_json_of_a_slice_lists_its_instruction_with_the_hash_and_body() {
@@ -42,15 +42,11 @@ fn show_json_of_a_slice_lists_its_instruction_with_the_hash_and_body() {
 #[test]
 fn show_json_prints_every_field_of_the_ticket() {
     let home = Home::initialized();
-    let plan = home.new_ticket(&["plan", "Move to tikk"]);
-    let blocker = home.new_ticket(&["task", "Decide the lease length", "--parent", &plan]);
-    let document = home.document(
-        "slice.md",
-        &format!(
-            "---\nkind: slice\ntitle: Lock the store\nstatus: canceled\nreason: Out of scope\nparent: {plan}\nrank: 2\nblockedBy: [{blocker}]\ndiscoveredFrom: {blocker}\nrelated: [{plan}]\ncriteria:\n  - id: c1\n    check: cargo nextest run\n    expected: passes\n---\nBody\n"
-        ),
-    );
-    let slice = home.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")]);
+    let EveryFieldSlice {
+        plan,
+        blocker,
+        slice,
+    } = home.every_field_slice();
     let bare = home.new_ticket(&["task", "Renew the domain"]);
 
     let full = home.tikk(&["show", &slice, "--json"]);

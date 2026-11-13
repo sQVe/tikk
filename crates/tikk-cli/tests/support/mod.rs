@@ -210,6 +210,34 @@ impl Home {
         (plan, slice)
     }
 
+    pub(crate) fn every_field_slice(&self) -> EveryFieldSlice {
+        let plan = self.new_ticket(&["plan", "Move to tikk"]);
+        let blocker = self.new_ticket(&["task", "Decide the lease length", "--parent", &plan]);
+        let document = self.document(
+            "slice.md",
+            &format!(
+                "---\nkind: slice\ntitle: Lock the store\nstatus: canceled\nreason: Out of scope\nparent: {plan}\nrank: 2\nblockedBy: [{blocker}]\ndiscoveredFrom: {blocker}\nrelated: [{plan}]\ncriteria:\n  - id: c1\n    check: cargo nextest run\n    expected: passes\n---\nBody\n"
+            ),
+        );
+        let slice = self.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")]);
+
+        EveryFieldSlice {
+            plan,
+            blocker,
+            slice,
+        }
+    }
+
+    // The last fact must be a claim.
+    pub(crate) fn end_the_last_claim_lease(&self) {
+        let claim_line = self.fact_lines().pop().expect("the claim is the last fact");
+        let mut lease_ended = claim_line.clone();
+        lease_ended["leaseEnd"] = serde_json::json!("2020-01-01T04:00:00Z");
+        let month = claim_line["at"].as_str().expect("a fact has a time")[..7].to_owned();
+
+        self.append_fact_line(&format!("{month}.jsonl"), &lease_ended.to_string());
+    }
+
     pub(crate) fn slice_under(&self, plan: &str, title: &str, blocked_by: &[&str]) -> String {
         let document = self.document(
             "slice.md",
@@ -299,6 +327,18 @@ impl Home {
         assert_eq!(run.exit_code, 0, "show {id}: {}", run.stderr);
 
         parse_json(&run.stdout)
+    }
+
+    pub(crate) fn ticket_path(&self, id: &str) -> PathBuf {
+        PathBuf::from(
+            self.show_json(id)["path"]
+                .as_str()
+                .expect("show prints the path"),
+        )
+    }
+
+    pub(crate) fn ticket_text(&self, id: &str) -> String {
+        std::fs::read_to_string(self.ticket_path(id)).expect("read the ticket file")
     }
 
     pub(crate) fn share_id(&self, id: &str) -> Vec<String> {
@@ -440,6 +480,12 @@ fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>
     }
 }
 
+pub(crate) struct EveryFieldSlice {
+    pub(crate) plan: String,
+    pub(crate) blocker: String,
+    pub(crate) slice: String,
+}
+
 pub(crate) struct Remote {
     directory: TempDir,
 }
@@ -470,6 +516,17 @@ impl Remote {
     pub(crate) fn git(&self, arguments: &[&str]) -> String {
         run_git(self.path(), arguments)
     }
+}
+
+// Distinct only for an index below 19,683.
+pub(crate) fn numbered_id(index: usize) -> String {
+    let alphabet: Vec<char> = "346789abcdefghijkmnpqrtwxyz".chars().collect();
+    let code: String = [index / 729, index / 27 % 27, index % 27, 0]
+        .iter()
+        .map(|digit| alphabet[*digit])
+        .collect();
+
+    format!("personal-{code}")
 }
 
 pub(crate) fn finish(output: std::process::Output) -> Run {
