@@ -471,3 +471,36 @@ fn a_program_path_that_is_not_unicode_prints_no_script_and_exits_with_1() {
         json!("programPathNotUnicode")
     );
 }
+
+#[test]
+fn without_tikk_home_and_home_completion_offers_no_id_and_the_script_still_prints() {
+    let home = Home::initialized();
+    home.new_ticket(&["task", "Renew the domain"]);
+    let without_store_path = |arguments: &[&str]| {
+        let mut command = home.command(arguments);
+        command.env_remove("TIKK_HOME").env_remove("HOME");
+        command
+    };
+
+    let completion = finish(
+        without_store_path(&["--", "tikk", "show", ""])
+            .env("COMPLETE", "fish")
+            .output()
+            .expect("start the tikk binary"),
+    );
+    let script = finish(
+        without_store_path(&["completions", "bash"])
+            .output()
+            .expect("start the tikk binary"),
+    );
+
+    assert_eq!(completion.exit_code, 0, "stderr: {}", completion.stderr);
+    assert_eq!(completion.stderr, "");
+    assert_eq!(candidates(&completion), Vec::new());
+    assert_eq!(script.exit_code, 0, "stderr: {}", script.stderr);
+    assert!(
+        script.stdout.contains("_clap_complete_tikk"),
+        "{}",
+        script.stdout
+    );
+}
