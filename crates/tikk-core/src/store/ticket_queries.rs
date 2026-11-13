@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::fs;
 use std::path::Path;
 
@@ -168,16 +169,14 @@ impl TicketFilter {
 }
 
 fn sort_tickets(tickets: &mut [StoredTicket]) {
-    tickets.sort_by(|left, right| {
-        let left_rank = left.document.fields.rank();
-        let right_rank = right.document.fields.rank();
+    tickets.sort_by(list_order);
+}
 
-        (left_rank.is_none(), left_rank, &left.id).cmp(&(
-            right_rank.is_none(),
-            right_rank,
-            &right.id,
-        ))
-    });
+pub(crate) fn list_order(left: &StoredTicket, right: &StoredTicket) -> Ordering {
+    let left_rank = left.document.fields.rank();
+    let right_rank = right.document.fields.rank();
+
+    (left_rank.is_none(), left_rank, &left.id).cmp(&(right_rank.is_none(), right_rank, &right.id))
 }
 
 fn folder_files(folder: &Path) -> Result<Vec<String>, StoreError> {

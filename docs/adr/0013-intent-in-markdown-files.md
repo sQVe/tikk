@@ -26,8 +26,11 @@ ready, active, and done come from facts and are never written to the file. A fil
 rewrite with state would conflict across machines.
 
 An agent reads a ticket's `hash`, the SHA-256 of its file. Agent writes pass that hash back and are
-refused when the file on disk has another hash. A file that fails to parse has no other state: tikk
-lists its path and error, refuses to show it as a ticket, and never rewrites it.
+refused when the file on disk has another hash. A narrow action that changes one field, such as
+`tikk block`, `move`, `rank`, `done`, or `cancel`, takes no hash. It reads the current file and
+writes it back under the exclusive store lock, so it cannot overwrite a change that it did not read.
+`tikk write` replaces the whole document, so it keeps the hash. A file that fails to parse has no
+other state: tikk lists its path and error, refuses to show it as a ticket, and never rewrites it.
 
 A human ticket may have a folder, `tickets/<project>/<id>/`, beside its file. A plan keeps its
 `design.md` and report files there. Sync commits the folder's files as they are. tikk does not

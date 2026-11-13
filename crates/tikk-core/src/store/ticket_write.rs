@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_file_write::replace_ticket_file;
-use crate::store::ticket_files::{StoredTicket, io_error, read_tickets, sha256_hex};
+use crate::store::ticket_files::{StoredTicket, TicketScan, io_error, read_tickets, sha256_hex};
 use crate::store::ticket_link_checks::check_written_links;
 use crate::store::ticket_queries::find_ticket;
 use crate::store::{Store, StoreError};
@@ -62,6 +62,26 @@ pub fn write_ticket(
     replace_ticket(current, document, effects)
 }
 
+pub(crate) fn change_ticket(
+    store: &Store,
+    id: &TicketId,
+    effects: &WriteEffects,
+    change: impl FnOnce(&TicketFields, &TicketScan) -> Result<Option<TicketFields>, StoreError>,
+) -> Result<StoredTicket, StoreError> {
+    let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
+    let scan = read_tickets(store.root())?;
+    let current = find_ticket(&scan, id)?;
+    let Some(fields) = change(&current.document.fields, &scan)? else {
+        return Ok(current.clone());
+    };
+    let document = TicketDocument {
+        fields,
+        body: current.document.body.clone(),
+    };
+
+    replace_ticket(current, document, effects)
+}
+
 // The caller holds the exclusive lock.
 pub(crate) fn replace_ticket(
     current: &StoredTicket,
@@ -81,7 +101,7 @@ pub(crate) fn replace_ticket(
     })
 }
 
-fn refuse_other_project(id: &TicketId, fields: &TicketFields) -> Result<(), StoreError> {
+pub(crate) fn refuse_other_project(id: &TicketId, fields: &TicketFields) -> Result<(), StoreError> {
     let Some(parent) = fields.parent() else {
         return Ok(());
     };
@@ -112,7 +132,7 @@ mod tests {
     use super::{TicketWrite, WriteEffects, write_ticket};
     use crate::store::store_lock::{LockAccess, StoreLock};
     use crate::store::ticket_files::sha256_hex;
-    use crate::store::{Store, StoreError};
+    use crate::store::{Store, StoreError, WaitLink, WaitStep};
     use crate::ticket::{TicketError, TicketId};
 
     const TASK: &str = "---\nkind: task\ntitle: Renew the domain\n---\n";
@@ -259,11 +279,24 @@ mod tests {
         )
         .expect_err("the instruction would sit under itself");
 
+        let instruction_id = TicketId::parse("personal-iiii").expect("a valid ID");
+        let slice_id = TicketId::parse("personal-kkkk").expect("a valid ID");
+        let cycle = [
+            WaitStep {
+                waiter: instruction_id.clone(),
+                link: WaitLink::Parent,
+                target: slice_id.clone(),
+            },
+            WaitStep {
+                waiter: slice_id,
+                link: WaitLink::Parent,
+                target: instruction_id,
+            },
+        ];
         assert!(
             matches!(
                 &error,
-                StoreError::Ticket(TicketError::Invalid { field, problem })
-                    if field == "parent" && problem.contains("cycle")
+                StoreError::Cycle { field: "parent", steps } if *steps == cycle
             ),
             "{error:?}"
         );
