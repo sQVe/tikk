@@ -21,21 +21,21 @@ status comes from triage facts. Criteria coverage is a query.
 
 ### Evidence records
 
-- A `check`, `review`, `audit`, or `qa` record carries repository, head, base, and a change hash. A
-  record for other code does not count for the current head.
+- A `check`, `review`, or `qa` record carries repository, head, base, and a change hash. A record
+  for other code does not count for the current head.
 - A `review` holds `finding`s. A `check` holds none. Triage appends a fact that changes a finding's
   status. The newest fact wins in the ordering defined by [ADR
   0015](./0015-facts-in-per-machine-jsonl.md).
-- An `audit` holds one verdict per criterion.
+- An `audit` record carries the repository, the PR head it saw, and the hash of the ticket file it
+  audited, not a base or a change hash. It holds a verdict per criterion. Each verdict holds the
+  criterion ID, the criterion's `check` and `expected` text at audit time, a verdict of `met`,
+  `not-met`, `not-run`, or `deferred`, and non-empty evidence. An audit that leaves out a criterion
+  is recorded, and it does not count ([ADR 0023](./0023-derived-slice-done.md)).
 - A `qa` record is one QA run on a slice. It holds a run ID, scenarios, artifacts, and gaps. Each
   scenario has a name, the criteria it covers, what was observed, and a verdict of `pass`, `fail`,
   or `blocked`. The run ID is the first 12 hex characters of a SHA-256 of the fact without `run`.
   `tikk qa add` refuses a ticket that is not a slice, a criterion the slice does not have, and a
   repository that is not `owner/name`, since an audit could never cite that run.
-- An audit verdict may cite QA runs by run ID. `tikk audit` refuses a cited run that is not a `qa`
-  record of the slice, was seen at another repository or head than the audit, or has no scenario for
-  the verdict's criterion. It also refuses a `met` verdict that cites a run whose scenario for that
-  criterion is `fail` or `blocked`.
 
 ### Finding identity and continuity
 
@@ -67,6 +67,13 @@ evidence; the review must still match the code state being assessed.
 - `tikk coverage [<id>]` reports each plan criterion that no slice covers and each slice criterion
   that no instruction covers. It takes a plan or a slice and exits 0 when it finds gaps.
 - The coverage report is a warning. It never stops a command.
+
+### What waits for a later design
+
+Only the `audit` record and its command exist. These wait for a later design, and the rules in
+this record for them are not built: `qa` records and verdicts that cite QA runs, `check` and
+`review` records with findings and triage, the `tikk coverage` query, and verdicts for the
+acceptance lists of instructions. Until then an audit verdict cites its evidence as text.
 
 ## Consequences
 
