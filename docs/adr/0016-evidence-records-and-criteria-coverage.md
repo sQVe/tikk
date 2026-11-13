@@ -66,7 +66,7 @@ evidence; the review must still match the code state being assessed.
   Archived tickets are left out. A `covers` ID that names no criterion of the parent is ignored.
 - `tikk coverage [<id>]` reports each plan criterion that no slice covers and each slice criterion
   that no instruction covers. It takes a plan or a slice and exits 0 when it finds gaps.
-- The coverage report is a warning until the `--force` rate shows agents can meet it.
+- The coverage report is a warning. It never stops a command.
 
 ## Consequences
 

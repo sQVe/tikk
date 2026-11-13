@@ -15,6 +15,7 @@ pub struct StoredTicket {
     pub path: PathBuf,
     /// The SHA-256 of the file's bytes, as lowercase hex.
     pub hash: String,
+    pub text: String,
     pub document: TicketDocument,
 }
 
@@ -147,6 +148,7 @@ fn read_ticket(
             id: ticket_id,
             path: path.to_path_buf(),
             hash: sha256_hex(&bytes),
+            text: text.to_owned(),
             document,
         })
         .map_err(|error| unreadable(error.to_string())))

@@ -20,6 +20,11 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::InvalidOrigin { .. } => ("invalidOrigin", Exit::Refused),
         StoreError::NoFreeId { .. } => ("noFreeId", Exit::Refused),
         StoreError::RandomUnavailable { .. } => ("randomUnavailable", Exit::Refused),
+        StoreError::Locked { .. } => ("locked", Exit::Refused),
+        StoreError::ChangedOnDisk { .. } => ("changedOnDisk", Exit::Refused),
+        StoreError::WrongKind { .. } => ("wrongKind", Exit::Refused),
+        StoreError::NoEditor => ("noEditor", Exit::Refused),
+        StoreError::EditorFailed { .. } => ("editorFailed", Exit::Refused),
         StoreError::Io { .. } => ("ioFailed", Exit::Refused),
     };
     let field = match error {
@@ -51,7 +56,7 @@ mod tests {
     use std::path::PathBuf;
 
     use serde_json::{Value, json};
-    use tikk_core::{StoreError, TicketError};
+    use tikk_core::{Kind, StoreError, TicketError};
 
     use super::failure;
     use crate::output::{Exit, Response};
@@ -214,6 +219,37 @@ mod tests {
                     message: "no source".to_owned(),
                 },
                 "randomUnavailable",
+                Exit::Refused,
+            ),
+            (
+                StoreError::Locked {
+                    lock: PathBuf::from("/tmp/store/.git/tikk.lock"),
+                },
+                "locked",
+                Exit::Refused,
+            ),
+            (
+                StoreError::ChangedOnDisk {
+                    path: PathBuf::from("/tmp/store/tickets/personal/personal-abcd-a.md"),
+                },
+                "changedOnDisk",
+                Exit::Refused,
+            ),
+            (
+                StoreError::WrongKind {
+                    id: "personal-abcd".to_owned(),
+                    kind: Kind::Plan,
+                    allowed: "a task or an instruction",
+                },
+                "wrongKind",
+                Exit::Refused,
+            ),
+            (StoreError::NoEditor, "noEditor", Exit::Refused),
+            (
+                StoreError::EditorFailed {
+                    message: "it ended with exit status: 1".to_owned(),
+                },
+                "editorFailed",
                 Exit::Refused,
             ),
             (

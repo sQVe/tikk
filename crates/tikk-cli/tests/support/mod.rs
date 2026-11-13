@@ -18,6 +18,29 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
+/// The `EILSEQ` code on macOS, where APFS refuses a file name that is not UTF-8.
+const ILLEGAL_BYTE_SEQUENCE: i32 = 92;
+
+/// Creates the folder and returns true, or returns false when the file system refuses the name
+/// because it is not UTF-8. Any other error fails the test.
+#[expect(
+    clippy::print_stderr,
+    reason = "a test that returns early names the reason in its output"
+)]
+pub(crate) fn create_folder_unless_name_refused(path: &Path) -> bool {
+    let Err(error) = std::fs::create_dir(path) else {
+        return true;
+    };
+
+    if error.raw_os_error() == Some(ILLEGAL_BYTE_SEQUENCE) {
+        eprintln!("skipped: the file system refuses the name {path:?}: {error}");
+
+        return false;
+    }
+
+    panic!("create {path:?}: {error}");
+}
+
 pub(crate) struct Run {
     pub(crate) exit_code: i32,
     pub(crate) stdout: String,
@@ -72,26 +95,48 @@ impl Home {
         environment: &[(&str, &Path)],
         arguments: &[&str],
     ) -> Run {
+        let mut command = self.command(arguments);
+
+        command
+            .current_dir(directory)
+            .envs(environment.iter().copied());
+
+        finish(command.output().expect("start the tikk binary"))
+    }
+
+    pub(crate) fn command(&self, arguments: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_tikk"));
 
         command
             .args(arguments)
-            .current_dir(directory)
+            .current_dir(self.work())
             .env("TIKK_HOME", self.store())
             .env("HOME", self.directory.path().join("home"))
-            .envs(environment.iter().copied());
+            .env_remove("EDITOR");
 
         for name in REPOSITORY_ENVIRONMENT {
             command.env_remove(name);
         }
 
-        let output = command.output().expect("start the tikk binary");
+        command
+    }
 
-        Run {
-            exit_code: output.status.code().expect("tikk exits with a code"),
-            stdout: String::from_utf8(output.stdout).expect("tikk prints UTF-8"),
-            stderr: String::from_utf8(output.stderr).expect("tikk prints UTF-8"),
-        }
+    pub(crate) fn show_json(&self, id: &str) -> Value {
+        let run = self.tikk(&["show", id, "--json"]);
+
+        assert_eq!(run.exit_code, 0, "show {id}: {}", run.stderr);
+
+        parse_json(&run.stdout)
+    }
+
+    pub(crate) fn lock_file(&self) -> std::fs::File {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.store().join(".git/tikk.lock"))
+            .expect("open the store lock file")
     }
 
     pub(crate) fn new_ticket(&self, arguments: &[&str]) -> String {
@@ -142,6 +187,14 @@ impl Home {
 
     pub(crate) fn git(&self, arguments: &[&str]) -> String {
         run_git(&self.store(), arguments)
+    }
+}
+
+pub(crate) fn finish(output: std::process::Output) -> Run {
+    Run {
+        exit_code: output.status.code().expect("tikk exits with a code"),
+        stdout: String::from_utf8(output.stdout).expect("tikk prints UTF-8"),
+        stderr: String::from_utf8(output.stderr).expect("tikk prints UTF-8"),
     }
 }
 

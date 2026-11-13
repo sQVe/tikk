@@ -1,3 +1,4 @@
+use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
 
@@ -13,11 +14,15 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
-pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
+pub(crate) fn run_git(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
     run_git_with("git", directory, arguments)
 }
 
-fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<String, StoreError> {
+fn run_git_with(
+    program: &str,
+    directory: &Path,
+    arguments: &[&str],
+) -> Result<Vec<u8>, StoreError> {
     let mut command = git_command(program, directory, arguments);
 
     // Git stops looking for a repository at the store's parent, so it never finds another one.
@@ -39,8 +44,7 @@ fn run_git_with(program: &str, directory: &Path, arguments: &[&str]) -> Result<S
         ));
     }
 
-    String::from_utf8(output.stdout)
-        .map_err(|_| git_error("Git printed text that is not UTF-8".to_owned()))
+    Ok(output.stdout)
 }
 
 pub(crate) fn read_origin_url(directory: &Path) -> Result<Option<String>, StoreError> {
@@ -91,6 +95,28 @@ fn git_command(program: &str, directory: &Path, arguments: &[&str]) -> Command {
     command
 }
 
+pub(crate) fn start_editor(
+    program: &OsStr,
+    arguments: &[OsString],
+    path: &Path,
+) -> Result<(), StoreError> {
+    let status = Command::new(program)
+        .args(arguments)
+        .arg(path)
+        .status()
+        .map_err(|error| StoreError::EditorFailed {
+            message: format!("could not start {}: {error}", program.to_string_lossy()),
+        })?;
+
+    if !status.success() {
+        return Err(StoreError::EditorFailed {
+            message: format!("it ended with {status}"),
+        });
+    }
+
+    Ok(())
+}
+
 pub(crate) fn fill_random(buffer: &mut [u8]) -> Result<(), StoreError> {
     getrandom::fill(buffer).map_err(|error| StoreError::RandomUnavailable {
         message: error.to_string(),
@@ -128,7 +154,7 @@ mod tests {
 
     use super::{
         fill_random, read_host_name, read_host_name_with, read_origin_url, read_origin_url_with,
-        run_git, run_git_with,
+        run_git, run_git_with, start_editor,
     };
     use crate::store::StoreError;
 
@@ -242,5 +268,25 @@ mod tests {
         fill_random(&mut second).expect("the operating system gives random bytes");
 
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn start_editor_reports_an_editor_that_fails() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let path = directory.path().join("ticket.md");
+
+        let passed = start_editor(std::ffi::OsStr::new("true"), &[], &path);
+        let failed = start_editor(std::ffi::OsStr::new("false"), &[], &path);
+        let missing = start_editor(std::ffi::OsStr::new("tikk-test-no-such-editor"), &[], &path);
+
+        assert!(passed.is_ok(), "{passed:?}");
+        assert!(
+            matches!(&failed, Err(StoreError::EditorFailed { message }) if message.contains("exit status: 1")),
+            "{failed:?}"
+        );
+        assert!(
+            matches!(&missing, Err(StoreError::EditorFailed { message }) if message.starts_with("could not start tikk-test-no-such-editor")),
+            "{missing:?}"
+        );
     }
 }

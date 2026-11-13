@@ -1,11 +1,15 @@
 use serde_json::{Value, json};
-use tikk_core::{Store, StoreError, TicketFilter, TicketListing};
+use tikk_core::{QueryEffects, Store, StoreError, TicketFilter, TicketListing};
 
 use crate::command::LsArguments;
 use crate::output::Output;
 use crate::ticket_row::{row_json, row_text};
 
-pub(crate) fn run(store: &Store, arguments: LsArguments) -> Result<Output, StoreError> {
+pub(crate) fn run(
+    store: &Store,
+    arguments: LsArguments,
+    effects: &QueryEffects,
+) -> Result<Output, StoreError> {
     let filter = TicketFilter {
         project: arguments.project,
         kind: arguments.kind,
@@ -13,7 +17,7 @@ pub(crate) fn run(store: &Store, arguments: LsArguments) -> Result<Output, Store
         status: arguments.status,
         search: arguments.search,
     };
-    let listing = tikk_core::list_tickets(store, &filter)?;
+    let listing = tikk_core::list_tickets(store, &filter, effects)?;
 
     Ok(Output {
         json: listing_json(&listing),

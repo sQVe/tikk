@@ -39,6 +39,25 @@ impl TicketFields {
 }
 
 impl TicketFields {
+    pub(crate) fn check_child(
+        &self,
+        child: &TicketId,
+        child_kind: Kind,
+    ) -> Result<(), TicketError> {
+        if allows_parent(child_kind, self.kind()) {
+            return Ok(());
+        }
+
+        Err(TicketError::invalid(
+            "kind",
+            format!(
+                "is {}, but its child {child}, a {child_kind}, cannot sit under a {}",
+                self.kind(),
+                self.kind()
+            ),
+        ))
+    }
+
     pub(crate) fn linked_ids(&self) -> impl Iterator<Item = &TicketId> {
         self.parent()
             .into_iter()

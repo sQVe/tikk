@@ -1,11 +1,17 @@
 mod machine;
 mod store_init;
+mod store_lock;
 mod system;
 mod ticket_create;
+mod ticket_edit;
+mod ticket_file_write;
 mod ticket_files;
 mod ticket_id_draw;
+mod ticket_link_checks;
 mod ticket_new_file;
 mod ticket_queries;
+mod ticket_status;
+mod ticket_write;
 
 use std::ffi::OsString;
 use std::fs;
@@ -16,11 +22,17 @@ use thiserror::Error;
 
 pub use machine::MachineName;
 pub use store_init::{InitOutcome, init};
+pub use store_lock::{LockAccess, StoreLock};
 pub use ticket_create::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
+pub use ticket_edit::{EditEffects, edit_ticket};
 pub use ticket_files::{StoredTicket, UnreadableTicket};
-pub use ticket_queries::{ShownTicket, TicketFilter, TicketListing, list_tickets, show_ticket};
+pub use ticket_queries::{
+    QueryEffects, ShownTicket, TicketFilter, TicketListing, list_tickets, show_ticket,
+};
+pub use ticket_status::{cancel_ticket, mark_done};
+pub use ticket_write::{TicketWrite, WriteEffects, write_ticket};
 
-use crate::ticket::TicketError;
+use crate::ticket::{Kind, TicketError};
 
 const CONFIG_FILE: &str = "tikk.json";
 const STORE_UNDER_HOME: &str = ".local/share/tikk";
@@ -59,6 +71,20 @@ pub enum StoreError {
     NoFreeId { project: String },
     #[error("Could not read random bytes: {message}")]
     RandomUnavailable { message: String },
+    #[error("Another process held the store lock {} for too long. Try again.", lock.display())]
+    Locked { lock: PathBuf },
+    #[error("{} changed after it was read. Run `tikk show` again and redo the change.", path.display())]
+    ChangedOnDisk { path: PathBuf },
+    #[error("{id} is a {kind}, but this command takes {allowed}.")]
+    WrongKind {
+        id: String,
+        kind: Kind,
+        allowed: &'static str,
+    },
+    #[error("EDITOR names no program. Set it to the editor to start, such as `EDITOR=vi`.")]
+    NoEditor,
+    #[error("The editor failed: {message}")]
+    EditorFailed { message: String },
     #[error("Could not {action} {}: {source}", path.display())]
     Io {
         action: &'static str,
@@ -69,7 +95,7 @@ pub enum StoreError {
 
 #[derive(Clone, Copy)]
 pub struct StoreEffects {
-    pub run_git: fn(&Path, &[&str]) -> Result<String, StoreError>,
+    pub run_git: fn(&Path, &[&str]) -> Result<Vec<u8>, StoreError>,
     pub read_host_name: fn() -> Result<String, StoreError>,
 }
 
