@@ -112,6 +112,34 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &environment.write_effects,
         )
         .map(|canceled| written_output(&canceled)),
+        Command::Block { id, blocker } => tikk_core::block_ticket(
+            &tikk_core::open(&store)?,
+            &id,
+            &blocker,
+            &environment.write_effects,
+        )
+        .map(|blocked| written_output(&blocked)),
+        Command::Unblock { id, blocker } => tikk_core::unblock_ticket(
+            &tikk_core::open(&store)?,
+            &id,
+            &blocker,
+            &environment.write_effects,
+        )
+        .map(|unblocked| written_output(&unblocked)),
+        Command::Move { id, new_parent } => tikk_core::move_ticket(
+            &tikk_core::open(&store)?,
+            &id,
+            new_parent.parent.as_ref(),
+            &environment.write_effects,
+        )
+        .map(|moved| written_output(&moved)),
+        Command::Rank { id, place } => tikk_core::rank_ticket(
+            &tikk_core::open(&store)?,
+            &id,
+            &place.place(),
+            &environment.write_effects,
+        )
+        .map(|ranked| written_output(&ranked)),
     }
 }
 

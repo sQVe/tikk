@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use tikk_core::{Kind, MachineName, ProjectName, Status, StoreError, TicketId};
+use tikk_core::{Kind, MachineName, ProjectName, RankPlace, Status, StoreError, TicketId};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -69,6 +69,80 @@ pub(crate) enum Command {
         #[arg(long, value_name = "TEXT")]
         reason: String,
     },
+    /// Make a ticket wait on a blocker until the blocker is done.
+    Block {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        #[arg(value_name = "BLOCKER", value_parser = TicketId::parse)]
+        blocker: TicketId,
+    },
+    /// Remove a blocker from a ticket.
+    Unblock {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        #[arg(value_name = "BLOCKER", value_parser = TicketId::parse)]
+        blocker: TicketId,
+    },
+    /// Move a ticket under another parent, or make it loose. The move clears its rank.
+    Move {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        #[command(flatten)]
+        new_parent: NewParent,
+    },
+    /// Order a ticket among the tickets with the same parent.
+    Rank {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        #[command(flatten)]
+        place: RankArguments,
+    },
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+pub(crate) struct NewParent {
+    /// The new parent, in the ticket's project.
+    #[arg(long, value_name = "ID", value_parser = TicketId::parse)]
+    pub(crate) parent: Option<TicketId>,
+    /// Leave the ticket with no parent.
+    #[arg(long)]
+    pub(crate) no_parent: bool,
+}
+
+#[derive(Debug, Args)]
+#[group(required = true, multiple = false)]
+pub(crate) struct RankArguments {
+    /// Put the ticket before all its siblings.
+    #[arg(long)]
+    first: bool,
+    /// Put the ticket after all its siblings.
+    #[arg(long)]
+    last: bool,
+    /// Put the ticket just before this sibling.
+    #[arg(long, value_name = "ID", value_parser = TicketId::parse)]
+    before: Option<TicketId>,
+    /// Put the ticket just after this sibling.
+    #[arg(long, value_name = "ID", value_parser = TicketId::parse)]
+    after: Option<TicketId>,
+}
+
+impl RankArguments {
+    pub(crate) fn place(self) -> RankPlace {
+        if let Some(anchor) = self.before {
+            return RankPlace::Before(anchor);
+        }
+
+        if let Some(anchor) = self.after {
+            return RankPlace::After(anchor);
+        }
+
+        if self.first {
+            return RankPlace::First;
+        }
+
+        RankPlace::Last
+    }
 }
 
 #[derive(Debug, Args)]
