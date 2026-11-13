@@ -62,8 +62,6 @@ pub fn write_ticket(
     replace_ticket(current, document, effects)
 }
 
-/// Changes one ticket under the exclusive lock. A change that returns `None` leaves the file as
-/// it is.
 pub(crate) fn change_ticket(
     store: &Store,
     id: &TicketId,

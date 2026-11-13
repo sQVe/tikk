@@ -12,7 +12,6 @@ pub enum WaitLink {
     Parent,
 }
 
-/// One link of a cycle: `waiter` waits on `target` through `link`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WaitStep {
     pub waiter: TicketId,
@@ -115,7 +114,6 @@ fn wait_edges(fields: &TicketFields) -> impl Iterator<Item = (&'static str, Wait
     parent.into_iter().chain(blockers)
 }
 
-// The shortest walk of waits from `start` to `goal`, where `goal` waits as `fields` says.
 fn find_wait_path(
     start: &TicketId,
     goal: &TicketId,
@@ -274,7 +272,6 @@ mod tests {
 
     #[test]
     fn a_walk_that_never_reaches_the_changed_ticket_passes() {
-        // B and C wait on each other, a loop that a hand edit made and that does not hold A.
         let store = scan(&[
             ("personal-aaaa", "---\nkind: task\ntitle: A\n---\n"),
             (

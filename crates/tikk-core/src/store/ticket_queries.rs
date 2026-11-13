@@ -172,7 +172,6 @@ fn sort_tickets(tickets: &mut [StoredTicket]) {
     tickets.sort_by(list_order);
 }
 
-/// Ranked tickets first, then by ID.
 pub(crate) fn list_order(left: &StoredTicket, right: &StoredTicket) -> Ordering {
     let left_rank = left.document.fields.rank();
     let right_rank = right.document.fields.rank();

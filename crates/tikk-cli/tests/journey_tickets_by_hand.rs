@@ -147,7 +147,6 @@ fn tickets_by_hand() {
         "step 6, the error names the cycle: {message}"
     );
 
-    // Step 5 ranks the two other tasks in the order they had, which is the order of their IDs.
     let mut others = [lease, windows];
     others.sort();
     let rows: Vec<(Value, Value)> = listed_rows(&home, &plan)

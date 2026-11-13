@@ -5,7 +5,6 @@ use crate::store::ticket_write::{WriteEffects, replace_ticket};
 use crate::store::{Store, StoreError};
 use crate::ticket::{TicketDocument, TicketId};
 
-/// Where `rank_ticket` puts a ticket among its siblings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RankPlace {
     First,
@@ -14,9 +13,6 @@ pub enum RankPlace {
     After(TicketId),
 }
 
-/// Ranks the siblings 1..n in the new order and writes only the files whose rank changed. Each
-/// file write is atomic, but the set is not: a failed write leaves the earlier siblings renumbered,
-/// which is still a valid order.
 pub fn rank_ticket(
     store: &Store,
     id: &TicketId,
@@ -74,7 +70,6 @@ fn sorted_siblings<'a>(scan: &'a TicketScan, ticket: &StoredTicket) -> Vec<&'a S
     siblings
 }
 
-// `others` holds the siblings without the ranked ticket, which sat at `from`.
 fn place_index(
     scan: &TicketScan,
     ticket: &StoredTicket,
@@ -161,7 +156,6 @@ mod tests {
         format!("---\nkind: task\ntitle: {title}\nparent: personal-pppp\nrank: {rank}\n---\n")
     }
 
-    /// A plan with the tasks A, B, and C ranked 1, 2, and 3 under it.
     fn ranked_siblings() -> (TempDir, Store) {
         let (a, b, c) = (task("A", 1), task("B", 2), task("C", 3));
 
@@ -196,7 +190,6 @@ mod tests {
         })
     }
 
-    // Writes the first file, then fails the way a full disk would.
     fn fail_after_one_write(path: &Path, text: &str, hash: &str) -> Result<(), StoreError> {
         let writes = WRITES.with(|writes| writes.replace(writes.get() + 1));
 

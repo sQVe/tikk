@@ -53,8 +53,6 @@ pub fn unblock_ticket(
     })
 }
 
-/// Moves the ticket under `parent`, or makes it loose when `parent` is `None`. The old rank ordered
-/// the old siblings, so a move clears it.
 pub fn move_ticket(
     store: &Store,
     id: &TicketId,
@@ -113,7 +111,6 @@ mod tests {
         }
     }
 
-    /// The task A under the plan P, ranked 4 and blocked by B and C, beside the plan Q.
     fn store_with_ranked_task() -> (TempDir, Store, PathBuf) {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         let folder = directory.path().join("tickets/personal");

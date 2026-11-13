@@ -27,7 +27,6 @@ fn rank(home: &Home, arguments: &[&str]) {
     assert_eq!(run.exit_code, 0, "rank {arguments:?}: {}", run.stderr);
 }
 
-/// A plan with three tasks ranked A, B, C.
 fn plan_with_ranked_tasks(home: &Home) -> (String, [String; 3]) {
     let plan = home.new_ticket(&["plan", "Move to tikk"]);
     let tasks = ["A", "B", "C"].map(|title| home.new_ticket(&["task", title, "--parent", &plan]));
