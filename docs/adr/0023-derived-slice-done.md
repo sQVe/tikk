@@ -35,6 +35,13 @@ there. A `mergedUnverified` slice is skipped with that hold and does not clear t
 A slice whose ID two files share derives nothing, because tikk cannot tell which file a fact
 belongs to.
 
+Done fails closed on input that tikk cannot read. While any fact line does not parse, no slice
+derives `done`: a slice that would be done reads `mergedUnverified`, because the unreadable line may
+be a newer audit of it. Plans then cannot be done either. While any ticket file does not parse or
+cannot be read, no plan derives `done` and each open plan reads `open`, because the file may be an
+unfinished child. Slices are unaffected by unreadable ticket files, and the other derived states
+are unchanged. `show`, `ls`, `ready`, and `pr refresh` share this one derivation.
+
 Only `tikk pr link` and `tikk pr refresh` run `gh`, and each read appends a `pr` fact
 ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)). `pr link <slice> <url>` reads the PR and makes
 it the slice's PR. `pr refresh` reads every linked PR that tikk has not yet seen in trunk, closed
@@ -73,6 +80,7 @@ refreshed slices that are `auditBehind`.
 
 - Done means merged and verified against the merged code.
 - A plan is not done while a slice or a task under it is open.
+- A broken fact line or ticket file never makes a slice or a plan read done.
 - An audit made before the merge still counts for the merged code when the PR head did not move.
 
 ### Negative
@@ -81,6 +89,8 @@ refreshed slices that are `auditBehind`.
   records its merge.
 - A slice sits as merged but unverified until an audit runs.
 - An instruction left open under a done slice stays open until someone closes or cancels it.
+- One broken fact line holds back done for every slice in the store, and one broken ticket file
+  holds back done for every plan, until someone fixes or removes it.
 
 ## Alternatives considered
 

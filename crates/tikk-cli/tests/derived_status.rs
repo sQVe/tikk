@@ -279,3 +279,84 @@ fn a_stored_audit_verdict_with_blank_evidence_does_not_count() {
     assert_eq!(shown["derivedStatus"], json!("mergedUnverified"), "{shown}");
     assert_eq!(shown["audit"], Value::Null, "{shown}");
 }
+
+fn done_slice(home: &Home, gh: &FakeGh) -> (String, String) {
+    let (plan, slice) = linked_slice(home, gh);
+    let file = verdicts(home, &json!([met("s1")]));
+    let run = audit(home, None, &slice, HEAD, &file);
+    assert_eq!(run.exit_code, 0, "audit: {}", run.stderr);
+    merge_and_refresh(home, gh, 7, HEAD);
+    assert_eq!(home.show_json(&slice)["derivedStatus"], json!("done"));
+
+    (plan, slice)
+}
+
+fn listed_row(home: &Home, id: &str) -> Value {
+    let run = home.tikk(&["ls", "--json"]);
+    assert_eq!(run.exit_code, 0, "ls: {}", run.stderr);
+
+    parse_json(&run.stdout)["tickets"]
+        .as_array()
+        .expect("ls lists tickets")
+        .iter()
+        .find(|row| row["id"] == json!(id))
+        .cloned()
+        .unwrap_or_else(|| panic!("ls lists {id}"))
+}
+
+#[test]
+fn an_unreadable_fact_line_keeps_a_merged_slice_from_reading_done() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let (plan, slice) = done_slice(&home, &gh);
+    let blocked = home.slice_under(&plan, "Add the lease", &[&slice]);
+
+    home.append_fact_line("2026-11.jsonl", "{\"v\":1,\"kind\":\"audit\"");
+
+    let shown = home.show_json(&slice);
+    assert_eq!(shown["derivedStatus"], json!("mergedUnverified"), "{shown}");
+    assert_eq!(
+        listed_row(&home, &slice)["derivedStatus"],
+        json!("mergedUnverified")
+    );
+    assert_eq!(home.show_json(&plan)["derivedStatus"], json!("open"));
+    let ready = home.tikk(&["ready", "--parent", &plan, "--json"]);
+    assert_eq!(ready.exit_code, 0, "ready: {}", ready.stderr);
+    let queue = parse_json(&ready.stdout);
+    assert_eq!(queue["candidates"], json!([]), "{queue}");
+    let holds: Vec<Value> = queue["skipped"]
+        .as_array()
+        .expect("ready lists skipped slices")
+        .iter()
+        .map(|row| json!([row["id"], row["holds"][0]["reason"]]))
+        .collect();
+    assert_eq!(
+        holds,
+        [
+            json!([slice, "mergedUnverified"]),
+            json!([blocked, "blockedBy"])
+        ],
+        "{queue}"
+    );
+    assert_ne!(queue["errors"], json!([]), "{queue}");
+}
+
+#[test]
+fn an_unreadable_ticket_file_keeps_a_plan_from_reading_done() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let (plan, _slice) = done_slice(&home, &gh);
+    let open = home.slice_under(&plan, "Add the lease", &[]);
+    assert_eq!(home.show_json(&plan)["derivedStatus"], json!("open"));
+    let file = home
+        .ticket_files()
+        .into_iter()
+        .find(|path| path.to_string_lossy().contains(&open))
+        .expect("the open slice has a file");
+
+    std::fs::write(&file, "---\nkind: [\n---\n").expect("break the slice file");
+
+    let shown = home.show_json(&plan);
+    assert_eq!(shown["derivedStatus"], json!("open"), "{shown}");
+    assert_eq!(listed_row(&home, &plan)["derivedStatus"], json!("open"));
+}

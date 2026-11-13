@@ -135,8 +135,8 @@ fn append_observed(
     }
 
     // One read after all appends, so a tie in time orders by file and line, as `show` does.
-    let facts = read_facts(root)?.facts;
-    let mut prs = current_prs(&facts);
+    let facts = read_facts(root)?;
+    let mut prs = current_prs(&facts.facts);
     let derived = derive_states(&scan, &facts, &prs);
     let audit_behind = appended
         .iter()

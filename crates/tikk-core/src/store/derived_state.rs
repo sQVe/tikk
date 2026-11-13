@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use crate::fact::{FactLine, PrState, ShownPr, last_audits};
+use crate::fact::{PrState, ShownPr, last_audits};
 use crate::store::audit_check::{AuditCheck, check_audit};
+use crate::store::fact_files::FactScan;
 use crate::store::ticket_files::{StoredTicket, TicketScan};
 use crate::store::ticket_queries::{TicketIndex, TicketLookup};
 use crate::ticket::{Kind, Status, TicketId};
@@ -71,11 +72,11 @@ impl DerivedStates {
 // `prs` is the `current_prs` of the same facts.
 pub(crate) fn derive_states(
     scan: &TicketScan,
-    facts: &[FactLine],
+    facts: &FactScan,
     prs: &HashMap<TicketId, ShownPr>,
 ) -> DerivedStates {
     let index = TicketIndex::new(scan);
-    let mut audits = last_audits(facts);
+    let mut audits = last_audits(&facts.facts);
     let mut states = DerivedStates::default();
     let only_file =
         |ticket: &&StoredTicket| matches!(index.look_up(&ticket.id), TicketLookup::Found(_));
@@ -90,9 +91,14 @@ pub(crate) fn derive_states(
             .remove(&slice.id)
             .map(|audit| check_audit(audit, slice.document.fields.criteria(), pr));
 
-        states
-            .statuses
-            .insert(slice.id.clone(), slice_status(pr, check.as_ref()));
+        let mut status = slice_status(pr, check.as_ref());
+
+        // An unreadable line may be a newer audit of this slice, so tikk cannot prove the last one.
+        if status == DerivedStatus::Done && !facts.errors.is_empty() {
+            status = DerivedStatus::MergedUnverified;
+        }
+
+        states.statuses.insert(slice.id.clone(), status);
 
         if let Some(check) = check {
             states.audits.insert(slice.id.clone(), check);
@@ -101,7 +107,12 @@ pub(crate) fn derive_states(
 
     for plan in scan.tickets.iter().filter(only_file) {
         if plan.document.fields.kind() == Kind::Plan {
-            let status = plan_status(&plan.id, scan, &states);
+            // An unreadable ticket file may be an unfinished child of this plan.
+            let status = if scan.errors.is_empty() {
+                plan_status(&plan.id, scan, &states)
+            } else {
+                DerivedStatus::Open
+            };
 
             states.statuses.insert(plan.id.clone(), status);
         }
@@ -172,7 +183,8 @@ mod tests {
         Timestamp, Verdict, current_prs,
     };
     use crate::store::audit_check::AuditReason;
-    use crate::store::ticket_files::{StoredTicket, TicketScan};
+    use crate::store::fact_files::{FactScan, UnreadableFact};
+    use crate::store::ticket_files::{StoredTicket, TicketScan, UnreadableTicket};
     use crate::ticket::{TicketDocument, TicketId};
 
     const CRITERIA: &str = "criteria:\n  - id: s1\n    check: c\n    expected: e\n";
@@ -254,7 +266,12 @@ mod tests {
     }
 
     fn derived(scan: &TicketScan, facts: &[FactLine]) -> DerivedStates {
-        derive_states(scan, facts, &current_prs(facts))
+        let facts = FactScan {
+            facts: facts.to_vec(),
+            errors: Vec::new(),
+        };
+
+        derive_states(scan, &facts, &current_prs(&facts.facts))
     }
 
     fn merged() -> FactLine {
@@ -342,6 +359,60 @@ mod tests {
 
         assert_eq!(check.reasons, vec![AuditReason::NotLinked]);
         assert_eq!(states.audit(&id("personal-rrrr")), None);
+    }
+
+    #[test]
+    fn no_slice_or_plan_is_done_while_a_fact_line_is_unreadable() {
+        let tickets = vec![
+            plan(),
+            slice("personal-kkkk", ""),
+            slice("personal-rrrr", ""),
+        ];
+        let behind = pr("personal-rrrr", PrState::Open, "new", false);
+        let mut behind_audit = met();
+        behind_audit.ticket = id("personal-rrrr");
+        let facts = FactScan {
+            facts: vec![merged(), met(), behind, behind_audit],
+            errors: vec![UnreadableFact {
+                path: PathBuf::from("facts/2026-11.jsonl"),
+                line: 3,
+                message: "the line is not JSON".to_owned(),
+            }],
+        };
+
+        let states = derive_states(&scan(tickets), &facts, &current_prs(&facts.facts));
+
+        assert_eq!(
+            states.status(&slice("personal-kkkk", "")),
+            Some(DerivedStatus::MergedUnverified)
+        );
+        assert_eq!(
+            states.status(&slice("personal-rrrr", "")),
+            Some(DerivedStatus::AuditBehind)
+        );
+        assert_eq!(states.status(&plan()), Some(DerivedStatus::Open));
+    }
+
+    #[test]
+    fn no_plan_is_done_while_a_ticket_file_is_unreadable() {
+        let done_task = ticket(
+            "personal-tttt",
+            "kind: task\ntitle: Task\nparent: personal-pppp\nstatus: done\n",
+        );
+        let mut tickets = scan(vec![plan(), slice("personal-kkkk", ""), done_task]);
+        tickets.errors.push(UnreadableTicket {
+            path: PathBuf::from("tickets/personal/personal-rrrr.md"),
+            id: Some(id("personal-rrrr")),
+            message: "the front matter is not YAML".to_owned(),
+        });
+
+        let states = derived(&tickets, &[merged(), met()]);
+
+        assert_eq!(states.status(&plan()), Some(DerivedStatus::Open));
+        assert_eq!(
+            states.status(&slice("personal-kkkk", "")),
+            Some(DerivedStatus::Done)
+        );
     }
 
     #[test]

@@ -122,7 +122,7 @@ pub fn ready_slices(
     let lookups = TicketIndex::new(&scan);
     let claims = current_claims(&facts.facts);
     let prs = current_prs(&facts.facts);
-    let derived = derive_states(&scan, &facts.facts, &prs);
+    let derived = derive_states(&scan, &facts, &prs);
     let mut slices: Vec<&StoredTicket> = scan
         .tickets
         .iter()

@@ -71,7 +71,7 @@ pub fn list_tickets(
     };
     let search = filter.search.as_deref().map(str::to_lowercase);
     let clashes = id_clashes(&scan);
-    let derived = derive_states(&scan, &facts.facts, &current_prs(&facts.facts));
+    let derived = derive_states(&scan, &facts, &current_prs(&facts.facts));
     let mut tickets: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -101,12 +101,12 @@ pub fn show_ticket(
     let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
     let scan = read_tickets(store.root())?;
     let ticket = find_ticket(&scan, id)?.clone();
-    let facts = read_facts(store.root())?.facts;
-    let prs = current_prs(&facts);
+    let facts = read_facts(store.root())?;
+    let prs = current_prs(&facts.facts);
     let derived = derive_states(&scan, &facts, &prs);
     let (claim, pr) = if ticket.document.fields.kind() == Kind::Slice {
         (
-            shown_claim(&facts, id, (effects.now)()),
+            shown_claim(&facts.facts, id, (effects.now)()),
             prs.get(id).cloned(),
         )
     } else {

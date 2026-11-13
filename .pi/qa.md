@@ -361,6 +361,11 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   skipped, and a slice it blocks is a candidate with `"stackParent":null`. A `mergedUnverified`
   slice is skipped with `{"reason":"mergedUnverified"}`, and a slice it blocks has
   `{"reason":"blockedBy",...,"state":"mergedUnverified"}`.
+- Append a line that does not parse, such as `{"v":1,"kind":"audit"`, to a fact file. While it is
+  there, a slice that was `done` reads `mergedUnverified` in `show`, `ls`, and `ready`, its plan
+  reads `open`, and `ready --json` lists the line in `errors`. Replace a ticket file of the store
+  with `---\nkind: [\n---\n`. While it is there, no plan reads `done`; an open plan reads `open`,
+  slices keep their derived state, and `ls --json` lists the file in `errors`.
 - With the fake `gh` answering an open PR with a new `headRefOid`,
   `target/debug/tikk pr refresh --json` prints `"auditBehind":[<slice>]` beside `refreshed` for a
   slice whose last audit saw another head, and `"auditBehind":[]` after an audit of the new head.
