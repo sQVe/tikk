@@ -2,12 +2,10 @@ use std::fmt;
 
 use serde::Serialize;
 
-/// The name of an agent, as `TIKK_AGENT` gives it. It is never empty.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct AgentName(String);
 
 impl AgentName {
-    /// Returns `None` for an empty name, which names no agent.
     pub fn parse(name: &str) -> Option<Self> {
         if name.is_empty() {
             return None;

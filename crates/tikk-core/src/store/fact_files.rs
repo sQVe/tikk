@@ -12,7 +12,6 @@ const FACTS_FOLDER: &str = "facts";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnreadableFact {
     pub path: PathBuf,
-    /// The line number in the file, from 1.
     pub line: usize,
     pub message: String,
 }
@@ -32,7 +31,6 @@ pub(crate) fn fact_file(root: &Path, at: Timestamp) -> Result<PathBuf, StoreErro
         .join(format!("{}.jsonl", at.month())))
 }
 
-// One write of the whole line to a file opened for append, so a line is never edited.
 pub(crate) fn append_line(path: &Path, line: &str) -> Result<(), StoreError> {
     if let Some(folder) = path.parent() {
         fs::create_dir_all(folder).map_err(|source| io_error("create", folder, source))?;
@@ -48,8 +46,6 @@ pub(crate) fn append_line(path: &Path, line: &str) -> Result<(), StoreError> {
         .map_err(|source| io_error("append to", path, source))
 }
 
-// Facts are ordered by time, then file path, then line number. A line that does not parse is in
-// `errors`.
 pub(crate) fn read_facts(root: &Path) -> Result<FactScan, StoreError> {
     let mut scan = FactScan::default();
 
@@ -57,7 +53,6 @@ pub(crate) fn read_facts(root: &Path) -> Result<FactScan, StoreError> {
         read_fact_file(&path, &mut scan)?;
     }
 
-    // The sort is stable, so facts of one time keep the path and line order they were read in.
     scan.facts.sort_by_key(|fact| fact.at);
 
     Ok(scan)
@@ -86,7 +81,6 @@ fn fact_paths(folder: &Path) -> Result<Vec<PathBuf>, StoreError> {
         }
     }
 
-    // Lexical order of the whole path, which differs from the order of its parts.
     paths.sort_by(|left, right| left.as_os_str().cmp(right.as_os_str()));
 
     Ok(paths)

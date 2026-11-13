@@ -273,7 +273,6 @@ fn write_bench_tickets(home: &Home) -> Vec<String> {
         let text = if index % 100 == 0 {
             format!("---\nkind: plan\ntitle: Plan {index}\nstatus: open\n---\nThe design.\n")
         } else {
-            // Each slice but the first of a plan waits on the slice before it.
             let blocked_by = if index % 100 == 1 {
                 String::new()
             } else {

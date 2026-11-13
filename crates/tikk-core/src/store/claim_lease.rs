@@ -24,7 +24,6 @@ impl LeaseEffects {
     }
 }
 
-// The claim of an instruction's slice covers a write to the instruction.
 pub(crate) fn instruction_slice(fields: &TicketFields) -> Option<&TicketId> {
     if fields.kind() != Kind::Instruction {
         return None;

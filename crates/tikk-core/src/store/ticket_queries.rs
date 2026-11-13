@@ -48,7 +48,6 @@ pub struct ShownTicket {
     pub ticket: StoredTicket,
     pub children: Vec<StoredTicket>,
     pub files: Vec<String>,
-    /// The slice's claim, live or stale. Other kinds have none.
     pub claim: Option<ShownClaim>,
 }
 

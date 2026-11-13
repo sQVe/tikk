@@ -40,7 +40,6 @@ pub fn cancel_ticket(
     })
 }
 
-// An instruction's status is part of its slice's claimed work.
 fn change_status(
     store: &Store,
     id: &TicketId,

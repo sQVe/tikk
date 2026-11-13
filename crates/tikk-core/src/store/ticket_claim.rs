@@ -32,8 +32,6 @@ pub struct ShownClaim {
     pub state: ClaimState,
 }
 
-/// Claims a slice for the caller's agent, or renews the agent's own claim. The slice must pass
-/// strict validation, and the error names the field to fix.
 pub fn claim_slice(
     store: &Store,
     id: &TicketId,
@@ -69,8 +67,6 @@ pub fn claim_slice(
     Ok(claim)
 }
 
-/// Ends the claim on a slice, and returns the claim it ended. An agent may end its own claim or
-/// a stale one. A person may end any claim.
 pub fn release_slice(
     store: &Store,
     id: &TicketId,

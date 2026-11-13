@@ -28,8 +28,6 @@ impl ReadyEffects {
     }
 }
 
-/// The slices to weigh: the plan's, or else the project's. Without either, the project is the
-/// one `tikk new` would choose in the working directory.
 #[derive(Debug, Clone)]
 pub struct ReadyScope {
     pub parent: Option<TicketId>,
@@ -54,13 +52,11 @@ pub struct SkippedSlice {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hold {
     Draft,
-    /// `via` names the plan whose `blockedBy` holds the blocker.
     BlockedBy {
         blocker: TicketId,
         via: Option<TicketId>,
         state: BlockerState,
     },
-    /// The slice's plan is a draft, is canceled, or cannot be read.
     Parent {
         parent: TicketId,
         state: BlockerState,
@@ -97,8 +93,6 @@ enum Lookup<'a> {
     Shared,
 }
 
-/// Candidates and skipped slices are in rank order, then by ID. Done and canceled slices are not
-/// listed.
 pub fn ready_slices(
     store: &Store,
     scope: ReadyScope,
@@ -218,7 +212,6 @@ fn index_tickets(scan: &TicketScan) -> HashMap<&TicketId, Lookup<'_>> {
     lookups
 }
 
-// A blocker that the slice and its plan both name is listed once, at the slice.
 fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>) -> Vec<Hold> {
     let fields = &slice.document.fields;
     let mut holds = Vec::new();
@@ -277,7 +270,6 @@ fn blocking_holds(slice: &StoredTicket, lookups: &HashMap<&TicketId, Lookup<'_>>
     holds
 }
 
-// A draft plan's slices wait until the plan is agreed, and a canceled plan's never start.
 fn plan_hold(status: Status) -> Option<BlockerState> {
     match status {
         Status::Draft => Some(BlockerState::Draft),
@@ -286,7 +278,6 @@ fn plan_hold(status: Status) -> Option<BlockerState> {
     }
 }
 
-// A done or canceled blocker no longer holds.
 fn blocker_state(lookup: Option<&Lookup<'_>>) -> Option<BlockerState> {
     match found(lookup) {
         Ok(ticket) => match ticket.document.fields.status() {

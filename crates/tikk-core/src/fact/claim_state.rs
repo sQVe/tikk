@@ -42,7 +42,6 @@ impl Claim {
         }
     }
 
-    /// A claim is live until its lease ends, and stale from then on.
     pub fn state(&self, now: Timestamp) -> ClaimState {
         if now < self.lease_end {
             ClaimState::Claimed

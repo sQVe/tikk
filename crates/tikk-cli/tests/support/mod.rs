@@ -18,7 +18,6 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
-/// tikk reads the caller's identity from these, so a test started by an agent would run as it.
 const IDENTITY_ENVIRONMENT: &[&str] = &["TIKK_AGENT", "TIKK_SESSION", "TIKK_SESSION_LOG"];
 
 /// The `EILSEQ` code on macOS, where APFS refuses a file name that is not UTF-8.
@@ -124,7 +123,6 @@ impl Home {
         command
     }
 
-    /// Runs tikk in the working directory as the agent, with `TIKK_AGENT` set to its name.
     pub(crate) fn tikk_as(&self, agent: &str, arguments: &[&str]) -> Run {
         let mut command = self.command(arguments);
 
@@ -133,7 +131,6 @@ impl Home {
         finish(command.output().expect("start the tikk binary"))
     }
 
-    /// Creates a plan and an open slice under it with one criterion, and returns their IDs.
     pub(crate) fn plan_and_slice(&self) -> (String, String) {
         let plan = self.new_ticket(&["plan", "Move to tikk"]);
         let slice = self.slice_under(&plan, "Add the store", &[]);
@@ -141,7 +138,6 @@ impl Home {
         (plan, slice)
     }
 
-    /// Creates an open slice with one criterion under the plan, blocked by the given tickets.
     pub(crate) fn slice_under(&self, plan: &str, title: &str, blocked_by: &[&str]) -> String {
         let document = self.document(
             "slice.md",
@@ -154,7 +150,6 @@ impl Home {
         self.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")])
     }
 
-    /// Returns every fact line in the store, file by file in path order.
     pub(crate) fn fact_lines(&self) -> Vec<Value> {
         let mut files = Vec::new();
         let Ok(machines) = std::fs::read_dir(self.store().join("facts")) else {
@@ -183,7 +178,6 @@ impl Home {
             .collect()
     }
 
-    /// Appends a line to `facts/test/<file>`, as a hand edit or another tikk version would.
     pub(crate) fn append_fact_line(&self, file: &str, line: &str) {
         use std::io::Write as _;
 

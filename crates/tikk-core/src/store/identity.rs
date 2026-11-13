@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use crate::fact::AgentName;
 use crate::store::StoreError;
 
-/// Who runs a command. With no agent, the caller is a person.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Identity {
     pub agent: Option<AgentName>,
@@ -12,8 +11,6 @@ pub struct Identity {
 }
 
 impl Identity {
-    /// Parses the values of `TIKK_AGENT`, `TIKK_SESSION`, and `TIKK_SESSION_LOG`. An empty
-    /// value counts as unset.
     pub fn from_environment(
         agent: Option<OsString>,
         session: Option<OsString>,

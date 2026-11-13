@@ -8,7 +8,6 @@ use time::{OffsetDateTime, UtcOffset};
 
 use crate::fact::FactError;
 
-// One fixed width keeps the text of two timestamps in the same order as their times.
 static TEXT_FORMAT: LazyLock<Vec<BorrowedFormatItem<'static>>> = LazyLock::new(|| {
     time::format_description::parse_borrowed::<2>(
         "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z",
@@ -20,8 +19,6 @@ static MONTH_FORMAT: LazyLock<Vec<BorrowedFormatItem<'static>>> = LazyLock::new(
         .expect("the month format is valid")
 });
 
-/// A moment in UTC, to the millisecond. Its text is RFC 3339, such as
-/// `2026-11-13T01:02:03.456Z`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(OffsetDateTime);
 

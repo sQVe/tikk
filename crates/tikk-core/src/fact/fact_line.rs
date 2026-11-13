@@ -15,7 +15,6 @@ pub(crate) struct FactLine {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FactEvent {
     Claim(Claim),
-    // `agent` is `None` when a person ended the claim.
     Release { agent: Option<AgentName> },
 }
 
