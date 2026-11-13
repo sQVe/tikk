@@ -117,7 +117,14 @@ mod tests {
 
         let directory = tempfile::tempdir().expect("create a temporary directory");
         let working_directory = directory.path().join(std::ffi::OsStr::from_bytes(b"\xff"));
-        std::fs::create_dir_all(working_directory.join("remote.git")).expect("create the remote");
+        // macOS refuses a file name that is not UTF-8, so there a working directory like this
+        // cannot exist.
+        let illegal_byte_sequence = 92;
+        if let Err(error) = std::fs::create_dir_all(working_directory.join("remote.git")) {
+            assert_eq!(error.raw_os_error(), Some(illegal_byte_sequence), "{error}");
+
+            return;
+        }
 
         let result = RemoteLocation::resolve("remote.git", &working_directory);
 
