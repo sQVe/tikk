@@ -5,8 +5,8 @@ use crate::store::StoreError;
 use crate::store::ticket_files::{exists, is_folder, sorted_entries};
 use crate::ticket::{ProjectName, TicketId};
 
-const DRAW_ATTEMPTS: usize = 100;
-const RANDOM_BYTES: usize = 16;
+pub(crate) const DRAW_ATTEMPTS: usize = 100;
+pub(crate) const RANDOM_BYTES: usize = 16;
 
 pub(crate) fn draw_free_id(
     project: &ProjectName,

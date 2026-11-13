@@ -1,3 +1,4 @@
+mod attention_read;
 mod audit;
 mod audit_check;
 mod claim_lease;
@@ -13,6 +14,8 @@ mod pr_link;
 mod pr_refresh;
 mod process_run;
 mod project_choice;
+mod question_answer;
+mod question_ask;
 mod ready;
 mod store_init;
 mod store_init_remote;
@@ -21,6 +24,7 @@ mod sync;
 mod sync_commit;
 mod sync_merge;
 mod sync_read;
+mod sync_result;
 mod system;
 mod ticket_claim;
 mod ticket_create;
@@ -44,6 +48,7 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+pub use attention_read::{AttentionEffects, read_attention};
 pub use audit::{AuditEffects, AuditRequest, audit_slice};
 pub use audit_check::{AuditCheck, AuditReason};
 pub use claim_lease::LeaseEffects;
@@ -56,6 +61,8 @@ pub use machine::MachineName;
 pub use pr_github::PrFailure;
 pub use pr_link::{PrEffects, link_pr};
 pub use pr_refresh::{RefreshOutcome, RefreshedPr, refresh_prs};
+pub use question_answer::{AnswerEffects, answer_question};
+pub use question_ask::{AskEffects, ask_question};
 pub use ready::{
     BlockerState, Hold, ReadyEffects, ReadyQueue, ReadyScope, ReadySlice, SkippedSlice,
     StackParent, ready_slices,
@@ -216,6 +223,10 @@ pub enum StoreError {
     UnknownCriterion { id: String, criterion: String },
     #[error("{}", describe_no_repository(origin.as_deref()))]
     NoRepository { origin: Option<String> },
+    #[error("{id} has no question `{item}`. Run `tikk show {id}` for its questions.")]
+    UnknownQuestion { id: String, item: String },
+    #[error("Found no free question item for {id}.")]
+    NoFreeItem { id: String },
     #[error("{id} has no linked PR. Run `tikk pr link {id} <url>` first.")]
     NotLinked { id: String },
     #[error("{error} Then the sync result could not be saved: {save}")]

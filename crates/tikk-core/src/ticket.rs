@@ -13,6 +13,7 @@ pub use ticket_document::TicketDocument;
 pub(crate) use ticket_document::write_document;
 pub use ticket_fields::{Criterion, TicketFields};
 pub use ticket_id::{ID_ALPHABET, TicketId};
+pub(crate) use ticket_id::{draw_code, is_code};
 pub use ticket_kind::{Kind, Status};
 pub(crate) use ticket_slug::ticket_file_name;
 

@@ -258,6 +258,24 @@ fn manager_runs_a_slice() {
         "step 7, done: {slice}"
     );
 
+    let calls = gh.calls();
+    let needs = home.tikk_with_gh(&gh, None, &["needs", "--json"]);
+
+    assert_eq!(needs.exit_code, 0, "step 8, needs: {}", needs.stderr);
+    let items = parse_json(&needs.stdout)["items"].clone();
+    let for_first: Vec<&serde_json::Value> = items
+        .as_array()
+        .expect("needs lists items")
+        .iter()
+        .filter(|item| item["id"] == json!(first))
+        .collect();
+    assert_eq!(
+        for_first,
+        Vec::<&serde_json::Value>::new(),
+        "step 8, no item for the first slice: {items}"
+    );
+    assert_eq!(gh.calls(), calls, "step 8, needs runs no gh");
+
     let ready = home.tikk(&["ready", "--parent", &plan, "--json"]);
     assert_eq!(ready.exit_code, 0, "end state, ready: {}", ready.stderr);
     let queue = parse_json(&ready.stdout);
