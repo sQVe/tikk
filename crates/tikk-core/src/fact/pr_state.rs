@@ -113,31 +113,40 @@ fn is_name(text: &str) -> bool {
 pub(crate) fn current_prs<'a>(
     facts: impl IntoIterator<Item = &'a FactLine>,
 ) -> HashMap<TicketId, ShownPr> {
-    let mut prs: HashMap<TicketId, ShownPr> = HashMap::new();
+    let mut newest: HashMap<&TicketId, (&PullRequest, Timestamp)> = HashMap::new();
+    let mut strongest: HashMap<(&TicketId, &PullRequest), &PrObservation> = HashMap::new();
 
     for fact in facts {
         let FactEvent::Pr(observation) = &fact.event else {
             continue;
         };
-        let replaces = match prs.get(&fact.ticket) {
-            Some(shown) if shown.observation.pull_request == observation.pull_request => {
-                strength(observation) >= strength(&shown.observation)
-            }
-            _ => true,
-        };
-        let checked = ShownPr {
-            observation: observation.clone(),
-            checked_at: fact.at,
-        };
+        let pull_request = &observation.pull_request;
 
-        if replaces {
-            prs.insert(fact.ticket.clone(), checked);
-        } else if let Some(shown) = prs.get_mut(&fact.ticket) {
-            shown.checked_at = fact.at;
-        }
+        newest.insert(&fact.ticket, (pull_request, fact.at));
+        strongest
+            .entry((&fact.ticket, pull_request))
+            .and_modify(|kept| {
+                if strength(observation) >= strength(kept) {
+                    *kept = observation;
+                }
+            })
+            .or_insert(observation);
     }
 
-    prs
+    newest
+        .into_iter()
+        .map(|(ticket, (pull_request, checked_at))| {
+            let observation = strongest[&(ticket, pull_request)].clone();
+
+            (
+                ticket.clone(),
+                ShownPr {
+                    observation,
+                    checked_at,
+                },
+            )
+        })
+        .collect()
 }
 
 fn strength(observation: &PrObservation) -> u8 {
@@ -302,6 +311,29 @@ mod tests {
             assert_eq!(shown.observation, expected, "case {index}");
             assert_eq!(shown.checked_at, newest, "case {index}");
         }
+    }
+
+    #[test]
+    fn a_pr_linked_again_keeps_its_strongest_fact_and_the_newest_check_time() {
+        let in_trunk = observed(7, PrState::Merged, Some("merge"), true);
+        let facts = [
+            fact("2026-11-13T01:00:00Z", in_trunk.clone()),
+            fact(
+                "2026-11-13T02:00:00Z",
+                observed(8, PrState::Open, None, false),
+            ),
+            fact(
+                "2026-11-13T03:00:00Z",
+                observed(7, PrState::Open, None, false),
+            ),
+        ];
+
+        let shown = current_prs(&facts)
+            .remove(&slice())
+            .expect("the slice has a PR");
+
+        assert_eq!(shown.observation, in_trunk);
+        assert_eq!(shown.checked_at, at("2026-11-13T03:00:00Z"));
     }
 
     #[test]
