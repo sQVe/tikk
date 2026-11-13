@@ -815,3 +815,36 @@ fn a_failed_unstage_after_a_failed_commit_reports_both_errors() {
         "{error:?}"
     );
 }
+
+#[test]
+fn sync_lists_each_id_clash_with_relative_paths_and_saves_the_outcome() {
+    let machines = Machines::new();
+    let laptop = machines.laptop();
+    let copy = "tickets/personal/personal-abcd-copy.md";
+    CLOCK.set(later());
+    write(&laptop, TICKET, TICKET_TEXT);
+    write(&laptop, copy, TICKET_TEXT);
+
+    let outcome = sync(&laptop, &effects()).expect("a clash does not stop sync");
+
+    assert_eq!(
+        outcome.clashes,
+        [IdClash {
+            id: TicketId::parse("personal-abcd").expect("a valid ID"),
+            paths: vec![PathBuf::from(copy), PathBuf::from(TICKET)],
+        }]
+    );
+    let mut saved: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(laptop.join(".git/tikk-sync.json")).expect("read the saved result"),
+    )
+    .expect("the saved result is JSON");
+    assert!(saved["at"].is_string(), "{saved}");
+    saved
+        .as_object_mut()
+        .expect("the saved result is an object")
+        .remove("at");
+    assert_eq!(
+        saved,
+        serde_json::to_value(&outcome).expect("the outcome serializes")
+    );
+}

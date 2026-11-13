@@ -583,4 +583,49 @@ mod tests {
         );
         assert_eq!(shown_state(&store), None);
     }
+
+    #[test]
+    fn done_by_the_holder_on_an_instruction_of_a_shared_slice_id_is_refused_and_writes_nothing() {
+        let (directory, store) = store_with_slice();
+        let folder = directory.path().join("tickets/personal");
+        let instruction = folder.join("personal-iiii-step.md");
+        set_clock(0);
+        claim_value(
+            &store,
+            &id("personal-kkkk"),
+            &agent("manager"),
+            &claim_effects(),
+        )
+        .expect("the slice is free");
+        fs::copy(
+            folder.join("personal-kkkk-slice.md"),
+            folder.join("personal-kkkk-copy.md"),
+        )
+        .expect("put a second file with the ID");
+        let before = fs::read(&instruction).expect("read the instruction");
+        let facts = read_facts(directory.path())
+            .expect("the facts are read")
+            .facts;
+        let effects = WriteEffects {
+            lease: lease(),
+            ..WriteEffects::system()
+        };
+
+        let result = mark_done(&store, &id("personal-iiii"), &agent("manager"), &effects);
+
+        assert!(
+            matches!(&result, Err(StoreError::IdShared { id, .. }) if id == "personal-kkkk"),
+            "{result:?}"
+        );
+        assert_eq!(
+            fs::read(&instruction).expect("read the instruction"),
+            before
+        );
+        assert_eq!(
+            read_facts(directory.path())
+                .expect("the facts are read")
+                .facts,
+            facts
+        );
+    }
 }
