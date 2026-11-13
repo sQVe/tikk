@@ -64,7 +64,6 @@ pub fn read_attention(store: &Store, effects: &AttentionEffects) -> Result<Atten
     }))
 }
 
-// A ticket whose ID is in more than one file is left out, as `derive_states` leaves it out.
 fn attention_tickets(scan: &TicketScan, derived: &DerivedStates) -> Vec<AttentionTicket> {
     let index = TicketIndex::new(scan);
 

@@ -51,8 +51,6 @@ impl Question {
     }
 }
 
-// Each ticket's questions in fact order. The newest answer to an item wins, and an answer that
-// names no asked item is ignored.
 pub(crate) fn current_questions<'a>(
     facts: impl IntoIterator<Item = &'a FactLine>,
 ) -> HashMap<TicketId, Vec<Question>> {

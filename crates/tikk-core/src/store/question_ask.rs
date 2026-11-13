@@ -29,9 +29,6 @@ impl AskEffects {
     }
 }
 
-/// Appends a `question` fact with a new item ID. On a slice or an instruction, an agent is
-/// refused while another agent holds a live claim on the slice, and the holder's question renews
-/// its lease.
 pub fn ask_question(
     store: &Store,
     id: &TicketId,
@@ -125,7 +122,6 @@ mod tests {
         static DRAWS: Cell<u8> = const { Cell::new(0) };
     }
 
-    // Draws `3333`, `3333`, then `4444`.
     fn repeating_random(buffer: &mut [u8]) -> Result<(), StoreError> {
         let draw = DRAWS.with(|draws| {
             let draw = draws.get();

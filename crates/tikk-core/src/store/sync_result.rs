@@ -7,8 +7,6 @@ use serde::Deserialize;
 use crate::fact::AttentionProblem;
 use crate::store::sync::{RESULT_FILE, SyncStep};
 
-// A saved outcome has `problems`, and a sync that stopped has `error`, with `conflict` for a
-// conflict.
 #[derive(Deserialize)]
 struct SavedResult {
     at: Option<String>,

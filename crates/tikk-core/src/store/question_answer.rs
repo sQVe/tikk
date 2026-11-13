@@ -28,8 +28,6 @@ impl AnswerEffects {
     }
 }
 
-/// Appends an `answer` fact to a question the ticket has. The user answers, so no claim refuses
-/// it, and it renews no lease. A later answer to the same item replaces this one.
 pub fn answer_question(
     store: &Store,
     id: &TicketId,

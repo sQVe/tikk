@@ -20,7 +20,6 @@ pub enum AttentionState {
     /// A draft, or a slice whose audit is behind its PR head.
     Unfinished,
     MergedUnverified,
-    /// Done or canceled.
     Finished,
 }
 
@@ -79,14 +78,11 @@ pub enum AttentionProblem {
         line: usize,
         message: String,
     },
-    /// The last sync stopped with an error. `files` are the conflicting files, relative to the
-    /// store.
     SyncFailed {
         at: Option<String>,
         message: String,
         files: Vec<String>,
     },
-    /// The last sync finished and reported a problem with one of its steps.
     SyncProblem {
         at: Option<String>,
         step: String,
@@ -141,7 +137,6 @@ impl AttentionProblem {
     }
 }
 
-/// Lists what waits on the user, ordered by reason, then by ticket ID, then by question item.
 pub fn attention(input: AttentionInput<'_>) -> Attention {
     let tickets: HashMap<&TicketId, &AttentionTicket> = input
         .tickets

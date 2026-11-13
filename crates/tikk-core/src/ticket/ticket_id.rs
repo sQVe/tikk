@@ -78,7 +78,6 @@ impl fmt::Display for TicketId {
     }
 }
 
-// The 4 characters of a ticket ID's suffix, from unbiased random bytes.
 pub(crate) fn draw_code(random: &[u8]) -> Option<String> {
     let alphabet = ID_ALPHABET.as_bytes();
     let code: String = random

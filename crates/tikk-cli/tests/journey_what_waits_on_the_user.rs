@@ -77,8 +77,6 @@ fn what_waits_on_the_user() {
 
     let claim = home.tikk_as("manager", &["claim", &slice, "--json"]);
     assert_eq!(claim.exit_code, 0, "step 4, claim: {}", claim.stderr);
-    // The lease end is moved into the past by a later claim fact with the same time, as a stopped
-    // manager's lease would end.
     let claim_line = home.fact_lines().pop().expect("the claim is the last fact");
     let mut lease_ended = claim_line.clone();
     lease_ended["leaseEnd"] = json!("2020-01-01T04:00:00Z");
