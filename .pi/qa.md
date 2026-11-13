@@ -41,12 +41,12 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
 A journey is one user's path through several commands. Each journey file lists its steps, and its
 test runs them against the built binary.
 
-| Journey                                                     | Goal                                                                      | Run it when the change touches                                                             | Test                                                    |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                            | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
-| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, `ready`, `claim`, `done`, ticket validation                     | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
-| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, `sync`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
-| [two-machines](qa/journeys/two-machines.md)                 | See the same tickets on both machines.                                    | `tikk init --remote`, `sync`, Git calls of sync                                            | `crates/tikk-cli/tests/journey_two_machines.rs`         |
+| Journey                                                     | Goal                                                                            | Run it when the change touches                                                                                  | Test                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                               | `tikk init`, `new`, `ls`, `cancel`, `rank`, `block`, CLI output                                                 | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand.       | `tikk new --file`, `show`, `ready`, `claim`, `done`, ticket validation                                          | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.                  | Ticket parsing, error codes, `tikk ls`, `show`, `write`, `release`, `sync`, `claim`, ID clashes, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
+| [two-machines](qa/journeys/two-machines.md)                 | See the same tickets on both machines, and never let two agents hold one slice. | `tikk init --remote`, `sync`, `claim`, `release`, Git calls of sync                                             | `crates/tikk-cli/tests/journey_two_machines.rs`         |
 
 ## Before a launch
 
@@ -209,7 +209,7 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   flags, or with two, it exits with 2.
 - `TIKK_AGENT=manager TIKK_SESSION=s-1 TIKK_SESSION_LOG=/tmp/log.jsonl target/debug/tikk claim
   <slice> --json` on an open slice with a criterion exits with 0 and prints
-  `{"claim":{"agent":"manager","leaseEnd":...,"session":"s-1","sessionLog":"/tmp/log.jsonl","state":"claimed"},"id":...}`.
+  `{"claim":{"agent":"manager","leaseEnd":...,"session":"s-1","sessionLog":"/tmp/log.jsonl","state":"claimed"},"id":...,"sync":{...}}`.
   The `leaseEnd` is 4 hours after the claim, in UTC to the millisecond. The claim is one line in
   `$TIKK_HOME/facts/<machine>/<yyyy-mm>.jsonl`, with the machine from `.git/tikk-machine`:
   `{"v":1,"kind":"claim","ticket":...,"at":...,"agent":"manager",...}`. A second claim by the same
@@ -227,16 +227,47 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   commands without `TIKK_AGENT` leave it as it was. With another `TIKK_AGENT`, they exit with 1 and
   `claimed`, and change no file.
 - `target/debug/tikk release <slice> --json` without `TIKK_AGENT` exits with 0, prints
-  `{"id":...,"released":true}`, and appends a `release` line with `"agent":null`. With another
-  agent's `TIKK_AGENT` on a live claim, it exits with 1 and `claimed`. On a slice with no claim, it
-  prints `"released":false` and writes nothing.
+  `{"id":...,"released":true,"sync":{...}}`, and appends a `release` line with `"agent":null`.
+  With another agent's `TIKK_AGENT` on a live claim, it exits with 1 and `claimed`. On a slice with
+  no claim, it prints `"released":false`, writes nothing, and makes no commit.
+- `tikk claim` and `tikk release` sync the store. Their `sync` field has the shape of
+  `tikk sync --json`'s result, and `$TIKK_HOME/.git/tikk-sync.json` holds it as the last result,
+  also after a refused claim. With two stores on one local bare remote (see `tikk init --remote`
+  below), `TIKK_AGENT=a tikk claim <slice> --json` on the first store commits the claim fact and
+  pushes (`"pushed":true`). Then `TIKK_AGENT=b tikk claim <slice> --json` on the second store exits
+  with 1 and `claimed`, with no `tikk sync` in either store. After
+  `TIKK_AGENT=a tikk release <slice>` on the first store, the second store's claim exits with 0
+  and prints `"merged":true`. A claim does not wait for files to settle: right after `tikk new`, the
+  new ticket files are in `pending` with `"reason":"settling"`, only the fact is committed, and the
+  other store's claim exits with 1 and `notFound`. After about two seconds, the next claim or
+  release commits them. Without `--json`, the claim or release line is followed by the lines of
+  `tikk sync`.
+- With `origin` set to a missing path (`git -C "$TIKK_HOME" remote set-url origin /tmp/missing.git`),
+  `TIKK_AGENT=b tikk claim <slice> --json` still exits with 0, prints `"fetched":false` and
+  `"pushed":false`, and names the failed fetch as `{"step":"fetch",...}` under `sync.problems` and
+  in `.git/tikk-sync.json`. A merge conflict in a claim is aborted, the claim exits with 0, and
+  `sync.problems` has `{"step":"merge","files":["tickets/<project>/<file>"],...}`.
+- `tikk new` on a store with a remote makes no commit: `git -C "$TIKK_HOME" rev-parse HEAD` is the
+  same before and after.
+- Two ticket files with one ID in one project, such as a copy `<id>-copy.md` of a slice file, are
+  an ID clash. `tikk sync --json` lists it as
+  `"clashes":[{"id":<id>,"paths":["tickets/<project>/<file>","tickets/<project>/<id>-copy.md"]}]`,
+  and without `--json` as `idShared: <id>  <path>  <path>`. `tikk ls --json` lists it under
+  `errors` as `{"code":"idShared","id":<id>,"paths":[...],"message":...}`, with absolute paths.
+  `tikk show <id> --json`, `tikk claim`, `tikk release`, and `TIKK_AGENT=<holder> tikk done` on an
+  instruction of the slice exit with 1 and print
+  `{"error":{"code":"idShared","files":[<path>,<path>],...}}`, and write nothing.
+  `tikk ready --json` lists each file of the slice as skipped with
+  `{"reason":"idShared","paths":[...]}` and no `claimed` hold. After a rename of one file to a new
+  ID, `tikk claim <id>` exits with 0.
 - `target/debug/tikk ready --parent <plan> --json` exits with 0 and prints
   `{"candidates":[...],"errors":[],"skipped":[...]}`. Candidates are open slices, in rank order,
   then by ID, as `ls` rows. Each skipped row adds `holds`, such as
   `{"reason":"blockedBy","blocker":<id>,"via":null,"state":"open"}`. A blocker of the plan has the
   plan in `via`. A live claim gives `{"reason":"claimed","claim":{...}}`, and a draft slice
   `{"reason":"draft"}`. A slice under a draft or canceled plan gives
-  `{"reason":"parent","parent":<plan>,"state":"draft"}` or `"state":"canceled"`. A blocker that
+  `{"reason":"parent","parent":<plan>,"state":"draft"}` or `"state":"canceled"`. A slice whose ID
+  is in two files gives `{"reason":"idShared","paths":[...]}`. A blocker that
   does not exist has the state `missing`. A fact line that
   does not parse is in `errors` with its `path` and `line`. Without `--parent`, it lists the slices
   of the project that `tikk new` would choose, such as `tikk` from the worktree root, and
@@ -251,13 +282,13 @@ path. Without `EDITOR`, or with one that is empty or holds only whitespace, it e
   names the folder and `--machine`, and `TIKK_HOME` stays absent. On a `TIKK_HOME` that holds a
   store, it prints `"created":false` and adds no remote.
 - `target/debug/tikk sync --json` exits with 0 and prints
-  `{"committed":...,"committedPaths":[...],"fetched":...,"merged":...,"pending":[...],"problems":[...],"pushed":...}`.
+  `{"clashes":[...],"committed":...,"committedPaths":[...],"fetched":...,"merged":...,"pending":[...],"problems":[...],"pushed":...}`.
   Right after `tikk new`, it waits about two seconds, then commits the new ticket file and pushes.
   Then `tikk sync` with the other store's `TIKK_HOME` prints `"merged":true`, and `tikk ls` there
   lists the ticket. A ticket file that holds only `kind: [` is in `pending` with
   `"reason":"unparsed"` and stays out of the commit. Without `--json`, it prints
   `committed: <count>  fetched: yes  merged: no  pushed: yes`, then a line per pending file and
-  per problem.
+  per problem and per clash.
 - `target/debug/tikk sync --json` on a store made with `tikk init`, with no `origin`, exits with 0,
   commits, and prints `"fetched":false` with `{"step":"fetch",...}` under `problems`.
 - When both stores change one ticket file and each runs `target/debug/tikk sync --json`, the second

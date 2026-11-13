@@ -36,8 +36,9 @@ private GitHub repository.
 - `tikk init` takes no lock, because the lock file lives in the store that `init` creates. `init`
   builds the store in a staging folder and renames it into place. When another `init` wins the
   rename, `init` checks the store that won and reports that the store exists.
-- Writes never commit. `tikk init` is the one exception: it makes the store's first commit, so the
-  store has a `main` branch from the start. `tikk init --remote <url>` clones the remote's `main`,
+- Writes never commit, with two exceptions. `tikk init` makes the store's first commit, so the
+  store has a `main` branch from the start. `tikk claim` and `tikk release` sync, as below, so a
+  claim reaches the other machines without a separate command. `tikk init --remote <url>` clones the remote's `main`,
   or creates the store and pushes `main` when the remote has no branches. It refuses a remote
   whose `main` holds the folder `facts/<machine>/` of the default machine name unless `--machine`
   is given, so two machines never write one fact folder. A relative path that names a folder from
@@ -47,13 +48,27 @@ private GitHub repository.
   command therefore never sees a half-merged store. The network steps run outside the lock,
   because writers wait for the lock at most five seconds. Each network step stops after 30
   seconds.
+- A claim fetches outside the lock. Then, in one hold of the exclusive lock, it merges what it
+  fetched, checks the claim, appends the fact, and commits, so no other process can claim between
+  the merge and the append. Then it pushes outside the lock. A release does the same. Both use the
+  steps of `tikk sync`, but merge before they commit, because the check must see the fetched
+  claims. A refused claim and a release of a slice with no claim append nothing and commit nothing.
+- In a claim or a release, a failed fetch, merge, commit, or push is a problem in the command's
+  `sync` field, not a refusal, and a conflict is aborted and named there. The claim decides on the
+  local state it has. A merge that cannot be aborted, or that stays in progress, fails the command
+  before it appends, because tikk never appends into an unresolved merge. A refused merge or
+  commit also skips the push.
 - A failed fetch keeps the local commit and skips the merge and the push, so a stale `origin/main`
   is never merged. A failed push leaves the next sync to push. A network failure is a result, not a
   refusal: sync reports `fetched` or `pushed` as false and names the failure under `problems`.
 - Every read of sync returns an error when it fails, and sync finishes its reads before it changes
-  a file, the index, or `HEAD`. A failed read never counts as "nothing there".
-- Sync is one function of the core crate that returns its result. `tikk sync` runs it, and no
-  command starts a sync in the background.
+  a file, the index, or `HEAD`. A failed read never counts as "nothing there". A claim and a release
+  finish the same reads before their merge, and read the changed files again after the append, so
+  the commit holds the new fact.
+- Sync is one function of the core crate that returns its result. `tikk sync`, `tikk claim`, and
+  `tikk release` run its steps. No other command syncs, and no command starts a sync in the
+  background or leaves a process running after it exits. Other writes reach the remote at the next
+  `tikk sync`, `claim`, or `release`.
 - `facts/` merges with Git's `union` driver through a normal merge, and facts are append-only. Sync
   refuses a fact file whose committed lines changed or were removed, and changes nothing.
 - tikk never rebases, stashes, resets, or drops local content to make a merge work. A merge that a
@@ -66,11 +81,14 @@ private GitHub repository.
   Sync waits outside the lock for the rest of the two seconds, then checks once more under the
   lock. A file that changed again stays pending as `settling`, and one that does not parse stays
   pending as `unparsed`. Other files outside `facts/` follow the same two-second rule. Sync stages
-  the bytes it checked, not a later read of the file.
+  the bytes it checked, not a later read of the file. A claim and a release do not wait: they
+  commit the facts and the files that have settled already, and leave younger files pending. Only
+  `tikk sync` waits.
 - Sync refuses an index with staged changes before it stages, so every entry it stages is its own.
   When staging or the commit fails, sync unstages only those paths and reports the error, so the
   next sync needs no `git reset` by hand.
 - Sync saves its last result, or its error, in `.git/tikk-sync.json`, outside the synced content.
+  A claim and a release save their sync result there too, also when they refuse.
 - The Git calls of sync and `init --remote` run with no hook, no signing, no terminal prompt, no
   autostash, and null standard input, with the fixed identity `tikk`. The local steps (stage,
   commit, merge, and abort) also read no global or system Git config. The network steps (fetch,
@@ -92,6 +110,7 @@ private GitHub repository.
 - The network steps read the user's global Git config, so a setting there that `-c` does not
   override, such as a URL rewrite, changes where sync fetches and pushes.
 - A conflict stops every sync until the user merges `origin/main` by hand.
+- A claim and a release wait for the network, up to 30 seconds for each network step.
 
 ## Alternatives considered
 
