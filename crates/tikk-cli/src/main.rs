@@ -9,6 +9,7 @@ mod output;
 mod ready;
 mod show;
 mod store_error;
+mod sync;
 mod ticket_row;
 
 use std::process::ExitCode;

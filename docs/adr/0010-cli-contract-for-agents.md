@@ -38,6 +38,12 @@ both.
   `{"error":{"code":"notInitialized","message":"..."}}`. The `code` is a stable camelCase name
   that a program branches on. The `message` is for people and may change. An error may add fields
   beside `code` and `message`.
+- An error that names files lists them in `files` beside `code`. A sync conflict, for example, is
+  `{"error":{"code":"conflict","files":["tickets/<project>/<file>"],"message":"..."}}`.
+- `tikk sync --json` prints `committed`, `committedPaths`, `pending` with each file's `path` and
+  `reason`, `fetched`, `merged`, `pushed`, and `problems`. A failed fetch or push is a result, not
+  a refusal: sync exits with 0, sets `fetched` or `pushed` to false, and names the step and the
+  failure under `problems`.
 - Exit codes: 0 for success, 1 when tikk refuses the action, and 2 for wrong usage.
 - Wrong usage, such as an unknown flag or a bad argument value, has the code `invalidArguments`.
   A missing store has the code `notInitialized`.

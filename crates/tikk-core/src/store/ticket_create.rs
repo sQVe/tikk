@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::store::claim_lease::{LeaseEffects, instruction_slice, write_for_slice};
+use crate::store::git;
 use crate::store::identity::Identity;
 use crate::store::project_choice::choose_project;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
@@ -29,7 +30,7 @@ pub struct TicketEffects {
 impl TicketEffects {
     pub fn system() -> Self {
         Self {
-            read_origin_url: system::read_origin_url,
+            read_origin_url: git::read_origin_url,
             fill_random: system::fill_random,
             lock_store: store_lock::lock_store,
             lease: LeaseEffects::system(),

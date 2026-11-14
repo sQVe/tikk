@@ -5,15 +5,15 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
 use tikk_core::{
-    ClaimEffects, EditEffects, Identity, QueryEffects, ReadyEffects, ReadyScope, StoreEffects,
-    StoreError, TicketEffects, WriteEffects,
+    ClaimEffects, EditEffects, Identity, QueryEffects, ReadyEffects, ReadyScope, RemoteInitEffects,
+    StoreEffects, StoreError, SyncEffects, TicketEffects, WriteEffects,
 };
 
 use crate::command::{Cli, Command};
 use crate::output::{Exit, Failure, Output, Response};
 use crate::ready::ready_output;
 use crate::ticket_row::written_output;
-use crate::{claim, edit, init, ls, new, show, store_error};
+use crate::{claim, edit, init, ls, new, show, store_error, sync};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -32,6 +32,8 @@ pub(crate) struct Environment {
     pub(crate) edit_effects: EditEffects,
     pub(crate) claim_effects: ClaimEffects,
     pub(crate) ready_effects: ReadyEffects,
+    pub(crate) remote_init_effects: RemoteInitEffects,
+    pub(crate) sync_effects: SyncEffects,
 }
 
 impl Environment {
@@ -52,6 +54,8 @@ impl Environment {
             edit_effects: EditEffects::system(),
             claim_effects: ClaimEffects::system(),
             ready_effects: ReadyEffects::system(),
+            remote_init_effects: RemoteInitEffects::system(),
+            sync_effects: SyncEffects::system(),
         }
     }
 }
@@ -94,7 +98,20 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
     );
 
     match command {
-        Command::Init { machine } => init::run(&store, machine, &environment.effects),
+        Command::Init {
+            machine,
+            remote: None,
+        } => init::run(&store, machine, &environment.effects),
+        Command::Init {
+            machine,
+            remote: Some(remote),
+        } => init::run_remote(
+            &store,
+            &init::RemoteLocation::resolve(&remote, &environment.working_directory)?,
+            machine,
+            &environment.remote_init_effects,
+        ),
+        Command::Sync => sync::run(&tikk_core::open(&store)?, &environment.sync_effects),
         Command::New(arguments) => new::run(
             &tikk_core::open(&store)?,
             arguments,
@@ -229,6 +246,7 @@ fn usage_response(json: bool, error: &clap::Error) -> Response {
         code: "invalidArguments",
         message,
         field: None,
+        files: None,
         exit: Exit::WrongUsage,
     };
 
@@ -238,8 +256,67 @@ fn usage_response(json: bool, error: &clap::Error) -> Response {
 #[cfg(test)]
 mod tests {
     use std::ffi::OsString;
+    use std::path::Path;
+    use std::time::{Duration, SystemTime};
 
-    use super::asks_for_json;
+    use serde_json::{Value, json};
+    use tikk_core::{MachineName, StoreEffects, StoreError, SyncEffects};
+
+    use super::{Environment, asks_for_json, run};
+    use crate::output::Exit;
+
+    fn origin(_: &Path) -> Result<Option<String>, StoreError> {
+        Ok(Some("git@example.com:owner/tikk-store.git".to_owned()))
+    }
+
+    fn timed_out(_: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreError> {
+        Err(StoreError::GitTimeout {
+            arguments: arguments.join(" "),
+            timeout: Duration::from_secs(30),
+        })
+    }
+
+    fn an_hour_later() -> SystemTime {
+        SystemTime::now() + Duration::from_secs(3600)
+    }
+
+    #[test]
+    fn sync_with_a_fetch_that_times_out_commits_and_exits_with_0() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let store = directory.path().join("store");
+        let machine = MachineName::parse("laptop").expect("a valid machine name");
+        tikk_core::init(&store, Some(machine), &StoreEffects::system()).expect("init the store");
+        std::fs::create_dir_all(store.join("tickets/personal")).expect("create a project");
+        std::fs::write(
+            store.join("tickets/personal/personal-abcd-renew.md"),
+            "---\nkind: task\ntitle: Renew\n---\n",
+        )
+        .expect("write a ticket");
+        let mut environment = Environment::system();
+        environment.tikk_home = Some(store.into_os_string());
+        environment.sync_effects = SyncEffects {
+            read_origin: origin,
+            run_network_git: timed_out,
+            now: an_hour_later,
+            ..SyncEffects::system()
+        };
+
+        let response = run(arguments(&["tikk", "sync", "--json"]), environment);
+
+        assert_eq!(response.exit, Exit::Success, "{}", response.stderr);
+        let result: Value = serde_json::from_str(&response.stdout).expect("one JSON value");
+        assert_eq!(result["committed"], json!(true));
+        assert_eq!(result["fetched"], json!(false));
+        assert_eq!(result["merged"], json!(false));
+        assert_eq!(result["pushed"], json!(false));
+        assert_eq!(result["problems"][0]["step"], json!("fetch"));
+        assert!(
+            result["problems"][0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("did not finish within 30 seconds")),
+            "{result}"
+        );
+    }
 
     fn arguments(values: &[&str]) -> Vec<OsString> {
         values.iter().map(OsString::from).collect()

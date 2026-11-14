@@ -4,11 +4,12 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 
-use support::{Home, parse_json};
+use support::{Home, Remote, parse_json};
 
 #[test]
 fn trouble() {
-    let home = Home::initialized();
+    let remote = Remote::new();
+    let home = Home::on_remote(&remote, "test");
     let kept = home.new_ticket(&["task", "Renew the domain"]);
     let broken = home.new_ticket(&["task", "Lock the store"]);
     let path = home
@@ -120,6 +121,68 @@ fn trouble() {
         home.show_json(&slice)["claim"],
         json!(null),
         "step 4, the slice has no claim"
+    );
+
+    let desktop = Home::on_remote(&remote, "desktop");
+    home.settle_files();
+    assert_eq!(
+        home.sync_json()["pushed"],
+        json!(true),
+        "step 5, first sync"
+    );
+    desktop.sync_json();
+    let plan_path = home.show_json(&plan)["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    let desktop_plan_path = desktop.show_json(&plan)["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    std::fs::write(
+        &desktop_plan_path,
+        "---\nkind: plan\ntitle: Move to tikk this year\n---\n",
+    )
+    .expect("edit the plan on the desktop");
+    let local_plan = "---\nkind: plan\ntitle: Move to tikk next week\n---\n";
+    std::fs::write(&plan_path, local_plan).expect("edit the plan here");
+    desktop.settle_files();
+    home.settle_files();
+    assert_eq!(
+        desktop.sync_json()["pushed"],
+        json!(true),
+        "step 5, desktop sync"
+    );
+
+    let conflict = home.tikk(&["sync", "--json"]);
+
+    assert_eq!(
+        conflict.exit_code, 1,
+        "step 5, second sync: {}",
+        conflict.stderr
+    );
+    assert_eq!(conflict.stdout, "", "step 5, second sync");
+    let error = &parse_json(&conflict.stderr)["error"];
+    assert_eq!(error["code"], json!("conflict"), "step 5, second sync");
+    let relative_plan = std::path::Path::new(&plan_path)
+        .strip_prefix(home.store())
+        .expect("inside the store")
+        .to_str()
+        .expect("a UTF-8 path")
+        .to_owned();
+    assert_eq!(
+        error["files"],
+        json!([relative_plan]),
+        "step 5, the error names the file"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&plan_path).expect("read the plan"),
+        local_plan,
+        "step 5, the plan keeps the local text"
+    );
+    assert!(
+        !home.store().join(".git/MERGE_HEAD").exists(),
+        "step 5, no merge stays in progress"
     );
 
     assert_eq!(

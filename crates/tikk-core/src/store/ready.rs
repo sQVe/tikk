@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::fact::{Claim, Timestamp, current_claims};
 use crate::store::fact_files::{UnreadableFact, read_facts};
+use crate::store::git;
 use crate::store::project_choice::choose_project;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
@@ -22,7 +23,7 @@ impl ReadyEffects {
     pub fn system() -> Self {
         Self {
             lock_store: store_lock::lock_store,
-            read_origin_url: system::read_origin_url,
+            read_origin_url: git::read_origin_url,
             now: system::now,
         }
     }
