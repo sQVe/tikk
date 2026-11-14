@@ -257,3 +257,24 @@ fn show_without_json_leaves_out_an_empty_reason_and_body() {
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     assert_eq!(run.stdout, format!("{plan}  plan  open  -  Move to tikk\n"));
 }
+
+#[test]
+fn show_without_json_prints_the_blockers() {
+    let home = Home::initialized();
+    let task = home.new_ticket(&["task", "Renew the domain"]);
+    let first = home.new_ticket(&["task", "Pay the bill"]);
+    let second = home.new_ticket(&["task", "Find the card"]);
+
+    for blocker in [&first, &second] {
+        let block = home.tikk(&["block", &task, blocker]);
+        assert_eq!(block.exit_code, 0, "block {blocker}: {}", block.stderr);
+    }
+
+    let run = home.tikk(&["show", &task]);
+
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        format!("{task}  task  open  -  Renew the domain\nblockedBy: {first}, {second}\n")
+    );
+}

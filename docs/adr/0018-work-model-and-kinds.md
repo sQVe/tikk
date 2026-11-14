@@ -29,9 +29,18 @@ no parent; no task sits under a slice. A loose task, one with no parent, becomes
 place with the same ID. A loose task is found by its missing parent, so no flag such as `new: true`
 marks it. The tool rejects other pairs, cycles, and missing targets, and its error names the field.
 A read checks each file alone, so it still shows a hand-edited file whose parent kind or edge target
-breaks these rules. A command that writes a ticket checks its links to other tickets. Criteria are
-required on plans and slices only, and no other kind holds them. An instruction covers all of its
-slice's criteria unless it names some. `tikk review add` accepts a slice or an instruction only.
+breaks these rules. `tikk block`, `move`, `new`, and `write` check the links of the ticket they
+write to other tickets. `tikk unblock` and `rank` do not check the links the ticket keeps, because
+removing an edge or setting a rank cannot break a link, and a person can then repair a ticket with a
+broken link. Criteria are required on plans and slices only, and no other kind holds them. An
+instruction covers all of its slice's criteria unless it names some. `tikk review add` accepts a
+slice or an instruction only.
+
+`rank` orders siblings: tickets with the same parent, or the tickets without a parent in one
+project. Ranked tickets come first, by rank, then the others by ID. Placing a ticket among its
+siblings renumbers them all from 1 in the new order. Placing a ticket before or after itself changes
+nothing. A move to a new parent clears the ticket's rank, because the old rank ordered the old
+siblings.
 
 ## Consequences
 

@@ -1,6 +1,6 @@
 mod support;
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use support::{Home, parse_json};
 
@@ -77,6 +77,8 @@ fn tickets_by_hand() {
         .iter()
         .map(|title| new_id(&home, &["new", "task", title, "--parent", &plan]))
         .collect();
+    let lease = &tasks[0];
+    let import = &tasks[1];
     let windows = &tasks[2];
 
     assert_eq!(
@@ -115,4 +117,72 @@ fn tickets_by_hand() {
         json!("open"),
         "step 4, cancel without --reason changes nothing"
     );
+
+    let rank = home.tikk(&["rank", import, "--first"]);
+    assert_eq!(rank.exit_code, 0, "step 5, rank: {}", rank.stderr);
+    assert_eq!(
+        listed_rows(&home, &plan)[0]["id"],
+        json!(import),
+        "step 5, ls --parent lists the import task first"
+    );
+
+    let block = home.tikk(&["block", lease, import]);
+    assert_eq!(block.exit_code, 0, "step 6, block: {}", block.stderr);
+    let shown = home.tikk(&["show", lease]);
+    assert_eq!(shown.exit_code, 0, "step 6, show: {}", shown.stderr);
+    assert!(
+        shown
+            .stdout
+            .lines()
+            .any(|line| line == format!("blockedBy: {import}")),
+        "step 6, show lists the blocker: {}",
+        shown.stdout
+    );
+    let reverse = home.tikk(&["block", import, lease, "--json"]);
+    assert_eq!(
+        reverse.exit_code, 1,
+        "step 6, reverse block: {}",
+        reverse.stdout
+    );
+    let error = &parse_json(&reverse.stderr)["error"];
+    assert_eq!(error["code"], json!("cycle"), "step 6, reverse block");
+    let message = error["message"].as_str().expect("the error has a message");
+    assert!(
+        message.contains(import.as_str()) && message.contains(lease.as_str()),
+        "step 6, the error names the cycle: {message}"
+    );
+
+    let mut others = [lease, windows];
+    others.sort();
+    let rows: Vec<(Value, Value)> = listed_rows(&home, &plan)
+        .iter()
+        .map(|row| (row["id"].clone(), row["status"].clone()))
+        .collect();
+    let status_of = |id: &String| if id == windows { "canceled" } else { "open" };
+    assert_eq!(
+        rows,
+        [import, others[0], others[1]].map(|id| (json!(id), json!(status_of(id)))),
+        "end state, ls --parent"
+    );
+    assert_eq!(
+        home.show_json(lease)["blockedBy"],
+        json!([import]),
+        "end state, the lease task waits on the import task"
+    );
+    assert_eq!(
+        home.show_json(windows)["reason"],
+        json!("Linux and macOS only"),
+        "end state, the Windows task keeps its reason"
+    );
+}
+
+fn listed_rows(home: &Home, plan: &str) -> Vec<Value> {
+    let run = home.tikk(&["ls", "--parent", plan, "--json"]);
+
+    assert_eq!(run.exit_code, 0, "ls --parent: {}", run.stderr);
+
+    parse_json(&run.stdout)["tickets"]
+        .as_array()
+        .expect("ls lists tickets")
+        .clone()
 }

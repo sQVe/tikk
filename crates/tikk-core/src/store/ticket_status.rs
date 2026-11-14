@@ -1,16 +1,14 @@
-use crate::store::store_lock::LockAccess;
-use crate::store::ticket_files::{StoredTicket, read_tickets};
-use crate::store::ticket_queries::find_ticket;
-use crate::store::ticket_write::{WriteEffects, replace_ticket};
+use crate::store::ticket_files::StoredTicket;
+use crate::store::ticket_write::{WriteEffects, change_ticket};
 use crate::store::{Store, StoreError};
-use crate::ticket::{Status, TicketDocument, TicketFields, TicketId};
+use crate::ticket::{Status, TicketId};
 
 pub fn mark_done(
     store: &Store,
     id: &TicketId,
     effects: &WriteEffects,
 ) -> Result<StoredTicket, StoreError> {
-    change_status(store, id, effects, |fields| {
+    change_ticket(store, id, effects, |fields, _scan| {
         let kind = fields.kind();
 
         if !kind.allows(Status::Done) {
@@ -21,7 +19,7 @@ pub fn mark_done(
             });
         }
 
-        Ok(fields.with_status(Status::Done, None)?)
+        Ok(Some(fields.with_status(Status::Done, None)?))
     })
 }
 
@@ -31,26 +29,9 @@ pub fn cancel_ticket(
     reason: &str,
     effects: &WriteEffects,
 ) -> Result<StoredTicket, StoreError> {
-    change_status(store, id, effects, |fields| {
-        Ok(fields.with_status(Status::Canceled, Some(reason))?)
+    change_ticket(store, id, effects, |fields, _scan| {
+        Ok(Some(fields.with_status(Status::Canceled, Some(reason))?))
     })
-}
-
-fn change_status(
-    store: &Store,
-    id: &TicketId,
-    effects: &WriteEffects,
-    change: impl FnOnce(&TicketFields) -> Result<TicketFields, StoreError>,
-) -> Result<StoredTicket, StoreError> {
-    let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
-    let scan = read_tickets(store.root())?;
-    let current = find_ticket(&scan, id)?;
-    let document = TicketDocument {
-        fields: change(&current.document.fields)?,
-        body: current.document.body.clone(),
-    };
-
-    replace_ticket(current, document, effects)
 }
 
 #[cfg(test)]

@@ -10,6 +10,8 @@ mod ticket_id_draw;
 mod ticket_link_checks;
 mod ticket_new_file;
 mod ticket_queries;
+mod ticket_rank;
+mod ticket_relations;
 mod ticket_status;
 mod ticket_write;
 
@@ -26,9 +28,12 @@ pub use store_lock::{LockAccess, StoreLock};
 pub use ticket_create::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
 pub use ticket_edit::{EditEffects, edit_ticket};
 pub use ticket_files::{StoredTicket, UnreadableTicket};
+pub use ticket_link_checks::{WaitLink, WaitStep};
 pub use ticket_queries::{
     QueryEffects, ShownTicket, TicketFilter, TicketListing, list_tickets, show_ticket,
 };
+pub use ticket_rank::{RankPlace, rank_ticket};
+pub use ticket_relations::{block_ticket, move_ticket, unblock_ticket};
 pub use ticket_status::{cancel_ticket, mark_done};
 pub use ticket_write::{TicketWrite, WriteEffects, write_ticket};
 
@@ -81,6 +86,13 @@ pub enum StoreError {
         kind: Kind,
         allowed: &'static str,
     },
+    #[error("`{field}` would make a cycle: {}.", describe_cycle(steps))]
+    Cycle {
+        field: &'static str,
+        steps: Vec<WaitStep>,
+    },
+    #[error("{anchor} is not a sibling of {id}. Pass a ticket with the same parent.")]
+    NotSibling { id: String, anchor: String },
     #[error("EDITOR names no program. Set it to the editor to start, such as `EDITOR=vi`.")]
     NoEditor,
     #[error("The editor failed: {message}")]
@@ -91,6 +103,14 @@ pub enum StoreError {
         path: PathBuf,
         source: io::Error,
     },
+}
+
+fn describe_cycle(steps: &[WaitStep]) -> String {
+    steps
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[derive(Clone, Copy)]

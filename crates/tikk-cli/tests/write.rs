@@ -166,7 +166,7 @@ fn write_refuses_a_plan_rewritten_as_a_slice_under_itself_and_keeps_the_file() {
 
     assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
     let error = &parse_json(&run.stderr)["error"];
-    assert_eq!(error["code"], json!("invalidTicket"));
+    assert_eq!(error["code"], json!("cycle"));
     assert_eq!(error["field"], json!("parent"));
     assert_eq!(std::fs::read(path).expect("read the plan file"), before);
 }
@@ -237,4 +237,30 @@ fn write_without_a_hash_is_wrong_usage() {
     ]);
 
     assert_eq!(run.exit_code, 2, "stderr: {}", run.stderr);
+}
+
+#[test]
+fn write_of_a_blocker_that_closes_a_cycle_exits_with_1_and_keeps_the_file() {
+    let home = Home::initialized();
+    let task = home.new_ticket(&["task", "Renew the domain"]);
+    let blocker = home.new_ticket(&["task", "Pay the bill"]);
+    let block = home.tikk(&["block", &task, &blocker]);
+    assert_eq!(block.exit_code, 0, "block: {}", block.stderr);
+    let shown = home.show_json(&blocker);
+    let path = shown["path"].as_str().expect("show prints the path");
+    let hash = shown["hash"].as_str().expect("show prints the hash");
+    let before = std::fs::read(path).expect("read the blocker file");
+
+    let run = write_document(
+        &home,
+        &blocker,
+        &format!("---\nkind: task\ntitle: Pay the bill\nblockedBy: [{task}]\n---\n"),
+        hash,
+    );
+
+    assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
+    let error = &parse_json(&run.stderr)["error"];
+    assert_eq!(error["code"], json!("cycle"));
+    assert_eq!(error["field"], json!("blockedBy"));
+    assert_eq!(std::fs::read(path).expect("read the blocker file"), before);
 }

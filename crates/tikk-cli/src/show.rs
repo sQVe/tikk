@@ -45,10 +45,21 @@ fn shown_json(shown: &ShownTicket) -> Value {
 }
 
 fn shown_text(shown: &ShownTicket) -> String {
+    let fields = &shown.ticket.document.fields;
     let mut lines = vec![row_text(&shown.ticket)];
 
-    if let Some(reason) = shown.ticket.document.fields.reason() {
+    if let Some(reason) = fields.reason() {
         lines.push(format!("reason: {reason}"));
+    }
+
+    if !fields.blocked_by().is_empty() {
+        let blockers: Vec<String> = fields
+            .blocked_by()
+            .iter()
+            .map(ToString::to_string)
+            .collect();
+
+        lines.push(format!("blockedBy: {}", blockers.join(", ")));
     }
 
     lines.extend(
