@@ -27,6 +27,9 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::NotSibling { .. } => ("notSibling", Exit::Refused),
         StoreError::NoEditor => ("noEditor", Exit::Refused),
         StoreError::EditorFailed { .. } => ("editorFailed", Exit::Refused),
+        StoreError::NoAgent => ("noTikkAgent", Exit::Refused),
+        StoreError::NotUnicode { .. } => ("invalidArguments", Exit::WrongUsage),
+        StoreError::Claimed { .. } => ("claimed", Exit::Refused),
         StoreError::Io { .. } => ("ioFailed", Exit::Refused),
     };
     let field = match error {
@@ -269,6 +272,23 @@ mod tests {
                     message: "it ended with exit status: 1".to_owned(),
                 },
                 "editorFailed",
+                Exit::Refused,
+            ),
+            (StoreError::NoAgent, "noTikkAgent", Exit::Refused),
+            (
+                StoreError::NotUnicode {
+                    variable: "TIKK_AGENT",
+                },
+                "invalidArguments",
+                Exit::WrongUsage,
+            ),
+            (
+                StoreError::Claimed {
+                    id: "personal-abcd".to_owned(),
+                    agent: "manager".to_owned(),
+                    lease_end: "2026-11-13T05:00:00.000Z".to_owned(),
+                },
+                "claimed",
                 Exit::Refused,
             ),
             (

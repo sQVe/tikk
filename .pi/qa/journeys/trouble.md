@@ -20,8 +20,11 @@ Each failure is named with what to fix, and no ticket is lost.
    exits with 1 and `changedOnDisk`, and the user's edit stays.
 3. Another process holds the store lock for more than five seconds. `tikk show` exits with 1 and
    `locked`.
+4. A manager stops, and its lease ends. The user's `tikk release <slice>` without `TIKK_AGENT`
+   exits with 0, and `tikk ready` offers the slice again.
 
 ## End state
 
 The broken file stays as the user left it, the edited ticket file holds the user's edit, and
-`tikk ls --json` still lists every other ticket under `tickets`.
+`tikk ls --json` still lists every other ticket under `tickets`. The released slice has no
+`claim` in `tikk show --json`.

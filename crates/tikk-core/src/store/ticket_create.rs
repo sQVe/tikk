@@ -1,6 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::store::claim_lease::{LeaseEffects, instruction_slice, write_for_slice};
+use crate::store::identity::Identity;
+use crate::store::project_choice::choose_project;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_files::{
@@ -20,6 +23,7 @@ pub struct TicketEffects {
     pub read_origin_url: fn(&Path) -> Result<Option<String>, StoreError>,
     pub fill_random: fn(&mut [u8]) -> Result<(), StoreError>,
     pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
+    pub lease: LeaseEffects,
 }
 
 impl TicketEffects {
@@ -28,6 +32,7 @@ impl TicketEffects {
             read_origin_url: system::read_origin_url,
             fill_random: system::fill_random,
             lock_store: store_lock::lock_store,
+            lease: LeaseEffects::system(),
         }
     }
 }
@@ -47,6 +52,7 @@ pub struct NewTicket {
     pub source: NewTicketSource,
     pub project: Option<ProjectName>,
     pub working_directory: PathBuf,
+    pub caller: Identity,
 }
 
 pub fn create_ticket(
@@ -60,14 +66,34 @@ pub fn create_ticket(
 
     check_ticket_links(&document.fields, &scan)?;
 
-    let project = choose_project(
-        &document.fields,
-        request.project,
-        &request.working_directory,
-        effects,
-    )?;
+    let slice = instruction_slice(&document.fields).cloned();
+
+    write_for_slice(
+        store.root(),
+        slice.as_ref(),
+        &request.caller,
+        &effects.lease,
+        || {
+            let project = choose_ticket_project(
+                &document.fields,
+                request.project,
+                &request.working_directory,
+                effects,
+            )?;
+
+            write_ticket_file(store, &project, document, effects)
+        },
+    )
+}
+
+fn write_ticket_file(
+    store: &Store,
+    project: &ProjectName,
+    document: TicketDocument,
+    effects: &TicketEffects,
+) -> Result<StoredTicket, StoreError> {
     let folder = store.root().join(TICKETS_FOLDER).join(project.as_str());
-    let id = draw_free_id(&project, &folder, effects.fill_random)?;
+    let id = draw_free_id(project, &folder, effects.fill_random)?;
     let path = folder.join(ticket_file_name(&id, document.fields.title()));
     let text = write_document(&document.fields, &document.body);
 
@@ -101,7 +127,7 @@ fn read_source(source: NewTicketSource) -> Result<TicketDocument, StoreError> {
     }
 }
 
-fn choose_project(
+fn choose_ticket_project(
     fields: &TicketFields,
     requested: Option<ProjectName>,
     working_directory: &Path,
@@ -123,16 +149,7 @@ fn choose_project(
         return Ok(parent_project.clone());
     }
 
-    if let Some(requested) = requested {
-        return Ok(requested);
-    }
-
-    match (effects.read_origin_url)(working_directory)? {
-        None => Ok(ProjectName::personal()),
-        Some(url) => {
-            ProjectName::from_origin_url(&url).map_err(|_| StoreError::InvalidOrigin { url })
-        }
-    }
+    choose_project(requested, working_directory, effects.read_origin_url)
 }
 
 #[cfg(test)]
@@ -142,6 +159,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
+    use crate::store::identity::Identity;
     use crate::store::store_lock::{LockAccess, StoreLock};
     use crate::store::{Store, StoreError};
     use crate::ticket::{Kind, ProjectName, TicketError, TicketId};
@@ -179,6 +197,7 @@ mod tests {
             read_origin_url,
             fill_random: counting_random,
             lock_store: TicketEffects::system().lock_store,
+            lease: TicketEffects::system().lease,
         }
     }
 
@@ -199,6 +218,7 @@ mod tests {
             },
             project: None,
             working_directory: PathBuf::from("/work"),
+            caller: Identity::default(),
         }
     }
 

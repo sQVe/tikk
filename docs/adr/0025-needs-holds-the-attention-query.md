@@ -25,7 +25,6 @@ has one reason:
 
 - `question`: an open question that the manager passed up with `tikk pass-up`, or that is 30 minutes
   old with no pass-up. The item carries the question text.
-- `submitted`: the latest submission, once the manager passed it up.
 - `staleClaim`: a claim whose lease ended.
 - `blockingTask`: an open task that an unfinished ticket lists in `blockedBy`.
 - `newTask`: a loose open task that `tikk new --json` created and that a later move, rank, done, or
@@ -36,8 +35,8 @@ has one reason:
 - `mergedUnverified`: a merged slice with no current audit that meets every criterion.
 - `blockedFinding`: a review finding whose latest status is blocked.
 
-Questions, submissions, answers, acceptances, rejections, and pass-ups each name an item ID, so the
-reader can tell which item an action decides. A task has no create time, so its age comes from its
+Questions, answers, acceptances, rejections, and pass-ups each name an item ID, so the reader can
+tell which item an action decides. A task has no create time, so its age comes from its
 latest status fact. A task with no status fact has no age.
 
 ## Consequences

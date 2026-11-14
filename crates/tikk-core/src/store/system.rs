@@ -1,7 +1,9 @@
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
+use std::time::SystemTime;
 
+use crate::fact::Timestamp;
 use crate::store::StoreError;
 
 /// Git reads these before `-C`. A tikk started from a Git hook would otherwise write to the
@@ -121,6 +123,10 @@ pub(crate) fn fill_random(buffer: &mut [u8]) -> Result<(), StoreError> {
     getrandom::fill(buffer).map_err(|error| StoreError::RandomUnavailable {
         message: error.to_string(),
     })
+}
+
+pub(crate) fn now() -> Timestamp {
+    Timestamp::from_system_time(SystemTime::now())
 }
 
 /// `uname -n` prints the host name on Linux and macOS, where a `hostname` program may be missing.

@@ -88,6 +88,7 @@ fn show_json_prints_every_field_of_the_ticket() {
             "document": file_text,
             "children": [],
             "files": [],
+            "claim": null,
         })
     );
     assert_eq!(empty.exit_code, 0, "stderr: {}", empty.stderr);

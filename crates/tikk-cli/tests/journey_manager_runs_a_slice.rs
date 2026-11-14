@@ -43,4 +43,86 @@ fn manager_runs_a_slice() {
         "step 1, criterion"
     );
     assert_eq!(shown["parent"], json!(plan), "step 1, parent");
+
+    let ready = home.tikk(&["ready", "--parent", &plan, "--json"]);
+
+    assert_eq!(ready.exit_code, 0, "step 2, ready: {}", ready.stderr);
+    let queue = parse_json(&ready.stdout);
+    assert_eq!(
+        queue["candidates"][0]["id"],
+        json!(first),
+        "step 2, candidate"
+    );
+    assert_eq!(
+        queue["candidates"].as_array().map(Vec::len),
+        Some(1),
+        "step 2, one candidate"
+    );
+    assert_eq!(queue["skipped"][0]["id"], json!(second), "step 2, skipped");
+    assert_eq!(
+        queue["skipped"][0]["holds"],
+        json!([{ "reason": "blockedBy", "blocker": first, "via": null, "state": "open" }]),
+        "step 2, the first slice blocks the second"
+    );
+
+    let claim = home.tikk_as("manager", &["claim", &first, "--json"]);
+
+    assert_eq!(claim.exit_code, 0, "step 3, claim: {}", claim.stderr);
+    let claimed = parse_json(&claim.stdout);
+    assert_eq!(
+        claimed["claim"]["agent"],
+        json!("manager"),
+        "step 3, holder"
+    );
+    let claimed_end = claimed["claim"]["leaseEnd"].clone();
+    assert!(claimed_end.is_string(), "step 3, leaseEnd: {claimed}");
+    let other = home.tikk_as("other-manager", &["claim", &first, "--json"]);
+    assert_eq!(other.exit_code, 1, "step 3, a second agent's claim");
+    assert_eq!(
+        parse_json(&other.stderr)["error"]["code"],
+        json!("claimed"),
+        "step 3, a second agent's claim"
+    );
+
+    let instruction_document = home.document(
+        "instruction.md",
+        &format!("---\nkind: instruction\ntitle: Write the store\nparent: {first}\n---\n"),
+    );
+    let new = home.tikk_as(
+        "manager",
+        &[
+            "new",
+            "--file",
+            instruction_document.to_str().expect("a UTF-8 path"),
+            "--json",
+        ],
+    );
+    assert_eq!(new.exit_code, 0, "step 4, new: {}", new.stderr);
+    let instruction = parse_json(&new.stdout)["id"].clone();
+    let instruction = instruction.as_str().expect("new prints the ID");
+    let created_end = home.show_json(&first)["claim"]["leaseEnd"].clone();
+
+    let done = home.tikk_as("manager", &["done", instruction, "--json"]);
+
+    assert_eq!(done.exit_code, 0, "step 4, done: {}", done.stderr);
+    let slice = home.show_json(&first);
+    assert_eq!(
+        slice["children"][0]["id"],
+        json!(instruction),
+        "step 4, the instruction"
+    );
+    assert_eq!(
+        slice["children"][0]["status"],
+        json!("done"),
+        "step 4, the instruction is done"
+    );
+    let done_end = slice["claim"]["leaseEnd"].clone();
+    assert!(
+        created_end.as_str() > claimed_end.as_str(),
+        "step 4, new moves leaseEnd from {claimed_end} to {created_end}"
+    );
+    assert!(
+        done_end.as_str() > created_end.as_str(),
+        "step 4, done moves leaseEnd from {created_end} to {done_end}"
+    );
 }

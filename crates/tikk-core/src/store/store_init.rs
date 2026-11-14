@@ -4,12 +4,12 @@ use std::io;
 use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
 
+use crate::store::machine::MACHINE_FILE;
 use crate::store::{CONFIG_FILE, MachineName, StoreEffects, StoreError, has_config};
 
 const CONFIG: &str = "{\"version\":1}\n";
 const ATTRIBUTES_FILE: &str = ".gitattributes";
 const ATTRIBUTES: &str = "facts/** merge=union\n";
-const MACHINE_FILE: &str = ".git/tikk-machine";
 const FIRST_COMMIT: &[&str] = &[
     "-c",
     "user.name=tikk",

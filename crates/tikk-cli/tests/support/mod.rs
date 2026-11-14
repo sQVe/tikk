@@ -18,6 +18,8 @@ const REPOSITORY_ENVIRONMENT: &[&str] = &[
     "GIT_COMMON_DIR",
 ];
 
+const IDENTITY_ENVIRONMENT: &[&str] = &["TIKK_AGENT", "TIKK_SESSION", "TIKK_SESSION_LOG"];
+
 /// The `EILSEQ` code on macOS, where APFS refuses a file name that is not UTF-8.
 const ILLEGAL_BYTE_SEQUENCE: i32 = 92;
 
@@ -114,11 +116,80 @@ impl Home {
             .env("HOME", self.directory.path().join("home"))
             .env_remove("EDITOR");
 
-        for name in REPOSITORY_ENVIRONMENT {
+        for name in REPOSITORY_ENVIRONMENT.iter().chain(IDENTITY_ENVIRONMENT) {
             command.env_remove(name);
         }
 
         command
+    }
+
+    pub(crate) fn tikk_as(&self, agent: &str, arguments: &[&str]) -> Run {
+        let mut command = self.command(arguments);
+
+        command.env("TIKK_AGENT", agent);
+
+        finish(command.output().expect("start the tikk binary"))
+    }
+
+    pub(crate) fn plan_and_slice(&self) -> (String, String) {
+        let plan = self.new_ticket(&["plan", "Move to tikk"]);
+        let slice = self.slice_under(&plan, "Add the store", &[]);
+
+        (plan, slice)
+    }
+
+    pub(crate) fn slice_under(&self, plan: &str, title: &str, blocked_by: &[&str]) -> String {
+        let document = self.document(
+            "slice.md",
+            &format!(
+                "---\nkind: slice\ntitle: {title}\nstatus: open\nparent: {plan}\nblockedBy: [{}]\ncriteria:\n  - id: s1\n    check: cargo nextest run\n    expected: The tests pass.\n---\n",
+                blocked_by.join(", ")
+            ),
+        );
+
+        self.new_ticket(&["--file", document.to_str().expect("a UTF-8 path")])
+    }
+
+    pub(crate) fn fact_lines(&self) -> Vec<Value> {
+        let mut files = Vec::new();
+        let Ok(machines) = std::fs::read_dir(self.store().join("facts")) else {
+            return Vec::new();
+        };
+
+        for machine in machines {
+            let machine = machine.expect("read a machine folder").path();
+
+            for entry in std::fs::read_dir(&machine).expect("list a machine folder") {
+                files.push(entry.expect("read a fact file entry").path());
+            }
+        }
+
+        files.sort();
+
+        files
+            .iter()
+            .flat_map(|path| {
+                std::fs::read_to_string(path)
+                    .expect("read a fact file")
+                    .lines()
+                    .map(parse_json)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    pub(crate) fn append_fact_line(&self, file: &str, line: &str) {
+        use std::io::Write as _;
+
+        let folder = self.store().join("facts/test");
+        std::fs::create_dir_all(&folder).expect("create the machine folder");
+        let mut opened = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(folder.join(file))
+            .expect("open the fact file");
+
+        writeln!(opened, "{line}").expect("append the fact line");
     }
 
     pub(crate) fn show_json(&self, id: &str) -> Value {

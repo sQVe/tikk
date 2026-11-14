@@ -97,6 +97,18 @@ pub(crate) enum Command {
         #[command(flatten)]
         place: RankArguments,
     },
+    /// Claim a slice for TIKK_AGENT for 4 hours, or renew the agent's own claim.
+    Claim {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+    },
+    /// End the claim on a slice. Without TIKK_AGENT, it ends any claim.
+    Release {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+    },
+    /// List the slices that can start, in rank order, and what holds each of the others.
+    Ready(ReadyArguments),
 }
 
 #[derive(Debug, Args)]
@@ -185,6 +197,17 @@ pub(crate) struct LsArguments {
     /// Keep tickets whose title or body holds the text, without regard to case.
     #[arg(long, value_name = "TEXT")]
     pub(crate) search: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ReadyArguments {
+    /// The plan whose slices to list.
+    #[arg(long, value_name = "ID", value_parser = TicketId::parse)]
+    pub(crate) parent: Option<TicketId>,
+    /// The project whose slices to list. The default is the repository name of `origin`, or
+    /// `personal` outside a repository.
+    #[arg(long, value_parser = ProjectName::parse, conflicts_with = "parent")]
+    pub(crate) project: Option<ProjectName>,
 }
 
 fn parse_machine(name: &str) -> Result<MachineName, StoreError> {

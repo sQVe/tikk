@@ -1,6 +1,10 @@
 use std::fmt;
+use std::fs;
+use std::path::Path;
 
 use crate::store::StoreError;
+
+pub(crate) const MACHINE_FILE: &str = ".git/tikk-machine";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MachineName(String);
@@ -41,6 +45,17 @@ impl fmt::Display for MachineName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.0)
     }
+}
+
+pub(crate) fn read_machine(root: &Path) -> Result<MachineName, StoreError> {
+    let path = root.join(MACHINE_FILE);
+    let text = fs::read_to_string(&path).map_err(|source| StoreError::Io {
+        action: "read",
+        path,
+        source,
+    })?;
+
+    MachineName::parse(text.trim_end())
 }
 
 fn is_name_character(character: char) -> bool {
