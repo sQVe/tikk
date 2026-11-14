@@ -1,8 +1,9 @@
 # QA guide
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
-`tikk` has only `--help`, and `tikk-desktop` is a stub. A mock scene of the UI opens in the scene
-window, in the ruta sandbox.
+`tikk` has `init`, `--help`, and `--version`, and `tikk-desktop` is a stub. A mock scene of the UI
+opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
+folder under `/tmp`.
 
 ## Choose sections
 
@@ -32,6 +33,15 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
   it from still images.
 - A change to only `tikk-desktop` falls under "Not testable".
 - When the impact on a section is unclear, include the section.
+
+## Journeys
+
+A journey is one user's path through several commands. Each journey file lists its steps, and its
+test runs them against the built binary.
+
+| Journey                                           | Goal                                              | Run it when the change touches            | Test                                               |
+| ------------------------------------------------- | ------------------------------------------------- | ----------------------------------------- | -------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md) | Set up a store and keep a plan's to-dos in order. | `tikk init`, the store layout, CLI output | `crates/tikk-cli/tests/journey_tickets_by_hand.rs` |
 
 ## Before a launch
 
@@ -68,7 +78,8 @@ without `url`; a native window has none.
 Never:
 
 - Run `tikk` from `PATH`. It can be another program.
-- Read or change `~/.local/share/tikk`. It is the user's store.
+- Read or change `~/.local/share/tikk`. It is the user's store. Set `TIKK_HOME` to a fresh folder
+  under `/tmp` for every `tikk` command, such as `export TIKK_HOME=$(mktemp -d /tmp/tikk-qa-XXXX)`.
 
 ## CLI
 
@@ -84,10 +95,29 @@ Never:
 - If the binary is missing or the command prints a file, stop and ask the parent to run
   `cargo build --locked` in the worktree.
 
+### External programs
+
+`tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. Both run from
+`PATH` with an argument list.
+
 ### What to check
 
-`target/debug/tikk --help` exits with 0 and prints "A local ticket tracker for AI agents" and the
-usage.
+- `target/debug/tikk --help` exits with 0 and prints "A local ticket tracker for AI agents" and the
+  usage.
+- `target/debug/tikk --version --json` exits with 0 and prints `{"version":"0.0.0"}`.
+- `target/debug/tikk init --json` in an empty `TIKK_HOME` exits with 0 and prints
+  `{"created":true,"store":"<TIKK_HOME>"}`. The folder then holds `tikk.json` with
+  `{"version":1}`, `.gitattributes` with `facts/** merge=union`, and one commit on `main`
+  (`git -C "$TIKK_HOME" log --oneline main`).
+- A second `target/debug/tikk init --json` exits with 0 and prints `"created":false`. Without
+  `--json`, it prints "The tikk store already exists at <TIKK_HOME>."
+- `target/debug/tikk init --machine laptop` saves `laptop` in `$TIKK_HOME/.git/tikk-machine`.
+  Without `--machine`, the file holds the first label of `uname -n`, lowercased.
+- `target/debug/tikk init --json` in a `TIKK_HOME` with other files exits with 1, prints nothing on
+  standard output, and prints `{"error":{"code":"folderNotEmpty",...}}` on standard error.
+- `target/debug/tikk init --json --no-such-flag` exits with 2 and prints
+  `{"error":{"code":"invalidArguments",...}}` on standard error. Without `--json`, it prints
+  the error and the usage on standard error.
 
 ## Scene window
 

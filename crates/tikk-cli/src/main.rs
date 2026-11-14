@@ -1,25 +1,13 @@
-use clap::Parser;
+mod app;
+mod command;
+mod init;
+mod output;
+mod store_error;
 
-#[derive(Parser)]
-#[command(about = "A local ticket tracker for AI agents")]
-struct Cli {}
+use std::process::ExitCode;
 
-fn main() {
-    Cli::parse();
-}
+fn main() -> ExitCode {
+    let response = app::run(std::env::args_os().collect(), app::Environment::system());
 
-#[cfg(test)]
-mod tests {
-    use super::Cli;
-    use clap::CommandFactory;
-
-    #[test]
-    fn help_shows_the_about_text() {
-        let about = Cli::command().get_about().map(|about| about.to_string());
-
-        assert_eq!(
-            about.as_deref(),
-            Some("A local ticket tracker for AI agents")
-        );
-    }
+    output::write(&response)
 }
