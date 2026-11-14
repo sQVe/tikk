@@ -90,6 +90,24 @@ impl TicketFields {
         Ok(fields)
     }
 
+    pub(crate) fn with_status(
+        &self,
+        status: Status,
+        reason: Option<&str>,
+    ) -> Result<Self, TicketError> {
+        let fields = Self {
+            status,
+            reason: reason
+                .filter(|reason| !reason.trim().is_empty())
+                .map(str::to_owned),
+            ..self.clone()
+        };
+
+        fields.check_rules()?;
+
+        Ok(fields)
+    }
+
     pub fn kind(&self) -> Kind {
         self.kind
     }

@@ -1,5 +1,6 @@
 mod app;
 mod command;
+mod edit;
 mod init;
 mod ls;
 mod new;

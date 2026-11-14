@@ -3,7 +3,7 @@
 **Date**: 2026-11-04\
 **Status**: Accepted\
 **Related**: [ADR 0014 (Git history is undo, with no event sourcing for intent)](./0014-git-history-as-undo.md),
-[ADR 0021 (Strict validation at claim, submit, and done)](./0021-validation-levels.md)
+[ADR 0021 (Strict validation at claim, submit, and audit)](./0021-validation-levels.md)
 
 ## Context
 

@@ -66,6 +66,7 @@ fn show_json_prints_every_field_of_the_ticket() {
         .as_str()
         .expect("show prints the hash")
         .to_owned();
+    let file_text = std::fs::read_to_string(&path).expect("read the slice file");
     assert_eq!(
         shown,
         json!({
@@ -84,6 +85,7 @@ fn show_json_prints_every_field_of_the_ticket() {
             "path": path,
             "hash": hash,
             "body": "Body\n",
+            "document": file_text,
             "children": [],
             "files": [],
         })
@@ -119,6 +121,22 @@ fn show_json_returns_the_body_of_a_ticket_document() {
         parse_json(&run.stdout)["body"],
         json!("The plan's design.\n")
     );
+}
+
+#[test]
+fn show_json_document_is_the_exact_text_of_a_hand_edited_file() {
+    let home = Home::initialized();
+    let id = home.new_ticket(&["task", "Renew the domain"]);
+    let path = home.show_json(&id)["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    let hand_edit = "---\ntitle: Renew the domain # by May\nkind:   task\n---\n\nNotes.\n";
+    std::fs::write(&path, hand_edit).expect("edit the ticket file by hand");
+
+    let shown = home.show_json(&id);
+
+    assert_eq!(shown["document"], json!(hand_edit));
 }
 
 #[test]

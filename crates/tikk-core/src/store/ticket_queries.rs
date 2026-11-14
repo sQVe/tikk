@@ -1,11 +1,26 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_files::{
-    StoredTicket, TICKETS_FOLDER, UnreadableTicket, exists, io_error, read_tickets, sorted_entries,
+    StoredTicket, TICKETS_FOLDER, TicketScan, UnreadableTicket, exists, io_error, read_tickets,
+    sorted_entries,
 };
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, ProjectName, Status, TicketId};
+
+#[derive(Clone, Copy)]
+pub struct QueryEffects {
+    pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
+}
+
+impl QueryEffects {
+    pub fn system() -> Self {
+        Self {
+            lock_store: store_lock::lock_store,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TicketFilter {
@@ -31,8 +46,16 @@ pub struct ShownTicket {
 
 /// Lists the tickets that match the filter, ranked ones first, then by ID. Every file that
 /// fails to parse is in `errors`, whatever the filter.
-pub fn list_tickets(store: &Store, filter: &TicketFilter) -> Result<TicketListing, StoreError> {
-    let scan = read_tickets(store.root())?;
+pub fn list_tickets(
+    store: &Store,
+    filter: &TicketFilter,
+    effects: &QueryEffects,
+) -> Result<TicketListing, StoreError> {
+    let scan = {
+        let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
+
+        read_tickets(store.root())?
+    };
     let search = filter.search.as_deref().map(str::to_lowercase);
     let mut tickets: Vec<StoredTicket> = scan
         .tickets
@@ -48,57 +71,24 @@ pub fn list_tickets(store: &Store, filter: &TicketFilter) -> Result<TicketListin
     })
 }
 
-pub fn show_ticket(store: &Store, id: &TicketId) -> Result<ShownTicket, StoreError> {
-    let scan = read_tickets(store.root())?;
-    let mut paths: Vec<PathBuf> = scan
-        .tickets
-        .iter()
-        .filter(|ticket| ticket.id == *id)
-        .map(|ticket| ticket.path.clone())
-        .collect();
-
-    paths.extend(
-        scan.errors
-            .iter()
-            .filter(|error| error.id.as_ref() == Some(id))
-            .map(|error| error.path.clone()),
-    );
-
-    if paths.len() > 1 {
-        return Err(StoreError::IdShared {
-            id: id.to_string(),
-            paths,
-        });
-    }
-
-    if let Some(error) = scan
-        .errors
-        .into_iter()
-        .find(|error| error.id.as_ref() == Some(id))
-    {
-        return Err(StoreError::TicketParse {
-            path: error.path,
-            message: error.message,
-        });
-    }
-
-    let mut children = Vec::new();
-    let mut found = None;
-
-    for ticket in scan.tickets {
-        if ticket.id == *id {
-            found = Some(ticket);
-        } else if ticket.document.fields.parent() == Some(id) {
-            children.push(ticket);
-        }
-    }
-
-    let ticket = found.ok_or_else(|| StoreError::NotFound { id: id.to_string() })?;
+pub fn show_ticket(
+    store: &Store,
+    id: &TicketId,
+    effects: &QueryEffects,
+) -> Result<ShownTicket, StoreError> {
     let folder = store
         .root()
         .join(TICKETS_FOLDER)
         .join(id.project().as_str())
         .join(id.to_string());
+    let _lock = (effects.lock_store)(store.root(), LockAccess::Shared)?;
+    let scan = read_tickets(store.root())?;
+    let ticket = find_ticket(&scan, id)?.clone();
+    let mut children: Vec<StoredTicket> = scan
+        .tickets
+        .into_iter()
+        .filter(|child| child.id != *id && child.document.fields.parent() == Some(id))
+        .collect();
 
     sort_tickets(&mut children);
 
@@ -107,6 +97,52 @@ pub fn show_ticket(store: &Store, id: &TicketId) -> Result<ShownTicket, StoreErr
         children,
         files: folder_files(&folder)?,
     })
+}
+
+pub(crate) fn find_ticket<'a>(
+    scan: &'a TicketScan,
+    id: &TicketId,
+) -> Result<&'a StoredTicket, StoreError> {
+    ticket_path(scan, id)?;
+
+    if let Some(error) = scan
+        .errors
+        .iter()
+        .find(|error| error.id.as_ref() == Some(id))
+    {
+        return Err(StoreError::TicketParse {
+            path: error.path.clone(),
+            message: error.message.clone(),
+        });
+    }
+
+    scan.tickets
+        .iter()
+        .find(|ticket| ticket.id == *id)
+        .ok_or_else(|| StoreError::NotFound { id: id.to_string() })
+}
+
+pub(crate) fn ticket_path<'a>(scan: &'a TicketScan, id: &TicketId) -> Result<&'a Path, StoreError> {
+    let parsed = scan
+        .tickets
+        .iter()
+        .filter(|ticket| ticket.id == *id)
+        .map(|ticket| ticket.path.as_path());
+    let broken = scan
+        .errors
+        .iter()
+        .filter(|error| error.id.as_ref() == Some(id))
+        .map(|error| error.path.as_path());
+    let paths: Vec<&Path> = parsed.chain(broken).collect();
+
+    match paths.as_slice() {
+        [] => Err(StoreError::NotFound { id: id.to_string() }),
+        [path] => Ok(path),
+        _ => Err(StoreError::IdShared {
+            id: id.to_string(),
+            paths: paths.iter().map(|path| path.to_path_buf()).collect(),
+        }),
+    }
 }
 
 impl TicketFilter {
@@ -182,7 +218,10 @@ fn is_real_folder(path: &Path) -> Result<bool, StoreError> {
 mod tests {
     use std::fs;
 
-    use super::{TicketFilter, list_tickets, show_ticket};
+    use std::path::{Path, PathBuf};
+
+    use super::{QueryEffects, TicketFilter, list_tickets, show_ticket};
+    use crate::store::store_lock::{LockAccess, StoreLock};
     use crate::store::{Store, StoreError};
     use crate::ticket::{Kind, ProjectName, Status, TicketId};
 
@@ -211,6 +250,7 @@ mod tests {
 
     fn store_with_tickets() -> (tempfile::TempDir, Store) {
         let directory = tempfile::tempdir().expect("create a temporary directory");
+        fs::create_dir(directory.path().join(".git")).expect("create the Git folder");
 
         for (path, text) in TICKETS {
             let path = directory.path().join("tickets").join(path);
@@ -230,7 +270,7 @@ mod tests {
     }
 
     fn listed(store: &Store, filter: &TicketFilter) -> Vec<String> {
-        list_tickets(store, filter)
+        list_tickets(store, filter, &QueryEffects::system())
             .expect("the listing runs")
             .tickets
             .iter()
@@ -309,11 +349,39 @@ mod tests {
         }
     }
 
+    fn busy_lock(_: &Path, access: LockAccess) -> Result<StoreLock, StoreError> {
+        Err(StoreError::Locked {
+            lock: PathBuf::from(format!("{access:?}")),
+        })
+    }
+
+    #[test]
+    fn list_and_show_wait_for_the_shared_lock() {
+        let (_directory, store) = store_with_tickets();
+        let effects = QueryEffects {
+            lock_store: busy_lock,
+        };
+
+        let listed = list_tickets(&store, &TicketFilter::default(), &effects);
+        let shown = show_ticket(&store, &id("personal-3333"), &effects);
+
+        let shared = PathBuf::from("Shared");
+        assert!(
+            matches!(&listed, Err(StoreError::Locked { lock }) if *lock == shared),
+            "{listed:?}"
+        );
+        assert!(
+            matches!(&shown, Err(StoreError::Locked { lock }) if *lock == shared),
+            "{shown:?}"
+        );
+    }
+
     #[test]
     fn show_ticket_returns_the_ticket_and_its_children_in_rank_order() {
         let (_directory, store) = store_with_tickets();
 
-        let shown = show_ticket(&store, &id("personal-3333")).expect("the plan exists");
+        let shown = show_ticket(&store, &id("personal-3333"), &QueryEffects::system())
+            .expect("the plan exists");
 
         assert_eq!(shown.ticket.document.fields.title(), "Move to tikk");
         let children: Vec<String> = shown
@@ -339,9 +407,12 @@ mod tests {
         )
         .expect("write");
 
-        let missing = show_ticket(&store, &id("personal-wxyz")).expect_err("no such ticket");
-        let broken = show_ticket(&store, &id("personal-9999")).expect_err("the file is broken");
-        let shared = show_ticket(&store, &id("personal-4444")).expect_err("two files share it");
+        let missing = show_ticket(&store, &id("personal-wxyz"), &QueryEffects::system())
+            .expect_err("no such ticket");
+        let broken = show_ticket(&store, &id("personal-9999"), &QueryEffects::system())
+            .expect_err("the file is broken");
+        let shared = show_ticket(&store, &id("personal-4444"), &QueryEffects::system())
+            .expect_err("two files share it");
 
         assert!(
             matches!(&missing, StoreError::NotFound { id } if id == "personal-wxyz"),
@@ -365,7 +436,8 @@ mod tests {
         fs::write(folder.join("design.md"), "").expect("write");
         fs::write(folder.join("reports/audit.md"), "").expect("write");
 
-        let shown = show_ticket(&store, &id("personal-3333")).expect("the plan exists");
+        let shown = show_ticket(&store, &id("personal-3333"), &QueryEffects::system())
+            .expect("the plan exists");
 
         assert_eq!(shown.files, ["design.md", "reports/audit.md"]);
     }

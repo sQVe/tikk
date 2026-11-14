@@ -1,11 +1,15 @@
 use serde_json::{Value, json};
-use tikk_core::{ShownTicket, Store, StoreError, TicketId};
+use tikk_core::{QueryEffects, ShownTicket, Store, StoreError, TicketId};
 
 use crate::output::Output;
 use crate::ticket_row::{row_json, row_text};
 
-pub(crate) fn run(store: &Store, id: &TicketId) -> Result<Output, StoreError> {
-    let shown = tikk_core::show_ticket(store, id)?;
+pub(crate) fn run(
+    store: &Store,
+    id: &TicketId,
+    effects: &QueryEffects,
+) -> Result<Output, StoreError> {
+    let shown = tikk_core::show_ticket(store, id, effects)?;
 
     Ok(Output {
         json: shown_json(&shown),
@@ -34,6 +38,7 @@ fn shown_json(shown: &ShownTicket) -> Value {
         "path": ticket.path.to_string_lossy(),
         "hash": ticket.hash,
         "body": ticket.document.body,
+        "document": ticket.text,
         "children": children,
         "files": shown.files,
     })

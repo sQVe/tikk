@@ -1,12 +1,13 @@
-use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_files::{
-    StoredTicket, TICKETS_FOLDER, TicketScan, io_error, read_tickets, sha256_hex,
+    StoredTicket, TICKETS_FOLDER, io_error, read_tickets, sha256_hex,
 };
 use crate::store::ticket_id_draw::draw_free_id;
+use crate::store::ticket_link_checks::check_ticket_links;
 use crate::store::ticket_new_file::{write_bytes, write_new_file};
 use crate::store::{Store, StoreError};
 use crate::ticket::{
@@ -18,6 +19,7 @@ use crate::ticket::{
 pub struct TicketEffects {
     pub read_origin_url: fn(&Path) -> Result<Option<String>, StoreError>,
     pub fill_random: fn(&mut [u8]) -> Result<(), StoreError>,
+    pub lock_store: fn(&Path, LockAccess) -> Result<StoreLock, StoreError>,
 }
 
 impl TicketEffects {
@@ -25,6 +27,7 @@ impl TicketEffects {
         Self {
             read_origin_url: system::read_origin_url,
             fill_random: system::fill_random,
+            lock_store: store_lock::lock_store,
         }
     }
 }
@@ -52,17 +55,10 @@ pub fn create_ticket(
     effects: &TicketEffects,
 ) -> Result<StoredTicket, StoreError> {
     let document = read_source(request.source)?;
+    let _lock = (effects.lock_store)(store.root(), LockAccess::Exclusive)?;
     let scan = read_tickets(store.root())?;
 
-    refuse_shared_links(&document.fields, &scan)?;
-
-    let kinds: HashMap<&TicketId, Kind> = scan
-        .tickets
-        .iter()
-        .map(|ticket| (&ticket.id, ticket.document.fields.kind()))
-        .collect();
-
-    document.fields.check_links(|id| kinds.get(id).copied())?;
+    check_ticket_links(&document.fields, &scan)?;
 
     let project = choose_project(
         &document.fields,
@@ -81,32 +77,9 @@ pub fn create_ticket(
         id,
         path,
         hash: sha256_hex(text.as_bytes()),
+        text,
         document,
     })
-}
-
-fn refuse_shared_links(fields: &TicketFields, scan: &TicketScan) -> Result<(), StoreError> {
-    let mut paths: HashMap<&TicketId, Vec<PathBuf>> = HashMap::new();
-    let parsed = scan.tickets.iter().map(|ticket| (&ticket.id, &ticket.path));
-    let broken = scan
-        .errors
-        .iter()
-        .filter_map(|error| error.id.as_ref().map(|id| (id, &error.path)));
-
-    for (id, path) in parsed.chain(broken) {
-        paths.entry(id).or_default().push(path.clone());
-    }
-
-    for id in fields.linked_ids() {
-        if let Some(shared) = paths.get(id).filter(|shared| shared.len() > 1) {
-            return Err(StoreError::IdShared {
-                id: id.to_string(),
-                paths: shared.clone(),
-            });
-        }
-    }
-
-    Ok(())
 }
 
 fn read_source(source: NewTicketSource) -> Result<TicketDocument, StoreError> {
@@ -169,6 +142,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
+    use crate::store::store_lock::{LockAccess, StoreLock};
     use crate::store::{Store, StoreError};
     use crate::ticket::{Kind, ProjectName, TicketError, TicketId};
 
@@ -204,10 +178,13 @@ mod tests {
         TicketEffects {
             read_origin_url,
             fill_random: counting_random,
+            lock_store: TicketEffects::system().lock_store,
         }
     }
 
     fn store(directory: &Path) -> Store {
+        fs::create_dir_all(directory.join(".git")).expect("create the Git folder");
+
         Store {
             root: directory.to_path_buf(),
         }
@@ -250,6 +227,35 @@ mod tests {
         names.sort();
 
         names
+    }
+
+    fn exclusive_lock_is_busy(_: &Path, access: LockAccess) -> Result<StoreLock, StoreError> {
+        Err(StoreError::Locked {
+            lock: PathBuf::from(format!("{access:?}")),
+        })
+    }
+
+    #[test]
+    fn create_ticket_writes_nothing_while_another_process_holds_the_lock() {
+        let directory = tempfile::tempdir().expect("create a temporary directory");
+        let store = store(directory.path());
+        let effects = TicketEffects {
+            lock_store: exclusive_lock_is_busy,
+            ..effects(no_origin)
+        };
+
+        let error = create_ticket(
+            &store,
+            fields(Kind::Task, "Renew the domain", None),
+            &effects,
+        )
+        .expect_err("the lock is held");
+
+        assert!(
+            matches!(&error, StoreError::Locked { lock } if lock.as_path() == Path::new("Exclusive")),
+            "{error:?}"
+        );
+        assert!(!directory.path().join("tickets").exists());
     }
 
     #[test]

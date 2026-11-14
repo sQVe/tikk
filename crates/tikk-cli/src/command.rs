@@ -40,6 +40,35 @@ pub(crate) enum Command {
     },
     /// List tickets, and the files that fail to parse.
     Ls(LsArguments),
+    /// Replace a ticket with a ticket document, if its file still has the given hash.
+    Write {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        /// The ticket document, such as the `document` of `tikk show --json` with changes.
+        #[arg(long, value_name = "PATH")]
+        file: PathBuf,
+        /// The `hash` of `tikk show --json`. The write is refused when the file has another.
+        #[arg(long)]
+        hash: String,
+    },
+    /// Start $EDITOR on the ticket file. tikk changes nothing itself.
+    Edit {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+    },
+    /// Mark a task or an instruction done.
+    Done {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+    },
+    /// Cancel a ticket, and keep the reason in its file.
+    Cancel {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+        /// Why the ticket is canceled.
+        #[arg(long, value_name = "TEXT")]
+        reason: String,
+    },
 }
 
 #[derive(Debug, Args)]

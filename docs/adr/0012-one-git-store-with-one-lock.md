@@ -22,7 +22,20 @@ private GitHub repository.
 ### Locking and sync
 
 - One store lock covers every write and every local Git step of sync. A claim is atomic, and no
-  write races a Git operation. tikk clears a stale lock by checking its PID.
+  write races a Git operation.
+- The store lock is an operating system file lock on `.git/tikk.lock`, taken through
+  `std::fs::File`. The operating system releases it when the process ends, so a crashed process
+  leaves no stale lock, and tikk keeps no PID file.
+- A command that writes, `tikk new` included, and each local Git step of sync take the lock
+  exclusive. A command that reads takes it shared, so readers do not block each other and never
+  read while a write or a sync changes files. A command waits for the lock at most five seconds,
+  then fails with the code `locked`.
+- A ticket file is written to a temporary file in the same folder and renamed onto the old one, so
+  no reader sees half a file. A hash-checked write compares the hash again right before the
+  rename, under the exclusive lock.
+- `tikk init` takes no lock, because the lock file lives in the store that `init` creates. `init`
+  builds the store in a staging folder and renames it into place. When another `init` wins the
+  rename, `init` checks the store that won and reports that the store exists.
 - Writes never commit. `tikk init` is the one exception: it makes the store's first commit, so the
   store has a `main` branch from the start. One sync step fetches, then commits and merges under the lock, then pushes.
   The network steps run outside the lock, because writers wait for the lock at most five seconds.
@@ -58,6 +71,12 @@ worktrees would not share one view.
 ### Commit on every write
 
 Let each write commit. Rejected because many agents committing at once jam Git.
+
+### A lock file with a PID
+
+Create a lock file that holds the writer's PID, and clear it when that process is gone. Rejected
+because a crash leaves the file behind, and the next command must guess whether the PID still
+belongs to tikk. The operating system lock ends with its process.
 
 ### Rebase on sync
 

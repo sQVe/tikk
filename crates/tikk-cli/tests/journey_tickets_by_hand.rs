@@ -1,5 +1,7 @@
 mod support;
 
+use serde_json::json;
+
 use support::{Home, parse_json};
 
 fn new_id(home: &Home, arguments: &[&str]) -> String {
@@ -71,9 +73,11 @@ fn tickets_by_hand() {
         "Ask about Windows",
     ];
 
-    for title in titles {
-        new_id(&home, &["new", "task", title, "--parent", &plan]);
-    }
+    let tasks: Vec<String> = titles
+        .iter()
+        .map(|title| new_id(&home, &["new", "task", title, "--parent", &plan]))
+        .collect();
+    let windows = &tasks[2];
 
     assert_eq!(
         listed_titles(&home, &["ls", "--parent", &plan, "--json"]),
@@ -88,5 +92,27 @@ fn tickets_by_hand() {
         listed_titles(&home, &["ls", "--search", "lease", "--json"]),
         ["Decide the lease length"],
         "step 3, ls --search lease"
+    );
+
+    let cancel = home.tikk(&["cancel", windows, "--reason", "Linux and macOS only"]);
+    assert_eq!(cancel.exit_code, 0, "step 4, cancel: {}", cancel.stderr);
+    let shown = home.show_json(windows);
+    assert_eq!(shown["status"], json!("canceled"), "step 4, show");
+    assert_eq!(
+        shown["reason"],
+        json!("Linux and macOS only"),
+        "step 4, show"
+    );
+
+    let no_reason = home.tikk(&["cancel", &tasks[0]]);
+    assert_eq!(
+        no_reason.exit_code, 2,
+        "step 4, cancel without --reason: {}",
+        no_reason.stdout
+    );
+    assert_eq!(
+        home.show_json(&tasks[0])["status"],
+        json!("open"),
+        "step 4, cancel without --reason changes nothing"
     );
 }

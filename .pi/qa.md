@@ -1,9 +1,9 @@
 # QA guide
 
 tikk ships `tikk`, a command line for agents and the user, and `tikk-desktop`, a desktop app. Today
-`tikk` has `init`, `new`, `show`, `ls`, `--help`, and `--version`, and `tikk-desktop` is a stub. A mock scene of the UI
-opens in the scene window, in the ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh
-folder under `/tmp`.
+`tikk` has `init`, `new`, `show`, `ls`, `write`, `edit`, `done`, `cancel`, `--help`, and
+`--version`, and `tikk-desktop` is a stub. A mock scene of the UI opens in the scene window, in the
+ruta sandbox. Every CLI check runs with `TIKK_HOME` set to a fresh folder under `/tmp`.
 
 ## Choose sections
 
@@ -39,11 +39,11 @@ Pick the scenes. `SceneName` in `crates/tikk-ui/src/scenes.rs` lists them.
 A journey is one user's path through several commands. Each journey file lists its steps, and its
 test runs them against the built binary.
 
-| Journey                                                     | Goal                                                                      | Run it when the change touches                         | Test                                                    |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------ | ------------------------------------------------------- |
-| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, the store layout, CLI output | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
-| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, ticket validation           | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
-| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`         | `crates/tikk-cli/tests/journey_trouble.rs`              |
+| Journey                                                     | Goal                                                                      | Run it when the change touches                                          | Test                                                    |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| [tickets-by-hand](qa/journeys/tickets-by-hand.md)           | Set up a store and keep a plan's to-dos in order.                         | `tikk init`, `new`, `ls`, `cancel`, the store layout, CLI output        | `crates/tikk-cli/tests/journey_tickets_by_hand.rs`      |
+| [manager-runs-a-slice](qa/journeys/manager-runs-a-slice.md) | Take a slice from ready to done, with no step that marks it done by hand. | `tikk new --file`, `show`, ticket validation                            | `crates/tikk-cli/tests/journey_manager_runs_a_slice.rs` |
+| [trouble](qa/journeys/trouble.md)                           | Each failure is named with what to fix, and no ticket is lost.            | Ticket parsing, error codes, `tikk ls`, `show`, `write`, the store lock | `crates/tikk-cli/tests/journey_trouble.rs`              |
 
 ## Before a launch
 
@@ -101,7 +101,10 @@ Never:
 
 `tikk init` starts `git` and, without `--machine`, `uname -n` for the host name. `tikk new` without
 `--parent` and `--project` starts `git config --get remote.origin.url` in the working directory. All
-run from `PATH` with an argument list.
+run from `PATH` with an argument list. `tikk edit` splits `EDITOR` on whitespace into a program
+and its arguments. It runs the program with no shell, with those arguments and then the ticket file
+path. Without `EDITOR`, or with one that is empty or holds only whitespace, it exits with 1 and
+`noEditor`.
 
 ### What to check
 
@@ -133,8 +136,9 @@ run from `PATH` with an argument list.
   written. A slice with `--parent <plan>` and a `--project` that differs from the plan's exits with
   1 and the field `project`.
 - `target/debug/tikk show <id> --json` exits with 0 and prints the front matter fields, `path`,
-  `hash` (the SHA-256 of the file, which `sha256sum <path>` prints), `body`, `children` as rows,
-  and `files` of the folder `tickets/<project>/<id>/`. Without `--json`, it prints the ticket's row,
+  `hash` (the SHA-256 of the file, which `sha256sum <path>` prints), `body`, `document` (the exact
+  text of the file, which `cat <path>` prints), `children` as rows, and `files` of the folder
+  `tickets/<project>/<id>/`. Without `--json`, it prints the ticket's row,
   its children's rows indented, and the body. An unknown ID exits with 1 and `notFound`, and a
   malformed ID exits with 2 and `invalidArguments`.
 - `target/debug/tikk ls [--project <p>] [--kind <k>] [--parent <id>] [--status <s>]
@@ -146,6 +150,23 @@ run from `PATH` with an argument list.
   stay listed. `target/debug/tikk show <its id> --json` exits with 1 and `parseError`.
 - `target/debug/tikk ls --json` with a `TIKK_HOME` that holds no store exits with 1, prints nothing
   on standard output, and prints `{"error":{"code":"notInitialized",...}}` on standard error.
+- `target/debug/tikk write <id> --file <path> --hash <hash> --json`, with the `document` and `hash`
+  of `tikk show <id> --json` saved unchanged to `<path>`, exits with 0, prints the ticket's row with
+  its `path` and `hash`, and leaves the file's bytes as they were. After an edit to the ticket file
+  by hand, the same command with the old hash exits with 1 and `changedOnDisk`, and the file keeps
+  the hand edit.
+- `EDITOR=<script> target/debug/tikk edit <id> --json` runs the script with the ticket file's path
+  as its one argument, then prints `{"id":...,"path":...}`. `EDITOR="<script> --wait"` passes
+  `--wait` before the path. The command changes no file itself.
+- `target/debug/tikk done <id> --json` on a task or an instruction exits with 0 and prints the row
+  with the status `done`. On a plan or a slice, it exits with 1 and `wrongKind`, and the message
+  names the kind.
+- `target/debug/tikk cancel <id> --reason <text> --json` exits with 0, and `tikk show <id> --json`
+  then has the status `canceled` and the reason. Without `--reason`, it exits with 2 and
+  `invalidArguments`.
+- The store lock is the file `$TIKK_HOME/.git/tikk.lock`. While another process holds it, such as
+  `flock $TIKK_HOME/.git/tikk.lock sleep 7`, `target/debug/tikk show <id> --json` waits five
+  seconds, then exits with 1 and `locked`.
 
 ## Scene window
 
