@@ -118,7 +118,10 @@ fn pr_refresh_records_a_merge_into_trunk_and_then_reads_that_pr_no_more() {
     let again = home.tikk_with_gh(&gh, None, &["pr", "refresh", "--json"]);
 
     assert_eq!(again.exit_code, 0, "second refresh: {}", again.stderr);
-    assert_eq!(parse_json(&again.stdout), json!({ "refreshed": [] }));
+    assert_eq!(
+        parse_json(&again.stdout),
+        json!({ "refreshed": [], "auditBehind": [] })
+    );
     assert_eq!(gh.calls(), before, "the second refresh runs no gh");
     assert_eq!(pr_facts(&home).len(), 2);
 }

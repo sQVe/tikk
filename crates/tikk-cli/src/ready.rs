@@ -57,6 +57,7 @@ fn skipped_json(skipped: &SkippedSlice) -> Value {
 fn hold_json(hold: &Hold) -> Value {
     match hold {
         Hold::Draft => json!({ "reason": "draft" }),
+        Hold::MergedUnverified => json!({ "reason": "mergedUnverified" }),
         Hold::BlockedBy {
             blocker,
             via,
@@ -131,6 +132,7 @@ fn queue_text(queue: &ReadyQueue) -> String {
 fn hold_text(hold: &Hold) -> String {
     match hold {
         Hold::Draft => "draft".to_owned(),
+        Hold::MergedUnverified => "merged, with no audit that counts".to_owned(),
         Hold::BlockedBy {
             blocker,
             via: Some(plan),

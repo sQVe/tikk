@@ -78,7 +78,7 @@ pub(crate) fn current_claims<'a>(
             FactEvent::Release { .. } => {
                 claims.remove(&fact.ticket);
             }
-            FactEvent::Pr(_) => {}
+            FactEvent::Pr(_) | FactEvent::Audit(_) => {}
         }
     }
 

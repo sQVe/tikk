@@ -90,6 +90,8 @@ fn show_json_prints_every_field_of_the_ticket() {
             "files": [],
             "claim": null,
             "pr": null,
+            "derivedStatus": "canceled",
+            "audit": null,
         })
     );
     assert_eq!(empty.exit_code, 0, "stderr: {}", empty.stderr);

@@ -1,4 +1,5 @@
 mod app;
+mod audit;
 mod claim;
 mod command;
 mod edit;

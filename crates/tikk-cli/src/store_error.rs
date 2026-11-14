@@ -47,6 +47,9 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::MachineInUse { .. } => ("machineInUse", Exit::Refused),
         StoreError::Gh { .. } => ("ghError", Exit::Refused),
         StoreError::NotLinked { .. } => ("notLinked", Exit::Refused),
+        StoreError::InvalidVerdicts { .. } => ("invalidArguments", Exit::WrongUsage),
+        StoreError::UnknownCriterion { .. } => ("unknownCriterion", Exit::Refused),
+        StoreError::NoRepository { .. } => ("noRepository", Exit::Refused),
         StoreError::ResultNotSaved { error: inner, .. } => {
             return Failure {
                 message: error.to_string(),
@@ -453,6 +456,27 @@ mod tests {
                     id: "personal-abcd".to_owned(),
                 },
                 "notLinked",
+                Exit::Refused,
+            ),
+            (
+                StoreError::InvalidVerdicts {
+                    path: PathBuf::from("verdicts.json"),
+                    message: "not a list".to_owned(),
+                },
+                "invalidArguments",
+                Exit::WrongUsage,
+            ),
+            (
+                StoreError::UnknownCriterion {
+                    id: "personal-abcd".to_owned(),
+                    criterion: "s9".to_owned(),
+                },
+                "unknownCriterion",
+                Exit::Refused,
+            ),
+            (
+                StoreError::NoRepository { origin: None },
+                "noRepository",
                 Exit::Refused,
             ),
         ];

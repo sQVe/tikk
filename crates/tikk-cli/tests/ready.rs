@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
+use support::audit::{HEAD, audit_met, link_open_pr, merge_and_refresh};
 use support::{FakeGh, Home, parse_json, run_git};
 
 fn ready(home: &Home, arguments: &[&str]) -> Value {
@@ -252,17 +253,6 @@ fn ready_without_json_prints_rows_and_the_holds_of_skipped_slices() {
 
 const ALPHABET: &str = "346789abcdefghijkmnpqrtwxyz";
 
-const HEAD: &str = "1111111111111111111111111111111111111111";
-
-fn link_open_pr(home: &Home, gh: &FakeGh, slice: &str, number: u64) {
-    let url = format!("https://github.com/owner/app/pull/{number}");
-    gh.open_pr("owner/app", number, HEAD);
-
-    let link = home.tikk_with_gh(gh, None, &["pr", "link", slice, &url, "--json"]);
-
-    assert_eq!(link.exit_code, 0, "link: {}", link.stderr);
-}
-
 #[test]
 fn ready_offers_a_slice_blocked_by_a_slice_with_an_open_pr_and_names_that_pr() {
     let home = Home::initialized();
@@ -452,4 +442,67 @@ fn ready_skips_a_claimed_slice_with_a_shared_id_with_id_shared_and_no_claim() {
         text.contains(&format!("\n  idShared: {}\n", paths.join("  "))),
         "{text}"
     );
+}
+
+#[test]
+fn ready_holds_a_merged_unverified_slice_and_its_blocked_slice_until_the_audit_counts() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let first = home.slice_under(&plan, "Add the store", &[]);
+    let second = home.slice_under(&plan, "Add ticket files", &[&first]);
+    link_open_pr(&home, &gh, &first, 7);
+    merge_and_refresh(&home, &gh, 7, HEAD);
+
+    let unverified = ready(&home, &["--parent", &plan]);
+
+    let holds = |id: &str| {
+        unverified["skipped"]
+            .as_array()
+            .expect("a list of skipped slices")
+            .iter()
+            .find(|row| row["id"] == json!(id))
+            .map(|row| row["holds"].clone())
+            .unwrap_or_else(|| panic!("{id} is skipped: {unverified}"))
+    };
+    assert_eq!(unverified["candidates"], json!([]), "{unverified}");
+    assert_eq!(holds(&first), json!([{ "reason": "mergedUnverified" }]));
+    assert_eq!(
+        holds(&second),
+        json!([{ "reason": "blockedBy", "blocker": first, "via": null, "state": "mergedUnverified" }])
+    );
+
+    audit_met(&home, &first);
+    let done = ready(&home, &["--parent", &plan]);
+
+    assert_eq!(ids(&done["candidates"]), [second]);
+    assert_eq!(done["candidates"][0]["stackParent"], json!(null));
+    assert_eq!(done["skipped"], json!([]), "{done}");
+}
+
+#[test]
+fn ready_offers_the_slices_of_a_plan_blocked_by_a_done_plan() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let (first_plan, first) = home.plan_and_slice();
+    let plan_document = home.document(
+        "plan.md",
+        &format!("---\nkind: plan\ntitle: Add claims\nblockedBy: [{first_plan}]\n---\n"),
+    );
+    let second_plan = home.new_ticket(&["--file", plan_document.to_str().expect("a UTF-8 path")]);
+    let second = home.slice_under(&second_plan, "Add the lease", &[]);
+    link_open_pr(&home, &gh, &first, 7);
+    merge_and_refresh(&home, &gh, 7, HEAD);
+
+    let before = ready(&home, &["--parent", &second_plan]);
+
+    assert_eq!(
+        before["skipped"][0]["holds"],
+        json!([{ "reason": "blockedBy", "blocker": first_plan, "via": second_plan, "state": "open" }])
+    );
+
+    audit_met(&home, &first);
+    let after = ready(&home, &["--parent", &second_plan]);
+
+    assert_eq!(ids(&after["candidates"]), [second]);
 }

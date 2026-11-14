@@ -31,7 +31,6 @@ has one reason:
   cancel has not cleared.
 - `draftPlan`: a draft plan whose latest `waiting` fact is true. `tikk wait <id> --text <text>` sets
   it, and `tikk wait <id> --done` clears it.
-- `flagged`: a merged slice with open instructions or tasks under it.
 - `mergedUnverified`: a merged slice with no current audit that meets every criterion.
 - `blockedFinding`: a review finding whose latest status is blocked.
 

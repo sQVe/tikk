@@ -26,15 +26,23 @@ pub(crate) fn run_refresh(
     id: Option<&TicketId>,
     effects: &PrEffects,
 ) -> Result<Output, StoreError> {
-    let refreshed = tikk_core::refresh_prs(store, id, effects)?;
-    let rows: Vec<Value> = refreshed
+    let outcome = tikk_core::refresh_prs(store, id, effects)?;
+    let rows: Vec<Value> = outcome
+        .refreshed
         .iter()
         .map(|refreshed| json!({ "id": refreshed.slice.to_string(), "pr": pr_json(&refreshed.pr) }))
         .collect();
+    let mut text = refreshed_text(&outcome.refreshed);
+
+    for slice in &outcome.audit_behind {
+        text.push_str(&format!(
+            "\n{slice}  auditBehind: the PR head differs from the last audit"
+        ));
+    }
 
     Ok(Output {
-        json: json!({ "refreshed": rows }),
-        text: refreshed_text(&refreshed),
+        json: json!({ "refreshed": rows, "auditBehind": outcome.audit_behind }),
+        text,
     })
 }
 

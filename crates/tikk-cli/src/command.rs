@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 use tikk_core::{
-    Kind, MachineName, ProjectName, PullRequest, RankPlace, Status, StoreError, TicketId,
+    Kind, MachineName, ProjectName, PullRequest, RankPlace, Repository, Status, StoreError,
+    TicketId,
 };
 
 #[derive(Debug, Parser)]
@@ -118,6 +119,9 @@ pub(crate) enum Command {
     },
     /// List the slices that can start, in rank order, and what holds each of the others.
     Ready(ReadyArguments),
+    /// Record a verdict for criteria of a slice, seen at a PR head. By the claim holder, it renews
+    /// the lease. It runs no `gh`.
+    Audit(AuditArguments),
     /// Record the PR of a slice, and read the state of linked PRs. Only these commands run `gh`.
     Pr {
         #[command(subcommand)]
@@ -233,6 +237,25 @@ pub(crate) struct LsArguments {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct AuditArguments {
+    #[arg(value_name = "ID", value_parser = TicketId::parse)]
+    pub(crate) id: TicketId,
+    /// The `hash` of `tikk show --json`. The audit is refused when the file has another.
+    #[arg(long)]
+    pub(crate) hash: String,
+    /// The PR head commit the audit saw.
+    #[arg(long, value_name = "SHA", value_parser = parse_head)]
+    pub(crate) head: String,
+    /// A JSON list of `{"criterion", "verdict", "evidence"}`, with the verdict `met`, `not-met`,
+    /// `not-run`, or `deferred`.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: PathBuf,
+    /// The repository as `owner/name`. The default is the GitHub repository of `origin`.
+    #[arg(long, value_name = "OWNER/NAME", value_parser = parse_repository)]
+    pub(crate) repository: Option<Repository>,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct ReadyArguments {
     /// The plan whose slices to list.
     #[arg(long, value_name = "ID", value_parser = TicketId::parse)]
@@ -245,6 +268,19 @@ pub(crate) struct ReadyArguments {
 
 fn parse_machine(name: &str) -> Result<MachineName, StoreError> {
     MachineName::parse(name)
+}
+
+fn parse_head(head: &str) -> Result<String, String> {
+    if head.trim().is_empty() {
+        return Err("the head must name a commit".to_owned());
+    }
+
+    Ok(head.to_owned())
+}
+
+fn parse_repository(repository: &str) -> Result<Repository, String> {
+    Repository::parse(repository)
+        .ok_or_else(|| format!("`{repository}` is not a repository; use <owner>/<name>"))
 }
 
 fn parse_pr_url(url: &str) -> Result<PullRequest, String> {
