@@ -17,7 +17,9 @@ pub(crate) struct FactLine {
     pub(crate) event: FactEvent,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// Untagged, because the line writes `kind` before `ticket` and `at`, ahead of the event's fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(untagged)]
 pub(crate) enum FactEvent {
     Claim(Claim),
     Release { agent: Option<AgentName> },
@@ -25,6 +27,19 @@ pub(crate) enum FactEvent {
     Audit(Audit),
     Question { item: QuestionItem, text: String },
     Answer { item: QuestionItem, text: String },
+}
+
+impl FactEvent {
+    fn kind(&self) -> &'static str {
+        match self {
+            Self::Claim(_) => "claim",
+            Self::Release { .. } => "release",
+            Self::Pr(_) => "pr",
+            Self::Audit(_) => "audit",
+            Self::Question { .. } => "question",
+            Self::Answer { .. } => "answer",
+        }
+    }
 }
 
 // Fields beyond these are ignored, so a later version may add some.
@@ -62,73 +77,13 @@ struct RawVerdict {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ClaimText<'a> {
+struct FactText<'a> {
     v: u32,
     kind: &'static str,
-    ticket: String,
-    at: String,
-    agent: &'a str,
-    session: Option<&'a str>,
-    session_log: Option<&'a str>,
-    lease_end: String,
-}
-
-#[derive(Serialize)]
-struct ReleaseText<'a> {
-    v: u32,
-    kind: &'static str,
-    ticket: String,
-    at: String,
-    agent: Option<&'a str>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PrText<'a> {
-    v: u32,
-    kind: &'static str,
-    ticket: String,
-    at: String,
-    repository: &'a str,
-    number: u64,
-    state: &'static str,
-    base: &'a str,
-    head: &'a str,
-    merge_commit: Option<&'a str>,
-    in_trunk: bool,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AuditText<'a> {
-    v: u32,
-    kind: &'static str,
-    ticket: String,
-    at: String,
-    repository: &'a str,
-    head: &'a str,
-    ticket_hash: &'a str,
-    verdicts: Vec<VerdictText<'a>>,
-}
-
-#[derive(Serialize)]
-struct ItemText<'a> {
-    v: u32,
-    kind: &'static str,
-    ticket: String,
-    at: String,
-    item: &'a str,
-    text: &'a str,
-}
-
-#[derive(Serialize)]
-struct VerdictText<'a> {
-    criterion: &'a str,
-    check: &'a str,
-    expected: &'a str,
-    verdict: &'static str,
-    evidence: &'a str,
+    ticket: &'a TicketId,
+    at: Timestamp,
+    #[serde(flatten)]
+    event: &'a FactEvent,
 }
 
 pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
@@ -172,78 +127,16 @@ pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
 }
 
 pub(crate) fn write_fact_line(fact: &FactLine) -> String {
-    let ticket = fact.ticket.to_string();
-    let at = fact.at.to_string();
-    let text = match &fact.event {
-        FactEvent::Claim(claim) => serde_json::to_string(&ClaimText {
-            v: VERSION,
-            kind: "claim",
-            ticket,
-            at,
-            agent: claim.agent.as_str(),
-            session: claim.session.as_deref(),
-            session_log: claim.session_log.as_deref(),
-            lease_end: claim.lease_end.to_string(),
-        }),
-        FactEvent::Release { agent } => serde_json::to_string(&ReleaseText {
-            v: VERSION,
-            kind: "release",
-            ticket,
-            at,
-            agent: agent.as_ref().map(AgentName::as_str),
-        }),
-        FactEvent::Pr(observation) => serde_json::to_string(&PrText {
-            v: VERSION,
-            kind: "pr",
-            ticket,
-            at,
-            repository: observation.pull_request.repository(),
-            number: observation.pull_request.number(),
-            state: observation.state.as_str(),
-            base: &observation.base,
-            head: &observation.head,
-            merge_commit: observation.merge_commit.as_deref(),
-            in_trunk: observation.in_trunk,
-        }),
-        FactEvent::Audit(audit) => serde_json::to_string(&AuditText {
-            v: VERSION,
-            kind: "audit",
-            ticket,
-            at,
-            repository: audit.repository.as_str(),
-            head: &audit.head,
-            ticket_hash: &audit.ticket_hash,
-            verdicts: audit.verdicts.iter().map(verdict_text).collect(),
-        }),
-        FactEvent::Question { item, text } => serde_json::to_string(&ItemText {
-            v: VERSION,
-            kind: "question",
-            ticket,
-            at,
-            item: item.as_str(),
-            text,
-        }),
-        FactEvent::Answer { item, text } => serde_json::to_string(&ItemText {
-            v: VERSION,
-            kind: "answer",
-            ticket,
-            at,
-            item: item.as_str(),
-            text,
-        }),
-    };
+    let text = serde_json::to_string(&FactText {
+        v: VERSION,
+        kind: fact.event.kind(),
+        ticket: &fact.ticket,
+        at: fact.at,
+        event: &fact.event,
+    })
+    .expect("a fact serializes to JSON");
 
-    format!("{}\n", text.expect("a fact serializes to JSON"))
-}
-
-fn verdict_text(verdict: &AuditVerdict) -> VerdictText<'_> {
-    VerdictText {
-        criterion: &verdict.criterion,
-        check: &verdict.check,
-        expected: &verdict.expected,
-        verdict: verdict.verdict.as_str(),
-        evidence: &verdict.evidence,
-    }
+    format!("{text}\n")
 }
 
 fn parse_claim(raw: RawFact) -> Result<Claim, FactError> {

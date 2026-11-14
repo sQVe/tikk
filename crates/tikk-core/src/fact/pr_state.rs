@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::{Serialize, Serializer};
+
 use crate::fact::{FactEvent, FactLine, Repository, Timestamp};
 use crate::ticket::TicketId;
 
 const URL_START: &str = "https://github.com/";
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize)]
 pub struct PullRequest {
     repository: Repository,
     number: u64,
@@ -19,8 +21,10 @@ pub enum PrState {
     Merged,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrObservation {
+    #[serde(flatten)]
     pub pull_request: PullRequest,
     pub state: PrState,
     pub base: String,
@@ -72,6 +76,12 @@ impl PullRequest {
 impl fmt::Display for PullRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}#{}", self.repository, self.number)
+    }
+}
+
+impl Serialize for PrState {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
     }
 }
 

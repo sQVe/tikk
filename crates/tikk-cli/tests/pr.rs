@@ -2,11 +2,10 @@ mod support;
 
 use serde_json::json;
 
+use support::audit::{HEAD, REPOSITORY, link_open_pr};
 use support::{FakeGh, Home, parse_json, pr_view_call};
 
-const REPOSITORY: &str = "owner/app";
 const URL: &str = "https://github.com/owner/app/pull/7";
-const HEAD: &str = "1111111111111111111111111111111111111111";
 
 #[test]
 fn pr_link_records_an_open_pr_that_show_returns_with_its_check_time() {
@@ -33,11 +32,8 @@ const MERGE: &str = "2222222222222222222222222222222222222222";
 
 fn linked_slice(home: &Home, gh: &FakeGh, number: u64) -> String {
     let (_plan, slice) = home.plan_and_slice();
-    let url = format!("https://github.com/{REPOSITORY}/pull/{number}");
-    gh.open_pr(REPOSITORY, number, HEAD);
-    let link = home.tikk_with_gh(gh, None, &["pr", "link", &slice, &url, "--json"]);
 
-    assert_eq!(link.exit_code, 0, "link: {}", link.stderr);
+    link_open_pr(home, gh, &slice, number);
 
     slice
 }

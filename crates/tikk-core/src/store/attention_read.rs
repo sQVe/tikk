@@ -13,7 +13,7 @@ use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::sync_result::read_sync_problems;
 use crate::store::system;
 use crate::store::ticket_files::{TicketScan, read_tickets};
-use crate::store::ticket_queries::{TicketIndex, TicketLookup};
+use crate::store::ticket_index::{TicketIndex, TicketLookup};
 use crate::store::{Store, StoreError};
 
 #[derive(Clone, Copy)]
@@ -121,32 +121,16 @@ fn scan_problems(scan: &TicketScan, facts: &FactScan) -> Vec<AttentionProblem> {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+
     use std::path::Path;
 
     use super::{AttentionEffects, read_attention};
     use crate::fact::{AttentionProblem, AttentionReason};
-    use crate::store::{Store, StoreError};
+    use crate::store::StoreError;
+    use crate::store::test_support::store_with;
 
     fn no_origin(_: &Path) -> Result<Option<String>, StoreError> {
         Ok(None)
-    }
-
-    fn store_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Store) {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        fs::create_dir(directory.path().join(".git")).expect("create the Git folder");
-        let folder = directory.path().join("tickets/personal");
-        fs::create_dir_all(&folder).expect("create the project folder");
-
-        for (name, text) in files {
-            fs::write(folder.join(name), text).expect("write a ticket");
-        }
-
-        let store = Store {
-            root: directory.path().to_path_buf(),
-        };
-
-        (directory, store)
     }
 
     fn effects() -> AttentionEffects {

@@ -8,7 +8,7 @@ use crate::store::pr_github::{PrFailure, read_pull_request};
 use crate::store::pr_link::{PrEffects, append_pr_fact, check_linkable};
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::read_tickets;
-use crate::store::ticket_queries::{TicketIndex, TicketLookup, shared};
+use crate::store::ticket_index::{TicketIndex, TicketLookup, shared};
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, TicketId};
 

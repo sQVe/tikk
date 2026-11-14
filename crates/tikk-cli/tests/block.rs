@@ -12,21 +12,14 @@ fn plan_with_two_slices(home: &Home) -> (String, String, String) {
     (plan, first, second)
 }
 
-fn file_text(home: &Home, id: &str) -> String {
-    let shown = home.show_json(id);
-    let path = shown["path"].as_str().expect("show prints the path");
-
-    std::fs::read_to_string(path).expect("read the ticket file")
-}
-
 #[test]
 fn block_that_closes_a_cycle_exits_with_1_names_the_cycle_and_writes_nothing() {
     let home = Home::initialized();
     let (_plan, first, second) = plan_with_two_slices(&home);
     let block = home.tikk(&["block", &first, &second]);
     assert_eq!(block.exit_code, 0, "block: {}", block.stderr);
-    let first_before = file_text(&home, &first);
-    let second_before = file_text(&home, &second);
+    let first_before = home.ticket_text(&first);
+    let second_before = home.ticket_text(&second);
 
     let run = home.tikk(&["block", &second, &first, "--json"]);
 
@@ -43,8 +36,8 @@ fn block_that_closes_a_cycle_exits_with_1_names_the_cycle_and_writes_nothing() {
         message.trim_end_matches('.').ends_with(second.as_str()),
         "the cycle ends with B: {message}"
     );
-    assert_eq!(file_text(&home, &first), first_before);
-    assert_eq!(file_text(&home, &second), second_before);
+    assert_eq!(home.ticket_text(&first), first_before);
+    assert_eq!(home.ticket_text(&second), second_before);
 }
 
 #[test]
@@ -68,7 +61,7 @@ fn block_then_unblock_adds_and_removes_the_blocker() {
 fn block_of_a_plan_by_its_own_slice_names_the_parent_link() {
     let home = Home::initialized();
     let (plan, first, _second) = plan_with_two_slices(&home);
-    let before = file_text(&home, &plan);
+    let before = home.ticket_text(&plan);
 
     let run = home.tikk(&["block", &plan, &first, "--json"]);
 
@@ -79,7 +72,7 @@ fn block_of_a_plan_by_its_own_slice_names_the_parent_link() {
     assert!(message.contains(&plan), "{message}");
     assert!(message.contains(&first), "{message}");
     assert!(message.contains("parent"), "{message}");
-    assert_eq!(file_text(&home, &plan), before);
+    assert_eq!(home.ticket_text(&plan), before);
 }
 
 #[test]
@@ -119,7 +112,7 @@ fn block_twice_and_unblock_of_a_missing_edge_change_nothing() {
     let blocker = home.new_ticket(&["task", "Pay the bill"]);
     let block = home.tikk(&["block", &task, &blocker]);
     assert_eq!(block.exit_code, 0, "block: {}", block.stderr);
-    let before = file_text(&home, &task);
+    let before = home.ticket_text(&task);
 
     let again = home.tikk(&["block", &task, &blocker]);
     let unblock_other = home.tikk(&["unblock", &task, &task]);
@@ -130,7 +123,7 @@ fn block_twice_and_unblock_of_a_missing_edge_change_nothing() {
         "unblock: {}",
         unblock_other.stderr
     );
-    assert_eq!(file_text(&home, &task), before);
+    assert_eq!(home.ticket_text(&task), before);
 }
 
 #[test]
@@ -152,11 +145,11 @@ fn block_without_json_prints_the_ticket_row() {
 fn unblock_with_no_edge_and_a_missing_blocker_exits_with_1_and_not_found() {
     let home = Home::initialized();
     let task = home.new_ticket(&["task", "Renew the domain"]);
-    let before = file_text(&home, &task);
+    let before = home.ticket_text(&task);
 
     let run = home.tikk(&["unblock", &task, "personal-zzzz", "--json"]);
 
     assert_eq!(run.exit_code, 1, "stdout: {}", run.stdout);
     assert_eq!(parse_json(&run.stderr)["error"]["code"], json!("notFound"));
-    assert_eq!(file_text(&home, &task), before);
+    assert_eq!(home.ticket_text(&task), before);
 }

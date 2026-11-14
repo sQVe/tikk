@@ -2,7 +2,7 @@ use crate::store::claim_lease::{instruction_slice, write_for_slice};
 use crate::store::identity::Identity;
 use crate::store::store_lock::LockAccess;
 use crate::store::ticket_files::{StoredTicket, read_tickets};
-use crate::store::ticket_queries::find_ticket;
+use crate::store::ticket_index::find_ticket;
 use crate::store::ticket_write::{WriteEffects, change_scanned};
 use crate::store::{Store, StoreError};
 use crate::ticket::{Status, TicketFields, TicketId};
@@ -62,13 +62,12 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use tempfile::TempDir;
-
     use super::{cancel_ticket, mark_done};
+    use crate::store::StoreError;
     use crate::store::identity::Identity;
     use crate::store::store_lock::{LockAccess, StoreLock};
+    use crate::store::test_support::store_with;
     use crate::store::ticket_write::WriteEffects;
-    use crate::store::{Store, StoreError};
     use crate::ticket::{Kind, Status, TicketId};
 
     const PLAN: &str = "---\nkind: plan\ntitle: Move to tikk\n---\nThe design.\n";
@@ -84,23 +83,6 @@ mod tests {
         Err(StoreError::Locked {
             lock: PathBuf::from("tikk.lock"),
         })
-    }
-
-    fn store_with(files: &[(&str, &str)]) -> (TempDir, Store) {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        let folder = directory.path().join("tickets/personal");
-        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
-        fs::create_dir_all(&folder).expect("create the project folder");
-
-        for (name, text) in files {
-            fs::write(folder.join(name), text).expect("write a ticket");
-        }
-
-        let store = Store {
-            root: directory.path().to_path_buf(),
-        };
-
-        (directory, store)
     }
 
     fn id(text: &str) -> TicketId {

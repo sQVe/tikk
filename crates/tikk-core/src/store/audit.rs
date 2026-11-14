@@ -12,7 +12,7 @@ use crate::store::identity::Identity;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_claim::{check_strictly, refuse_other_kinds};
 use crate::store::ticket_files::{io_error, read_tickets};
-use crate::store::ticket_queries::find_ticket;
+use crate::store::ticket_index::find_ticket;
 use crate::store::{Store, StoreError};
 use crate::ticket::{Criterion, TicketId};
 

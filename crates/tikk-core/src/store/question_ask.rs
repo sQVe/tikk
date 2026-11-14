@@ -8,7 +8,7 @@ use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_files::read_tickets;
 use crate::store::ticket_id_draw::{DRAW_ATTEMPTS, RANDOM_BYTES};
-use crate::store::ticket_queries::find_ticket;
+use crate::store::ticket_index::find_ticket;
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, TicketId};
 

@@ -7,8 +7,8 @@ use crate::store::fact_files::{append_fact, read_facts};
 use crate::store::identity::Identity;
 use crate::store::sync::SyncEffects;
 use crate::store::ticket_files::{StoredTicket, TicketScan};
+use crate::store::ticket_index::find_ticket;
 use crate::store::ticket_link_checks::check_written_links;
-use crate::store::ticket_queries::find_ticket;
 use crate::store::{Store, StoreError};
 use crate::ticket::{Kind, Status, TicketError, TicketId};
 

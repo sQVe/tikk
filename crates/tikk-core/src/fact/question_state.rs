@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use serde::{Serialize, Serializer};
+
 use crate::fact::{FactEvent, FactLine, Timestamp};
 use crate::ticket::{TicketId, draw_code, is_code};
 
@@ -21,6 +23,12 @@ pub struct Question {
 pub struct Answer {
     pub text: String,
     pub answered_at: Timestamp,
+}
+
+impl Serialize for QuestionItem {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.code)
+    }
 }
 
 impl QuestionItem {

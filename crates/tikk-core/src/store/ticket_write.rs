@@ -5,8 +5,8 @@ use crate::store::claim_lease::LeaseEffects;
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::ticket_file_write::replace_ticket_file;
 use crate::store::ticket_files::{StoredTicket, TicketScan, io_error, read_tickets, sha256_hex};
+use crate::store::ticket_index::find_ticket;
 use crate::store::ticket_link_checks::check_written_links;
-use crate::store::ticket_queries::find_ticket;
 use crate::store::{Store, StoreError};
 use crate::ticket::{TicketDocument, TicketError, TicketFields, TicketId, write_document};
 
@@ -145,6 +145,7 @@ mod tests {
 
     use super::{TicketWrite, WriteEffects, write_ticket};
     use crate::store::store_lock::{LockAccess, StoreLock};
+    use crate::store::test_support::store_with;
     use crate::store::ticket_files::sha256_hex;
     use crate::store::{Store, StoreError, WaitLink, WaitStep};
     use crate::ticket::{TicketError, TicketId};
@@ -244,23 +245,6 @@ mod tests {
         assert_eq!(written.hash, sha256_hex(expected.as_bytes()));
         assert_eq!(written.path, path);
         assert_eq!(fs::read_to_string(&path).expect("read the task"), expected);
-    }
-
-    fn store_with(files: &[(&str, &str)]) -> (TempDir, Store) {
-        let directory = tempfile::tempdir().expect("create a temporary directory");
-        let folder = directory.path().join("tickets/personal");
-        fs::create_dir_all(directory.path().join(".git")).expect("create the Git folder");
-        fs::create_dir_all(&folder).expect("create the project folder");
-
-        for (name, text) in files {
-            fs::write(folder.join(name), text).expect("write a ticket");
-        }
-
-        let store = Store {
-            root: directory.path().to_path_buf(),
-        };
-
-        (directory, store)
     }
 
     fn rewrite(directory: &TempDir, id: &str, old: &str, new: &str) -> TicketWrite {

@@ -6,7 +6,7 @@ use crate::store::fact_files::{self, append_fact, read_facts};
 use crate::store::identity::Identity;
 use crate::store::system;
 use crate::store::ticket_files::TicketScan;
-use crate::store::ticket_queries::ticket_path;
+use crate::store::ticket_index::ticket_path;
 use crate::ticket::{Kind, TicketFields, TicketId};
 
 #[derive(Clone, Copy)]

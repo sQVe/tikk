@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use tikk_core::{
     Kind, MachineName, ProjectName, PullRequest, QuestionItem, RankPlace, Repository, Status,
     StoreError, TicketId,
@@ -150,6 +150,25 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: PrCommand,
     },
+    /// Print the completion script of a shell. It completes commands, flags, and ticket IDs.
+    #[command(after_help = LOAD_COMPLETIONS)]
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+}
+
+const LOAD_COMPLETIONS: &str = "\
+Load the script when the shell starts, so it matches the installed tikk:
+  bash  Add `source <(tikk completions bash)` to ~/.bashrc.
+  zsh   Add `source <(tikk completions zsh)` to ~/.zshrc, after `compinit`.
+  fish  Add `tikk completions fish | source` to ~/.config/fish/config.fish.";
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub(crate) enum Shell {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[derive(Debug, Subcommand)]

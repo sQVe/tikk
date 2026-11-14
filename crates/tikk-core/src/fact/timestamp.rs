@@ -2,6 +2,7 @@ use std::fmt;
 use std::sync::LazyLock;
 use std::time::{Duration, SystemTime};
 
+use serde::{Serialize, Serializer};
 use time::format_description::BorrowedFormatItem;
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
@@ -51,6 +52,12 @@ impl Timestamp {
             utc.replace_millisecond(milliseconds)
                 .expect("a millisecond of a valid time is valid"),
         )
+    }
+}
+
+impl Serialize for Timestamp {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
     }
 }
 
