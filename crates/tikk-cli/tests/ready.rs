@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use serde_json::{Value, json};
 
-use support::{Home, parse_json, run_git};
+use support::{FakeGh, Home, parse_json, run_git};
 
 fn ready(home: &Home, arguments: &[&str]) -> Value {
     let mut all = vec!["ready", "--json"];
@@ -251,6 +251,82 @@ fn ready_without_json_prints_rows_and_the_holds_of_skipped_slices() {
 }
 
 const ALPHABET: &str = "346789abcdefghijkmnpqrtwxyz";
+
+const HEAD: &str = "1111111111111111111111111111111111111111";
+
+fn link_open_pr(home: &Home, gh: &FakeGh, slice: &str, number: u64) {
+    let url = format!("https://github.com/owner/app/pull/{number}");
+    gh.open_pr("owner/app", number, HEAD);
+
+    let link = home.tikk_with_gh(gh, None, &["pr", "link", slice, &url, "--json"]);
+
+    assert_eq!(link.exit_code, 0, "link: {}", link.stderr);
+}
+
+#[test]
+fn ready_offers_a_slice_blocked_by_a_slice_with_an_open_pr_and_names_that_pr() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let first = home.slice_under(&plan, "Add the store", &[]);
+    let second = home.slice_under(&plan, "Add ticket files", &[&first]);
+    link_open_pr(&home, &gh, &first, 7);
+    let checked_at = home.show_json(&first)["pr"]["prCheckedAt"].clone();
+
+    let queue = ready(&home, &["--parent", &plan]);
+
+    let candidate = |id: &str| {
+        queue["candidates"]
+            .as_array()
+            .expect("a list of candidates")
+            .iter()
+            .find(|row| row["id"] == json!(id))
+            .cloned()
+            .unwrap_or_else(|| panic!("{id} is a candidate: {queue}"))
+    };
+    assert_eq!(candidate(&first)["stackParent"], json!(null));
+    assert_eq!(
+        candidate(&second)["stackParent"],
+        json!({
+            "slice": first,
+            "repository": "owner/app",
+            "number": 7,
+            "url": "https://github.com/owner/app/pull/7",
+            "head": HEAD,
+            "prCheckedAt": checked_at,
+        })
+    );
+    let text = home.tikk(&["ready", "--parent", &plan]);
+    assert!(
+        text.stdout.contains(&format!(
+            "  stacks on https://github.com/owner/app/pull/7 of {first} at {HEAD}, checked "
+        )),
+        "{}",
+        text.stdout
+    );
+}
+
+#[test]
+fn ready_skips_a_slice_blocked_by_a_task_that_waits_on_a_slice_with_an_open_pr() {
+    let home = Home::initialized();
+    let gh = FakeGh::new();
+    let plan = home.new_ticket(&["plan", "Move to tikk"]);
+    let first = home.slice_under(&plan, "Add the store", &[]);
+    let task = home.new_ticket(&["task", "Decide the lease length", "--parent", &plan]);
+    let block = home.tikk(&["block", &task, &first]);
+    assert_eq!(block.exit_code, 0, "block: {}", block.stderr);
+    let second = home.slice_under(&plan, "Add ticket files", &[&task]);
+    link_open_pr(&home, &gh, &first, 7);
+
+    let queue = ready(&home, &["--parent", &plan]);
+
+    assert_eq!(ids(&queue["candidates"]), [first]);
+    assert_eq!(ids(&queue["skipped"]), [second]);
+    assert_eq!(
+        queue["skipped"][0]["holds"],
+        json!([{ "reason": "blockedBy", "blocker": task, "via": null, "state": "open" }])
+    );
+}
 
 fn bench_id(index: usize) -> String {
     let alphabet: Vec<char> = ALPHABET.chars().collect();

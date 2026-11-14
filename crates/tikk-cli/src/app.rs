@@ -5,15 +5,15 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
 use tikk_core::{
-    ClaimEffects, EditEffects, Identity, QueryEffects, ReadyEffects, ReadyScope, RemoteInitEffects,
-    StoreEffects, StoreError, SyncEffects, TicketEffects, WriteEffects,
+    ClaimEffects, EditEffects, Identity, PrEffects, QueryEffects, ReadyEffects, ReadyScope,
+    RemoteInitEffects, StoreEffects, StoreError, SyncEffects, TicketEffects, WriteEffects,
 };
 
-use crate::command::{Cli, Command};
+use crate::command::{Cli, Command, PrCommand};
 use crate::output::{Exit, Failure, Output, Response};
 use crate::ready::ready_output;
 use crate::ticket_row::written_output;
-use crate::{claim, edit, init, ls, new, show, store_error, sync};
+use crate::{claim, edit, init, ls, new, pr, show, store_error, sync};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -32,6 +32,7 @@ pub(crate) struct Environment {
     pub(crate) edit_effects: EditEffects,
     pub(crate) claim_effects: ClaimEffects,
     pub(crate) ready_effects: ReadyEffects,
+    pub(crate) pr_effects: PrEffects,
     pub(crate) remote_init_effects: RemoteInitEffects,
     pub(crate) sync_effects: SyncEffects,
 }
@@ -54,6 +55,7 @@ impl Environment {
             edit_effects: EditEffects::system(),
             claim_effects: ClaimEffects::system(),
             ready_effects: ReadyEffects::system(),
+            pr_effects: PrEffects::system(),
             remote_init_effects: RemoteInitEffects::system(),
             sync_effects: SyncEffects::system(),
         }
@@ -204,6 +206,22 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &environment.ready_effects,
         )
         .map(|queue| ready_output(&queue)),
+        Command::Pr {
+            command: PrCommand::Link { id, url },
+        } => pr::run_link(
+            &tikk_core::open(&store)?,
+            &id,
+            &url,
+            &caller?,
+            &environment.pr_effects,
+        ),
+        Command::Pr {
+            command: PrCommand::Refresh { id },
+        } => pr::run_refresh(
+            &tikk_core::open(&store)?,
+            id.as_ref(),
+            &environment.pr_effects,
+        ),
     }
 }
 
@@ -247,6 +265,7 @@ fn usage_response(json: bool, error: &clap::Error) -> Response {
         message,
         field: None,
         files: None,
+        pull_requests: None,
         exit: Exit::WrongUsage,
     };
 

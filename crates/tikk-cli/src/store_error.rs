@@ -1,4 +1,5 @@
-use tikk_core::{StoreError, TicketError};
+use serde_json::{Value, json};
+use tikk_core::{PrFailure, StoreError, TicketError};
 
 use crate::output::{Exit, Failure};
 
@@ -44,6 +45,8 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         StoreError::RemoteWithoutMain { .. } => ("remoteWithoutMain", Exit::Refused),
         StoreError::RemoteNotAStore { .. } => ("remoteNotAStore", Exit::Refused),
         StoreError::MachineInUse { .. } => ("machineInUse", Exit::Refused),
+        StoreError::Gh { .. } => ("ghError", Exit::Refused),
+        StoreError::NotLinked { .. } => ("notLinked", Exit::Refused),
         StoreError::ResultNotSaved { error: inner, .. } => {
             return Failure {
                 message: error.to_string(),
@@ -66,14 +69,29 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
         ),
         _ => None,
     };
+    let pull_requests = match error {
+        StoreError::Gh { failures } => Some(failures.iter().map(pr_failure_json).collect()),
+        _ => None,
+    };
 
     Failure {
         code,
         message: error.to_string(),
         field,
         files,
+        pull_requests,
         exit,
     }
+}
+
+fn pr_failure_json(failure: &PrFailure) -> Value {
+    json!({
+        "id": failure.slice.to_string(),
+        "repository": failure.pull_request.repository(),
+        "number": failure.pull_request.number(),
+        "url": failure.pull_request.url(),
+        "message": failure.message,
+    })
 }
 
 fn ticket_code(error: &TicketError) -> (&'static str, Exit) {
@@ -421,6 +439,20 @@ mod tests {
                     machine: "laptop".to_owned(),
                 },
                 "machineInUse",
+                Exit::Refused,
+            ),
+            (
+                StoreError::Gh {
+                    failures: Vec::new(),
+                },
+                "ghError",
+                Exit::Refused,
+            ),
+            (
+                StoreError::NotLinked {
+                    id: "personal-abcd".to_owned(),
+                },
+                "notLinked",
                 Exit::Refused,
             ),
         ];

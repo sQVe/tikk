@@ -6,6 +6,7 @@ mod init;
 mod ls;
 mod new;
 mod output;
+mod pr;
 mod ready;
 mod show;
 mod store_error;

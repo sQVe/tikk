@@ -1,16 +1,9 @@
-use std::fs::File;
-use std::io::{Read as _, Seek as _, SeekFrom};
 use std::path::Path;
-use std::process::{Child, Command, ExitStatus, Output, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::process::{Command, Output, Stdio};
+use std::time::Duration;
 
 use crate::store::StoreError;
-
-/// Writers wait at most five seconds for the store lock, so the network steps run outside it, and
-/// each gives up after this long.
-const NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
-const NETWORK_POLL: Duration = Duration::from_millis(20);
+use crate::store::process_run::{NETWORK_TIMEOUT, RunFailure, run_within};
 
 const STORE_SETTINGS: &[&str] = &[
     "-c",
@@ -195,92 +188,26 @@ fn git_command(policy: GitPolicy, program: &str, directory: &Path, arguments: &[
     command
 }
 
-/// Output goes to files, not pipes, so a full pipe never blocks the wait. Only the Git child is
-/// stopped at the timeout; a program it started may outlive it.
 fn run_git_within(
     program: &str,
     directory: &Path,
     arguments: &[&str],
     timeout: Duration,
 ) -> Result<Vec<u8>, StoreError> {
-    let failed = |message: String| git_error(arguments, message);
-    let capture = || {
-        tempfile::tempfile().map_err(|error| failed(format!("could not capture output: {error}")))
-    };
-    let mut stdout = capture()?;
-    let mut stderr = capture()?;
     let mut command = git_command(GitPolicy::NetworkStep, program, directory, arguments);
-
-    command
-        .stdout(clone_capture(&stdout).map_err(failed)?)
-        .stderr(clone_capture(&stderr).map_err(failed)?);
-
-    let child = command.spawn().map_err(|error| failed(error.to_string()))?;
-    let status = wait_within(child, timeout).map_err(|failure| match failure {
-        WaitFailure::TimedOut => StoreError::GitTimeout {
+    let finished = run_within(&mut command, timeout).map_err(|failure| match failure {
+        RunFailure::TimedOut => StoreError::GitTimeout {
             arguments: arguments.join(" "),
             timeout,
         },
-        WaitFailure::Failed(message) => failed(message),
+        RunFailure::Failed(message) => git_error(arguments, message),
     })?;
 
-    if !status.success() {
-        let message = read_capture(&mut stderr).map_err(failed)?;
-
-        return Err(failed(stderr_message(&message)));
+    if !finished.status.success() {
+        return Err(git_error(arguments, stderr_message(&finished.stderr)));
     }
 
-    read_capture(&mut stdout).map_err(failed)
-}
-
-enum WaitFailure {
-    TimedOut,
-    Failed(String),
-}
-
-fn wait_within(mut child: Child, timeout: Duration) -> Result<ExitStatus, WaitFailure> {
-    let deadline = Instant::now() + timeout;
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return Ok(status),
-            Ok(None) if Instant::now() < deadline => thread::sleep(NETWORK_POLL),
-            Ok(None) => return Err(stop(&mut child, WaitFailure::TimedOut)),
-            Err(error) => {
-                return Err(stop(
-                    &mut child,
-                    WaitFailure::Failed(format!("could not wait for Git: {error}")),
-                ));
-            }
-        }
-    }
-}
-
-/// Kills and reaps the child. A failure to stop it replaces the reason, since Git may still run.
-fn stop(child: &mut Child, reason: WaitFailure) -> WaitFailure {
-    if let Err(error) = child.kill() {
-        return WaitFailure::Failed(format!("could not stop Git: {error}"));
-    }
-
-    match child.wait() {
-        Ok(_) => reason,
-        Err(error) => WaitFailure::Failed(format!("could not reap Git: {error}")),
-    }
-}
-
-fn clone_capture(file: &File) -> Result<File, String> {
-    file.try_clone()
-        .map_err(|error| format!("could not capture output: {error}"))
-}
-
-fn read_capture(file: &mut File) -> Result<Vec<u8>, String> {
-    let mut bytes = Vec::new();
-
-    file.seek(SeekFrom::Start(0))
-        .and_then(|_| file.read_to_end(&mut bytes))
-        .map_err(|error| format!("could not read the output: {error}"))?;
-
-    Ok(bytes)
+    Ok(finished.stdout)
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@ mod support;
 
 use serde_json::json;
 
-use support::{Home, parse_json};
+use support::{FakeGh, Home, parse_json};
 
 #[test]
 fn manager_runs_a_slice() {
@@ -124,5 +124,69 @@ fn manager_runs_a_slice() {
     assert!(
         done_end.as_str() > created_end.as_str(),
         "step 4, done moves leaseEnd from {created_end} to {done_end}"
+    );
+
+    let gh = FakeGh::new();
+    let head = "1111111111111111111111111111111111111111";
+    gh.open_pr("owner/app", 12, head);
+
+    let link = home.tikk_with_gh(
+        &gh,
+        Some("manager"),
+        &[
+            "pr",
+            "link",
+            &first,
+            "https://github.com/owner/app/pull/12",
+            "--json",
+        ],
+    );
+
+    assert_eq!(link.exit_code, 0, "step 5, pr link: {}", link.stderr);
+    let slice = home.show_json(&first);
+    let pr = &slice["pr"];
+    assert_eq!(pr["number"], json!(12), "step 5, the PR number");
+    assert_eq!(pr["state"], json!("open"), "step 5, the PR state");
+    assert!(
+        pr["prCheckedAt"].is_string(),
+        "step 5, prCheckedAt: {slice}"
+    );
+    let ready = home.tikk(&["ready", "--parent", &plan, "--json"]);
+    assert_eq!(ready.exit_code, 0, "step 5, ready: {}", ready.stderr);
+    let queue = parse_json(&ready.stdout);
+    let offered = queue["candidates"]
+        .as_array()
+        .expect("ready lists candidates")
+        .iter()
+        .find(|row| row["id"] == json!(second))
+        .unwrap_or_else(|| panic!("step 5, ready offers the second slice: {queue}"));
+    assert_eq!(
+        offered["stackParent"]["slice"],
+        json!(first),
+        "step 5, the stack parent"
+    );
+    assert_eq!(
+        offered["stackParent"]["number"],
+        json!(12),
+        "step 5, the stack parent's PR"
+    );
+    assert_eq!(
+        offered["stackParent"]["prCheckedAt"], pr["prCheckedAt"],
+        "step 5, the stack parent's check time"
+    );
+
+    assert_eq!(
+        slice["claim"]["agent"],
+        json!("manager"),
+        "end state, the manager holds the first slice"
+    );
+    assert!(
+        slice["claim"]["leaseEnd"].as_str() > done_end.as_str(),
+        "end state, pr link moves leaseEnd from {done_end}"
+    );
+    assert_eq!(
+        home.show_json(&second)["blockedBy"],
+        json!([first]),
+        "end state, the second slice still names its blocker"
     );
 }
