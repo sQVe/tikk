@@ -39,8 +39,8 @@ names it ([ADR 0012](./0012-one-git-store-with-one-lock.md)).
   in the same hold of the lock. The write and the fact append are not one transaction: when the
   append fails, the command reports the error, and its write stays.
 - When `TIKK_AGENT` is set and another agent holds a live claim on the slice, `claim`, `release`,
-  `pr link`, and `new`, `done`, and `cancel` on the slice's instructions refuse with the code
-  `claimed`. The refusal writes nothing, and a refused `pr link` runs no `gh`. A person, with no `TIKK_AGENT`, is never refused.
+  `pr link`, `ask` on the slice or its instructions, and `new`, `done`, and `cancel` on the slice's
+  instructions refuse with the code `claimed`. The refusal writes nothing, and a refused `pr link` runs no `gh`. A person, with no `TIKK_AGENT`, is never refused.
 - `release` ends a claim. An agent ends its own claim or a stale one. A person ends any claim, so
   the user can free the slice of a dead manager. Claims and releases are facts
   ([ADR 0015](./0015-facts-in-per-machine-jsonl.md)).

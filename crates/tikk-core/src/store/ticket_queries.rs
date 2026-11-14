@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::fact::{ShownPr, Timestamp, current_prs};
+use crate::fact::{Question, ShownPr, Timestamp, current_prs, current_questions};
 use crate::store::derived_state::{DerivedStates, derive_states};
 use crate::store::fact_files::read_facts;
 use crate::store::id_clash::{IdClash, id_clashes};
@@ -56,6 +56,7 @@ pub struct ShownTicket {
     pub files: Vec<String>,
     pub claim: Option<ShownClaim>,
     pub pr: Option<ShownPr>,
+    pub questions: Vec<Question>,
     pub derived: DerivedStates,
 }
 
@@ -104,6 +105,9 @@ pub fn show_ticket(
     let facts = read_facts(store.root())?;
     let prs = current_prs(&facts.facts);
     let derived = derive_states(&scan, &facts, &prs);
+    let questions = current_questions(&facts.facts)
+        .remove(id)
+        .unwrap_or_default();
     let (claim, pr) = if ticket.document.fields.kind() == Kind::Slice {
         (
             shown_claim(&facts.facts, id, (effects.now)()),
@@ -126,6 +130,7 @@ pub fn show_ticket(
         files: folder_files(&folder)?,
         claim,
         pr,
+        questions,
         derived,
     })
 }

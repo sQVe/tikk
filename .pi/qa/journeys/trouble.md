@@ -28,6 +28,8 @@ Each failure is named with what to fix, and no ticket is lost.
    exits with 1 and `idShared`. After the user renames one file, the claim exits with 0.
 7. `gh` fails. `tikk pr refresh` exits with 1 and `ghError` and names the PR, and `tikk ready`
    still exits with 0.
+8. `tikk needs --json` lists the broken file with `parseError` and the failed sync of step 5 with
+   `syncFailed` and the conflicting file under `problems`, and it changes no file in the store.
 
 ## End state
 
@@ -35,4 +37,6 @@ The broken file stays as the user left it, the edited ticket file holds the user
 `tikk ls --json` still lists every other ticket under `tickets`. The released slice has no
 `claim` in `tikk show --json`. The ticket of the conflict holds the local text, and no merge is in
 progress. The slice that kept the shared ID is claimed, and `tikk sync --json` lists no clash. The
-slice whose PR `gh` could not read keeps its last recorded PR state.
+slice whose PR `gh` could not read keeps its last recorded PR state. Every ticket file the user did
+not touch has the same bytes as before the journey. After the user repairs the broken file,
+`tikk needs --json` no longer lists it, and `tikk ls --json` lists its ticket.

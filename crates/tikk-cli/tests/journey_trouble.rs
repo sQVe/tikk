@@ -94,6 +94,11 @@ fn trouble() {
         .expect("the other process releases the lock");
 
     let (plan, slice) = home.plan_and_slice();
+    let slice_path = home.show_json(&slice)["path"]
+        .as_str()
+        .expect("show prints the path")
+        .to_owned();
+    let slice_bytes = std::fs::read(&slice_path).expect("read the slice");
     let claim = home.tikk_as("manager", &["claim", &slice, "--json"]);
     assert_eq!(claim.exit_code, 0, "step 4, claim: {}", claim.stderr);
     let claim_line = home.fact_lines().pop().expect("the claim is the last fact");
@@ -294,10 +299,55 @@ fn trouble() {
         ready_after.stderr
     );
 
+    let before_needs = home.store_files();
+
+    let needs = home.tikk(&["needs", "--json"]);
+
+    assert_eq!(needs.exit_code, 0, "step 8, needs: {}", needs.stderr);
+    let problems = parse_json(&needs.stdout)["problems"].clone();
+    let broken_problem = json!({
+        "code": "parseError",
+        "path": path.to_str().expect("a UTF-8 path"),
+        "message": listed["errors"][0]["message"],
+    });
+    assert!(
+        problems
+            .as_array()
+            .expect("needs lists problems")
+            .contains(&broken_problem),
+        "step 8, needs names the broken file: {problems}"
+    );
+    let failed_sync: Vec<&serde_json::Value> = problems
+        .as_array()
+        .expect("needs lists problems")
+        .iter()
+        .filter(|problem| problem["code"] == json!("syncFailed"))
+        .collect();
+    assert_eq!(failed_sync.len(), 1, "step 8, one failed sync: {problems}");
+    assert_eq!(
+        failed_sync[0]["files"],
+        json!([relative_plan]),
+        "step 8, the failed sync names the file"
+    );
+    assert_eq!(
+        failed_sync[0]["message"], error["message"],
+        "step 8, the failed sync keeps the message"
+    );
+    assert_eq!(
+        home.store_files(),
+        before_needs,
+        "step 8, needs changes no file"
+    );
+
     assert_eq!(
         home.show_json(&slice)["pr"]["state"],
         json!("open"),
         "end state, the slice keeps its last recorded PR state"
+    );
+    assert_eq!(
+        std::fs::read(&slice_path).expect("read the slice"),
+        slice_bytes,
+        "end state, the ticket file the user did not touch keeps its bytes"
     );
     assert_eq!(
         std::fs::read_to_string(&path).expect("read the broken file"),
@@ -320,6 +370,24 @@ fn trouble() {
     listed.sort_unstable();
     expected.sort_unstable();
     assert_eq!(listed, expected, "end state, ls lists every other ticket");
+    std::fs::write(&path, "---\nkind: task\ntitle: Lock the store\n---\n")
+        .expect("the user repairs the broken file");
+    let repaired = parse_json(&home.tikk(&["needs", "--json"]).stdout);
+    let still_broken: Vec<&serde_json::Value> = repaired["problems"]
+        .as_array()
+        .expect("needs lists problems")
+        .iter()
+        .filter(|problem| problem["path"] == json!(path.to_str()))
+        .collect();
+    assert_eq!(
+        still_broken,
+        Vec::<&serde_json::Value>::new(),
+        "end state, needs no longer lists the repaired file: {repaired}"
+    );
+    assert!(
+        home.listed_ids().contains(&broken),
+        "end state, ls lists the repaired ticket"
+    );
     assert_eq!(
         laptop.show_json(&drawn)["claim"]["agent"],
         json!("manager"),

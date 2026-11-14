@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::fact::{
     AgentName, Audit, AuditVerdict, Claim, FactError, PrObservation, PrState, PullRequest,
-    Repository, Timestamp, Verdict,
+    QuestionItem, Repository, Timestamp, Verdict,
 };
 use crate::ticket::TicketId;
 
@@ -23,6 +23,8 @@ pub(crate) enum FactEvent {
     Release { agent: Option<AgentName> },
     Pr(PrObservation),
     Audit(Audit),
+    Question { item: QuestionItem, text: String },
+    Answer { item: QuestionItem, text: String },
 }
 
 // Fields beyond these are ignored, so a later version may add some.
@@ -46,6 +48,8 @@ struct RawFact {
     in_trunk: Option<bool>,
     ticket_hash: Option<String>,
     verdicts: Option<Vec<RawVerdict>>,
+    item: Option<String>,
+    text: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +113,16 @@ struct AuditText<'a> {
 }
 
 #[derive(Serialize)]
+struct ItemText<'a> {
+    v: u32,
+    kind: &'static str,
+    ticket: String,
+    at: String,
+    item: &'a str,
+    text: &'a str,
+}
+
+#[derive(Serialize)]
 struct VerdictText<'a> {
     criterion: &'a str,
     check: &'a str,
@@ -137,9 +151,19 @@ pub(crate) fn parse_fact_line(text: &str) -> Result<FactLine, FactError> {
         },
         "pr" => FactEvent::Pr(parse_pr(raw)?),
         "audit" => FactEvent::Audit(parse_audit(raw)?),
+        "question" => {
+            let (item, text) = parse_item_text("a question", raw)?;
+
+            FactEvent::Question { item, text }
+        }
+        "answer" => {
+            let (item, text) = parse_item_text("an answer", raw)?;
+
+            FactEvent::Answer { item, text }
+        }
         other => {
             return Err(FactError::new(format!(
-                "`{other}` is not a fact kind; use claim, release, pr, or audit"
+                "`{other}` is not a fact kind; use claim, release, pr, audit, question, or answer"
             )));
         }
     };
@@ -191,6 +215,22 @@ pub(crate) fn write_fact_line(fact: &FactLine) -> String {
             ticket_hash: &audit.ticket_hash,
             verdicts: audit.verdicts.iter().map(verdict_text).collect(),
         }),
+        FactEvent::Question { item, text } => serde_json::to_string(&ItemText {
+            v: VERSION,
+            kind: "question",
+            ticket,
+            at,
+            item: item.as_str(),
+            text,
+        }),
+        FactEvent::Answer { item, text } => serde_json::to_string(&ItemText {
+            v: VERSION,
+            kind: "answer",
+            ticket,
+            at,
+            item: item.as_str(),
+            text,
+        }),
     };
 
     format!("{}\n", text.expect("a fact serializes to JSON"))
@@ -223,6 +263,18 @@ fn parse_claim(raw: RawFact) -> Result<Claim, FactError> {
         session_log: raw.session_log,
         lease_end: Timestamp::parse(lease_end)?,
     })
+}
+
+fn parse_item_text(fact: &str, raw: RawFact) -> Result<(QuestionItem, String), FactError> {
+    let missing = |field: &str| FactError::new(format!("{fact} fact needs `{field}`"));
+    let item = raw.item.ok_or_else(|| missing("item"))?;
+    let item = QuestionItem::parse(&item).ok_or_else(|| {
+        FactError::new(format!(
+            "`{item}` is not an item ID; use 4 characters of 346789abcdefghijkmnpqrtwxyz"
+        ))
+    })?;
+
+    Ok((item, raw.text.ok_or_else(|| missing("text"))?))
 }
 
 fn parse_pr(raw: RawFact) -> Result<PrObservation, FactError> {
@@ -312,8 +364,8 @@ fn parse_verdict(raw: RawVerdict) -> Result<AuditVerdict, FactError> {
 mod tests {
     use super::{FactEvent, FactLine, parse_fact_line, write_fact_line};
     use crate::fact::{
-        AgentName, Audit, AuditVerdict, Claim, PrObservation, PrState, PullRequest, Repository,
-        Timestamp, Verdict,
+        AgentName, Audit, AuditVerdict, Claim, PrObservation, PrState, PullRequest, QuestionItem,
+        Repository, Timestamp, Verdict,
     };
     use crate::ticket::TicketId;
 
@@ -459,6 +511,74 @@ mod tests {
                 error.to_string().contains(expected),
                 "case {fields}: {error}"
             );
+        }
+    }
+
+    #[test]
+    fn question_and_answer_lines_have_their_fields_in_order_and_parse_back() {
+        let item = QuestionItem::parse("ab3x").expect("a valid item");
+        let cases = [
+            (
+                FactEvent::Question {
+                    item: item.clone(),
+                    text: "Which crate?".to_owned(),
+                },
+                "question",
+                "Which crate?",
+            ),
+            (
+                FactEvent::Answer {
+                    item,
+                    text: "serde-saphyr".to_owned(),
+                },
+                "answer",
+                "serde-saphyr",
+            ),
+        ];
+
+        for (event, kind, text) in cases {
+            let fact = FactLine {
+                ticket: slice(),
+                at: at("2026-11-13T01:00:00Z"),
+                event,
+            };
+
+            let line = write_fact_line(&fact);
+
+            assert_eq!(
+                line,
+                format!(
+                    "{{\"v\":1,\"kind\":\"{kind}\",\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00.000Z\",\"item\":\"ab3x\",\"text\":\"{text}\"}}\n"
+                ),
+                "case {kind}"
+            );
+            assert_eq!(parse_fact_line(line.trim_end()), Ok(fact), "case {kind}");
+        }
+    }
+
+    #[test]
+    fn parse_names_what_is_wrong_with_a_question_or_answer_line() {
+        let start = "\"ticket\":\"tikk-abcd\",\"at\":\"2026-11-13T01:00:00Z\"";
+        let cases = [
+            (
+                "question",
+                "\"text\":\"Which crate?\"",
+                "a question fact needs `item`",
+            ),
+            ("answer", "\"item\":\"ab3x\"", "an answer fact needs `text`"),
+            (
+                "question",
+                "\"item\":\"AB3X\",\"text\":\"x\"",
+                "`AB3X` is not an item ID",
+            ),
+        ];
+
+        for (kind, fields, expected) in cases {
+            let text = format!("{{\"v\":1,\"kind\":\"{kind}\",{start},{fields}}}");
+
+            let error = parse_fact_line(&text).expect_err("the line is refused");
+
+            assert!(error.to_string().contains(expected), "case {text}: {error}");
         }
     }
 

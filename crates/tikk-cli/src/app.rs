@@ -5,16 +5,16 @@ use clap::error::ErrorKind;
 use clap::{CommandFactory, Parser};
 use serde_json::json;
 use tikk_core::{
-    AuditEffects, AuditRequest, ClaimEffects, EditEffects, Identity, PrEffects, QueryEffects,
-    ReadyEffects, ReadyScope, RemoteInitEffects, StoreEffects, StoreError, SyncEffects,
-    TicketEffects, WriteEffects,
+    AnswerEffects, AskEffects, AttentionEffects, AuditEffects, AuditRequest, ClaimEffects,
+    EditEffects, Identity, PrEffects, QueryEffects, ReadyEffects, ReadyScope, RemoteInitEffects,
+    StoreEffects, StoreError, SyncEffects, TicketEffects, WriteEffects,
 };
 
 use crate::command::{Cli, Command, PrCommand};
 use crate::output::{Exit, Failure, Output, Response};
 use crate::ready::ready_output;
 use crate::ticket_row::written_output;
-use crate::{audit, claim, edit, init, ls, new, pr, show, store_error, sync};
+use crate::{audit, claim, edit, init, ls, needs, new, pr, question, show, store_error, sync};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -35,6 +35,9 @@ pub(crate) struct Environment {
     pub(crate) ready_effects: ReadyEffects,
     pub(crate) pr_effects: PrEffects,
     pub(crate) audit_effects: AuditEffects,
+    pub(crate) ask_effects: AskEffects,
+    pub(crate) answer_effects: AnswerEffects,
+    pub(crate) attention_effects: AttentionEffects,
     pub(crate) remote_init_effects: RemoteInitEffects,
     pub(crate) sync_effects: SyncEffects,
 }
@@ -59,6 +62,9 @@ impl Environment {
             ready_effects: ReadyEffects::system(),
             pr_effects: PrEffects::system(),
             audit_effects: AuditEffects::system(),
+            ask_effects: AskEffects::system(),
+            answer_effects: AnswerEffects::system(),
+            attention_effects: AttentionEffects::system(),
             remote_init_effects: RemoteInitEffects::system(),
             sync_effects: SyncEffects::system(),
         }
@@ -222,6 +228,21 @@ fn run_command(command: Command, environment: Environment) -> Result<Output, Sto
             &caller?,
             &environment.audit_effects,
         ),
+        Command::Ask { id, text } => question::run_ask(
+            &tikk_core::open(&store)?,
+            &id,
+            &text,
+            &caller?,
+            &environment.ask_effects,
+        ),
+        Command::Answer { id, item, text } => question::run_answer(
+            &tikk_core::open(&store)?,
+            &id,
+            &item,
+            &text,
+            &environment.answer_effects,
+        ),
+        Command::Needs => needs::run(&tikk_core::open(&store)?, &environment.attention_effects),
         Command::Pr {
             command: PrCommand::Link { id, url },
         } => pr::run_link(

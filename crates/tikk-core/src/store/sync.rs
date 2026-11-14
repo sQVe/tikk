@@ -15,7 +15,7 @@ use crate::store::sync_read::{self, SyncPlan, read_plan, settle_deadline};
 use crate::store::ticket_files::{TicketScan, io_error, read_tickets};
 use crate::store::{Store, StoreError};
 
-const RESULT_FILE: &str = ".git/tikk-sync.json";
+pub(crate) const RESULT_FILE: &str = ".git/tikk-sync.json";
 
 #[derive(Clone, Copy)]
 pub struct SyncEffects {

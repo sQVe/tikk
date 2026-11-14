@@ -32,6 +32,8 @@ Take a slice from ready to done, with no step that marks it done by hand.
    criterion. `tikk show <first> --json` reports the audit with `"counts":true`.
 7. The fake `gh` reports the PR merged into trunk, and the agent runs `tikk pr refresh`.
    `tikk show <first> --json` keeps the stored `status` `open` and reports `derivedStatus` `done`.
+8. The user runs `tikk needs --json`. It lists no item for the first slice, and the fake `gh` logs
+   no call.
 
 ## End state
 

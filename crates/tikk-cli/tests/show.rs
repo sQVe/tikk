@@ -90,6 +90,7 @@ fn show_json_prints_every_field_of_the_ticket() {
             "files": [],
             "claim": null,
             "pr": null,
+            "questions": [],
             "derivedStatus": "canceled",
             "audit": null,
         })
@@ -280,6 +281,37 @@ fn show_without_json_prints_the_blockers() {
     assert_eq!(
         run.stdout,
         format!("{task}  task  open  -  Renew the domain\nblockedBy: {first}, {second}\n")
+    );
+}
+
+#[test]
+fn show_without_json_prints_one_line_per_question() {
+    let home = Home::initialized();
+    let task = home.new_ticket(&["task", "Renew the domain"]);
+    let mut items = Vec::new();
+
+    for text in ["Which registrar?", "How many years?"] {
+        let run = home.tikk(&["ask", &task, "--text", text, "--json"]);
+        assert_eq!(run.exit_code, 0, "ask {text}: {}", run.stderr);
+        items.push(
+            parse_json(&run.stdout)["item"]
+                .as_str()
+                .expect("ask prints the item")
+                .to_owned(),
+        );
+    }
+
+    let answer = home.tikk(&["answer", &task, &items[0], "--text", "The same one"]);
+    let run = home.tikk(&["show", &task]);
+
+    assert_eq!(answer.exit_code, 0, "answer: {}", answer.stderr);
+    assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
+    assert_eq!(
+        run.stdout,
+        format!(
+            "{task}  task  open  -  Renew the domain\nquestion {}: Which registrar? answer: The same one\nquestion {}: How many years? (open)\n",
+            items[0], items[1]
+        )
     );
 }
 

@@ -5,6 +5,7 @@ use crate::audit::{checked_audit_json, checked_audit_text};
 use crate::claim::{claim_json, claim_text};
 use crate::output::Output;
 use crate::pr::{pr_json, pr_text};
+use crate::question::{question_json, question_text};
 use crate::ticket_row::{read_row_json, read_row_text};
 
 pub(crate) fn run(
@@ -33,6 +34,7 @@ fn shown_json(shown: &ShownTicket) -> Value {
         .claim
         .as_ref()
         .map(|shown| claim_json(&shown.claim, shown.state));
+    let questions: Vec<Value> = shown.questions.iter().map(question_json).collect();
     let mut shown_json = json!({
         "id": ticket.id.to_string(),
         "project": ticket.id.project().as_str(),
@@ -54,6 +56,7 @@ fn shown_json(shown: &ShownTicket) -> Value {
         "files": shown.files,
         "claim": claim,
         "pr": shown.pr.as_ref().map(pr_json),
+        "questions": questions,
     });
 
     if let Some(status) = derived.status(ticket) {
@@ -97,6 +100,8 @@ fn shown_text(shown: &ShownTicket) -> String {
     if let Some(check) = derived.audit(&shown.ticket.id) {
         lines.push(checked_audit_text(check));
     }
+
+    lines.extend(shown.questions.iter().map(question_text));
 
     lines.extend(
         shown
