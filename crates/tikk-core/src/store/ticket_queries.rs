@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::fact::Timestamp;
+use crate::store::id_clash::{IdClash, id_clashes};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::system;
 use crate::store::ticket_claim::{ShownClaim, shown_claim};
@@ -42,6 +43,7 @@ pub struct TicketFilter {
 pub struct TicketListing {
     pub tickets: Vec<StoredTicket>,
     pub errors: Vec<UnreadableTicket>,
+    pub clashes: Vec<IdClash>,
 }
 
 #[derive(Debug)]
@@ -52,8 +54,6 @@ pub struct ShownTicket {
     pub claim: Option<ShownClaim>,
 }
 
-/// Lists the tickets that match the filter, ranked ones first, then by ID. Every file that
-/// fails to parse is in `errors`, whatever the filter.
 pub fn list_tickets(
     store: &Store,
     filter: &TicketFilter,
@@ -65,6 +65,7 @@ pub fn list_tickets(
         read_tickets(store.root())?
     };
     let search = filter.search.as_deref().map(str::to_lowercase);
+    let clashes = id_clashes(&scan);
     let mut tickets: Vec<StoredTicket> = scan
         .tickets
         .into_iter()
@@ -76,6 +77,7 @@ pub fn list_tickets(
     Ok(TicketListing {
         tickets,
         errors: scan.errors,
+        clashes,
     })
 }
 
@@ -139,6 +141,21 @@ impl<'a> TicketIndex<'a> {
 
     pub(crate) fn look_up(&self, id: &TicketId) -> TicketLookup<'a> {
         classify(self.entries.get(id).map_or(&[][..], Vec::as_slice))
+    }
+
+    pub(crate) fn shared(&self) -> Vec<(&'a TicketId, Vec<&'a Path>)> {
+        let mut shared: Vec<(&TicketId, Vec<&Path>)> = self
+            .entries
+            .iter()
+            .filter_map(|(id, entries)| match classify(entries) {
+                TicketLookup::Shared(paths) => Some((*id, paths)),
+                _ => None,
+            })
+            .collect();
+
+        shared.sort_by_key(|(id, _)| *id);
+
+        shared
     }
 }
 

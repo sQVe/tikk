@@ -1,6 +1,8 @@
 mod claim_lease;
+mod claim_sync;
 mod fact_files;
 mod git;
+mod id_clash;
 mod identity;
 mod machine;
 mod project_choice;
@@ -36,7 +38,9 @@ use std::time::Duration;
 use thiserror::Error;
 
 pub use claim_lease::LeaseEffects;
+pub use claim_sync::Synced;
 pub use fact_files::UnreadableFact;
+pub use id_clash::IdClash;
 pub use identity::Identity;
 pub use machine::MachineName;
 pub use ready::{

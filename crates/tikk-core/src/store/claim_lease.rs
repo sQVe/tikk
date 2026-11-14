@@ -5,6 +5,8 @@ use crate::store::StoreError;
 use crate::store::fact_files::{self, append_fact, read_facts};
 use crate::store::identity::Identity;
 use crate::store::system;
+use crate::store::ticket_files::TicketScan;
+use crate::store::ticket_queries::ticket_path;
 use crate::ticket::{Kind, TicketFields, TicketId};
 
 #[derive(Clone, Copy)]
@@ -30,11 +32,13 @@ pub(crate) fn instruction_slice(fields: &TicketFields) -> Option<&TicketId> {
     fields.parent()
 }
 
-// The caller holds the exclusive lock. An agent is refused while another agent holds a live claim
-// on the slice, and the write by the holder renews its lease. A person is never refused and renews
+// The caller holds the exclusive lock, and `scan` is its read of the tickets. An agent is refused
+// while another agent holds a live claim on the slice, or while the slice's ID is in more than one
+// file, and the write by the holder renews its lease. A person is never refused and renews
 // nothing. When the renewal fails after the write, the error is returned and the write stays.
 pub(crate) fn write_for_slice<T>(
     root: &Path,
+    scan: &TicketScan,
     slice: Option<&TicketId>,
     caller: &Identity,
     effects: &LeaseEffects,
@@ -43,6 +47,9 @@ pub(crate) fn write_for_slice<T>(
     let (Some(slice), Some(agent)) = (slice, caller.agent.as_ref()) else {
         return write();
     };
+
+    refuse_shared_id(scan, slice)?;
+
     let facts = read_facts(root)?;
     let now = (effects.now)();
     let claim = current_claims(&facts.facts).remove(slice);
@@ -62,6 +69,13 @@ pub(crate) fn write_for_slice<T>(
     }
 
     Ok(written)
+}
+
+fn refuse_shared_id(scan: &TicketScan, slice: &TicketId) -> Result<(), StoreError> {
+    match ticket_path(scan, slice) {
+        Err(error @ StoreError::IdShared { .. }) => Err(error),
+        _ => Ok(()),
+    }
 }
 
 pub(crate) fn refuse_other_holder(

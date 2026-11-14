@@ -534,3 +534,38 @@ fn network_steps_use_the_global_git_config_but_run_no_global_hook() {
         .collect();
     assert_eq!(in_a_store, Vec::<&str>::new(), "all hooks that ran: {ran}");
 }
+
+#[test]
+fn sync_lists_two_files_with_one_id_and_claim_of_the_id_is_id_shared_until_a_rename() {
+    let home = Home::initialized();
+    let (_plan, slice) = home.plan_and_slice();
+    let first = ticket_path(&home, &slice);
+    let second = first.with_file_name(format!("{slice}-copy.md"));
+    std::fs::copy(&first, &second).expect("put a second file with the ID");
+    home.settle_files();
+
+    let synced = home.sync_json();
+    let refused = home.tikk_as("manager", &["claim", &slice, "--json"]);
+    let renamed = first.with_file_name(format!("{}-zzzz-copy.md", &slice[..slice.len() - 5]));
+    std::fs::rename(&second, &renamed).expect("rename the copy to a new ID");
+    let claimed = home.tikk_as("manager", &["claim", &slice, "--json"]);
+
+    let mut paths = vec![relative(&home, &first), relative(&home, &second)];
+    paths.sort();
+    assert_eq!(
+        synced["clashes"],
+        json!([{ "id": slice, "paths": paths }]),
+        "{synced}"
+    );
+    assert_eq!(refused.exit_code, 1, "{}", refused.stdout);
+    assert_eq!(
+        parse_json(&refused.stderr)["error"]["code"],
+        json!("idShared")
+    );
+    assert_eq!(claimed.exit_code, 0, "{}", claimed.stderr);
+    assert_eq!(
+        parse_json(&claimed.stdout)["sync"]["clashes"],
+        json!([]),
+        "the rename ends the clash"
+    );
+}

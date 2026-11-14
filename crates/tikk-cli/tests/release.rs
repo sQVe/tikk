@@ -12,6 +12,13 @@ fn candidates(home: &Home, plan: &str) -> serde_json::Value {
     parse_json(&run.stdout)["candidates"].clone()
 }
 
+fn facts_month(home: &Home) -> String {
+    let facts = home.fact_lines();
+    let month = &facts[0]["at"].as_str().expect("a fact has a time")[..7];
+
+    format!("{month}.jsonl")
+}
+
 #[test]
 fn another_agent_cannot_release_a_live_claim_and_a_person_can() {
     let home = Home::initialized();
@@ -30,9 +37,13 @@ fn another_agent_cannot_release_a_live_claim_and_a_person_can() {
     );
     assert_eq!(held, json!("manager-1"));
     assert_eq!(by_person.exit_code, 0, "stderr: {}", by_person.stderr);
+    let released = parse_json(&by_person.stdout);
+    assert_eq!(released["id"], json!(slice));
+    assert_eq!(released["released"], json!(true));
     assert_eq!(
-        parse_json(&by_person.stdout),
-        json!({ "id": slice, "released": true })
+        released["sync"]["committedPaths"],
+        json!(["facts/test/".to_owned() + &facts_month(&home)]),
+        "the release commits its fact"
     );
     assert_eq!(home.show_json(&slice)["claim"], json!(null));
     assert_eq!(candidates(&home, &plan)[0]["id"], json!(slice));
@@ -53,8 +64,8 @@ fn an_agent_releases_its_own_claim() {
 
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     assert_eq!(
-        run.stdout,
-        format!("{slice}  released the claim of manager\n")
+        run.stdout.lines().next(),
+        Some(format!("{slice}  released the claim of manager").as_str())
     );
     assert_eq!(home.show_json(&slice)["claim"], json!(null));
     assert_eq!(home.fact_lines()[1]["agent"], json!("manager"));
@@ -68,9 +79,10 @@ fn release_of_a_slice_without_a_claim_writes_nothing() {
     let run = home.tikk(&["release", &slice, "--json"]);
 
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
-    assert_eq!(
-        parse_json(&run.stdout),
-        json!({ "id": slice, "released": false })
-    );
+    let released = parse_json(&run.stdout);
+    assert_eq!(released["id"], json!(slice));
+    assert_eq!(released["released"], json!(false));
+    assert_eq!(released["sync"]["committed"], json!(false), "{released}");
     assert!(home.fact_lines().is_empty());
+    assert_eq!(home.git(&["rev-list", "--count", "HEAD"]).trim(), "1");
 }

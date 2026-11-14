@@ -7,11 +7,12 @@ use serde_json::json;
 
 use crate::fact::Timestamp;
 use crate::store::git;
+use crate::store::id_clash::{IdClash, id_clashes};
 use crate::store::store_lock::{self, LockAccess, StoreLock};
 use crate::store::sync_commit::commit_plan;
 use crate::store::sync_merge::merge_fetched;
 use crate::store::sync_read::{self, SyncPlan, read_plan, settle_deadline};
-use crate::store::ticket_files::io_error;
+use crate::store::ticket_files::{TicketScan, io_error, read_tickets};
 use crate::store::{Store, StoreError};
 
 const RESULT_FILE: &str = ".git/tikk-sync.json";
@@ -66,6 +67,7 @@ pub struct SyncOutcome {
     pub merged: bool,
     pub pushed: bool,
     pub problems: Vec<SyncProblem>,
+    pub clashes: Vec<IdClash>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,11 +87,25 @@ pub enum PendingReason {
 pub struct SyncProblem {
     pub step: SyncStep,
     pub message: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
+}
+
+impl SyncProblem {
+    pub fn new(step: SyncStep, message: String) -> Self {
+        Self {
+            step,
+            message,
+            files: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncStep {
     Fetch,
+    Merge,
+    Commit,
     Push,
     Save,
 }
@@ -114,6 +130,8 @@ impl SyncStep {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Fetch => "fetch",
+            Self::Merge => "merge",
+            Self::Commit => "commit",
             Self::Push => "push",
             Self::Save => "save",
         }
@@ -128,49 +146,70 @@ impl Serialize for SyncStep {
 
 pub fn sync_store(store: &Store, effects: &SyncEffects) -> Result<SyncOutcome, StoreError> {
     let root = store.root();
-    let outcome = run_sync(root, effects);
-    let at = Timestamp::from_system_time((effects.now)());
-    let saved = save_result(root, at, &outcome);
 
-    match (outcome, saved) {
-        (Ok(mut outcome), Err(save)) => {
-            outcome.problems.push(SyncProblem {
-                step: SyncStep::Save,
-                message: save.to_string(),
-            });
+    match run_sync(root, effects) {
+        Ok(outcome) => Ok(save_outcome(root, effects, outcome)),
+        Err(error) => Err(save_error(root, effects, error)),
+    }
+}
 
-            Ok(outcome)
-        }
-        (Ok(outcome), Ok(())) => Ok(outcome),
-        (Err(error), Ok(())) => Err(error),
-        (Err(error), Err(save)) => Err(StoreError::ResultNotSaved {
+pub(crate) fn save_outcome(
+    root: &Path,
+    effects: &SyncEffects,
+    mut outcome: SyncOutcome,
+) -> SyncOutcome {
+    if let Err(save) = save_result(root, &saved_outcome(now(effects), &outcome)) {
+        outcome
+            .problems
+            .push(SyncProblem::new(SyncStep::Save, save.to_string()));
+    }
+
+    outcome
+}
+
+pub(crate) fn save_error(root: &Path, effects: &SyncEffects, error: StoreError) -> StoreError {
+    let saved = save_result(root, &saved_error(now(effects), &error));
+
+    not_saved(error, saved)
+}
+
+pub(crate) fn save_refused(
+    root: &Path,
+    effects: &SyncEffects,
+    outcome: SyncOutcome,
+    refusal: StoreError,
+) -> StoreError {
+    let saved = save_result(root, &saved_outcome(now(effects), &outcome));
+
+    not_saved(refusal, saved)
+}
+
+fn not_saved(error: StoreError, saved: Result<(), StoreError>) -> StoreError {
+    match saved {
+        Ok(()) => error,
+        Err(save) => StoreError::ResultNotSaved {
             error: Box::new(error),
             save: Box::new(save),
-        }),
+        },
     }
+}
+
+fn now(effects: &SyncEffects) -> Timestamp {
+    Timestamp::from_system_time((effects.now)())
 }
 
 fn run_sync(root: &Path, effects: &SyncEffects) -> Result<SyncOutcome, StoreError> {
     let origin = (effects.read_origin)(root)?;
     let deadline = settle_deadline(root, effects)?;
     let mut problems = Vec::new();
-    let fetched = match origin {
-        None => {
-            problems.push(SyncProblem {
-                step: SyncStep::Fetch,
-                message: "The store has no `origin` remote, so sync only commits.".to_owned(),
-            });
-
-            false
-        }
-        Some(_) => fetch(root, effects, &mut problems),
-    };
+    let fetched = fetch_origin(root, origin.as_deref(), effects, &mut problems);
 
     wait_until(deadline, effects);
 
-    let (plan, merged) = {
+    let (plan, merged, clashes) = {
         let _lock = (effects.lock_store)(root, LockAccess::Exclusive)?;
         let plan = read_plan(root, fetched, effects)?;
+        let scanned = read_clashes(root)?;
 
         commit_plan(root, &plan, effects.run_git)?;
 
@@ -182,31 +221,50 @@ fn run_sync(root: &Path, effects: &SyncEffects) -> Result<SyncOutcome, StoreErro
             }
             None => false,
         };
+        let clashes = if merged {
+            merged_clashes(root, scanned, &mut problems)
+        } else {
+            scanned
+        };
 
-        (plan, merged)
+        (plan, merged, clashes)
     };
     let pushed = fetched && push(root, effects, &mut problems);
 
-    Ok(outcome(plan, fetched, merged, pushed, problems))
+    Ok(SyncOutcome {
+        clashes,
+        ..outcome(plan, fetched, merged, pushed, problems)
+    })
 }
 
-fn fetch(root: &Path, effects: &SyncEffects, problems: &mut Vec<SyncProblem>) -> bool {
+pub(crate) fn fetch_origin(
+    root: &Path,
+    origin: Option<&str>,
+    effects: &SyncEffects,
+    problems: &mut Vec<SyncProblem>,
+) -> bool {
+    if origin.is_none() {
+        problems.push(SyncProblem::new(
+            SyncStep::Fetch,
+            "The store has no `origin` remote, so sync only commits.".to_owned(),
+        ));
+
+        return false;
+    }
+
     let arguments = ["fetch", "--quiet", "--no-tags", "--prune", "origin"];
 
     match (effects.run_network_git)(root, &arguments) {
         Ok(_) => true,
         Err(error) => {
-            problems.push(SyncProblem {
-                step: SyncStep::Fetch,
-                message: error.to_string(),
-            });
+            problems.push(SyncProblem::new(SyncStep::Fetch, error.to_string()));
 
             false
         }
     }
 }
 
-fn push(root: &Path, effects: &SyncEffects, problems: &mut Vec<SyncProblem>) -> bool {
+pub(crate) fn push(root: &Path, effects: &SyncEffects, problems: &mut Vec<SyncProblem>) -> bool {
     let arguments = [
         "push",
         "--quiet",
@@ -218,14 +276,48 @@ fn push(root: &Path, effects: &SyncEffects, problems: &mut Vec<SyncProblem>) -> 
     match (effects.run_network_git)(root, &arguments) {
         Ok(_) => true,
         Err(error) => {
-            problems.push(SyncProblem {
-                step: SyncStep::Push,
-                message: error.to_string(),
-            });
+            problems.push(SyncProblem::new(SyncStep::Push, error.to_string()));
 
             false
         }
     }
+}
+
+pub(crate) fn read_clashes(root: &Path) -> Result<Vec<IdClash>, StoreError> {
+    let scan = read_tickets(root)?;
+
+    Ok(relative_clashes(root, &scan))
+}
+
+// The store has changed by now, so a failed scan is a problem, and the clashes found before the
+// merge stand.
+fn merged_clashes(
+    root: &Path,
+    before: Vec<IdClash>,
+    problems: &mut Vec<SyncProblem>,
+) -> Vec<IdClash> {
+    match read_clashes(root) {
+        Ok(clashes) => clashes,
+        Err(error) => {
+            problems.push(SyncProblem::new(SyncStep::Merge, error.to_string()));
+
+            before
+        }
+    }
+}
+
+pub(crate) fn relative_clashes(root: &Path, scan: &TicketScan) -> Vec<IdClash> {
+    id_clashes(scan)
+        .into_iter()
+        .map(|clash| IdClash {
+            paths: clash
+                .paths
+                .iter()
+                .map(|path| path.strip_prefix(root).unwrap_or(path).to_path_buf())
+                .collect(),
+            ..clash
+        })
+        .collect()
 }
 
 fn wait_until(deadline: Option<SystemTime>, effects: &SyncEffects) {
@@ -238,7 +330,7 @@ fn wait_until(deadline: Option<SystemTime>, effects: &SyncEffects) {
     }
 }
 
-fn outcome(
+pub(crate) fn outcome(
     plan: SyncPlan,
     fetched: bool,
     merged: bool,
@@ -255,25 +347,20 @@ fn outcome(
         merged,
         pushed,
         problems,
+        clashes: Vec::new(),
     }
 }
 
-fn save_result(
-    root: &Path,
-    at: Timestamp,
-    outcome: &Result<SyncOutcome, StoreError>,
-) -> Result<(), StoreError> {
-    let saved = match outcome {
-        Ok(outcome) => {
-            let mut saved = serde_json::to_value(outcome)
-                .expect("a sync outcome holds only strings, booleans, and lists");
+fn saved_outcome(at: Timestamp, outcome: &SyncOutcome) -> serde_json::Value {
+    let mut saved = serde_json::to_value(outcome)
+        .expect("a sync outcome holds only strings, booleans, and lists");
 
-            saved["at"] = json!(at.to_string());
+    saved["at"] = json!(at.to_string());
 
-            saved
-        }
-        Err(error) => saved_error(at, error),
-    };
+    saved
+}
+
+fn save_result(root: &Path, saved: &serde_json::Value) -> Result<(), StoreError> {
     let path = root.join(RESULT_FILE);
     let folder = path.parent().expect("the result file is inside .git");
     let mut file = tempfile::NamedTempFile::new_in(folder)

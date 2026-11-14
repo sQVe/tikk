@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use tikk_core::{QueryEffects, Store, StoreError, TicketFilter, TicketListing};
+use tikk_core::{IdClash, QueryEffects, Store, StoreError, TicketFilter, TicketListing};
 
 use crate::command::LsArguments;
 use crate::output::Output;
@@ -27,11 +27,19 @@ pub(crate) fn run(
 
 fn listing_json(listing: &TicketListing) -> Value {
     let tickets: Vec<Value> = listing.tickets.iter().map(row_json).collect();
-    let errors: Vec<Value> = listing
+    let unreadable = listing
         .errors
         .iter()
-        .map(|error| json!({ "path": error.path.to_string_lossy(), "message": error.message }))
-        .collect();
+        .map(|error| json!({ "path": error.path.to_string_lossy(), "message": error.message }));
+    let clashes = listing.clashes.iter().map(|clash| {
+        json!({
+            "code": "idShared",
+            "id": clash.id,
+            "paths": clash_paths(clash),
+            "message": clash_message(clash),
+        })
+    });
+    let errors: Vec<Value> = unreadable.chain(clashes).collect();
 
     json!({ "tickets": tickets, "errors": errors })
 }
@@ -42,12 +50,35 @@ fn listing_text(listing: &TicketListing) -> String {
         .errors
         .iter()
         .map(|error| format!("error: {}: {}", error.path.display(), error.message));
+    let clashes = listing.clashes.iter().map(|clash| {
+        format!(
+            "error: {}: {}",
+            clash_paths(clash).join("  "),
+            clash_message(clash)
+        )
+    });
 
-    let lines: Vec<String> = rows.chain(errors).collect();
+    let lines: Vec<String> = rows.chain(errors).chain(clashes).collect();
 
     if lines.is_empty() {
         return "No tickets.".to_owned();
     }
 
     lines.join("\n")
+}
+
+fn clash_paths(clash: &IdClash) -> Vec<String> {
+    clash
+        .paths
+        .iter()
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect()
+}
+
+fn clash_message(clash: &IdClash) -> String {
+    StoreError::IdShared {
+        id: clash.id.to_string(),
+        paths: clash.paths.clone(),
+    }
+    .to_string()
 }

@@ -347,3 +347,33 @@ fn ready_json_of_two_thousand_tickets_and_a_hundred_thousand_facts_reports_its_t
         elapsed.as_millis()
     );
 }
+
+#[test]
+fn ready_skips_a_claimed_slice_with_a_shared_id_with_id_shared_and_no_claim() {
+    let home = Home::initialized();
+    let (plan, slice) = home.plan_and_slice();
+    let claim = home.tikk_as("manager", &["claim", &slice]);
+    assert_eq!(claim.exit_code, 0, "claim: {}", claim.stderr);
+    let paths = home.share_id(&slice);
+
+    let run = home.tikk(&["ready", "--parent", &plan, "--json"]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    let queue = parse_json(&run.stdout);
+    assert_eq!(queue["candidates"], json!([]), "{queue}");
+    let skipped = queue["skipped"].as_array().expect("ready lists skipped");
+    assert_eq!(skipped.len(), 2, "both files of the ID: {queue}");
+    for row in skipped {
+        assert_eq!(row["id"], json!(slice));
+        assert_eq!(
+            row["holds"],
+            json!([{ "reason": "idShared", "paths": paths }]),
+            "{row}"
+        );
+    }
+    let text = home.tikk(&["ready", "--parent", &plan]).stdout;
+    assert!(
+        text.contains(&format!("\n  idShared: {}\n", paths.join("  "))),
+        "{text}"
+    );
+}

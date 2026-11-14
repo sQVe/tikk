@@ -19,8 +19,10 @@ Two offline machines can claim the same slice.
 
 A manager claims a slice with a `claim` fact that has a lease of 4 hours. `ready` returns ordered
 candidate slices and names what holds each skipped one. Before a claim, tikk fetches when the
-network is up, and merges what it fetched under the store lock. A failed fetch or a conflicting
-merge does not stop the claim.
+network is up, and merges what it fetched under the store lock. After the append, in the same hold
+of the lock, it commits, then pushes outside the lock. A release does the same. A failed fetch or
+push, or a conflicting merge, does not stop the claim or the release: the command's `sync` field
+names it ([ADR 0012](./0012-one-git-store-with-one-lock.md)).
 
 ### Claims
 
@@ -65,6 +67,8 @@ merge does not stop the claim.
   from the plan names the plan that holds it. A blocker that is missing or does not parse holds the
   slice and is named as such, because tikk cannot tell that it is done.
 - A slice with a live claim is skipped, and names its holder.
+- A slice whose own ID is in two files is skipped with the hold `idShared`, and tikk reads no claim
+  for it ([ADR 0019](./0019-ids-and-file-names.md)).
 - The stacking exception: a slice's own `blockedBy` may name a slice whose PR is open. That blocker
   counts as cleared for the slice, and the ready slice names that PR as its stack parent. A task or
   plan blocker never clears this way.

@@ -185,6 +185,81 @@ fn trouble() {
         "step 5, no merge stays in progress"
     );
 
+    let clash_remote = Remote::new();
+    let laptop = Home::on_remote(&clash_remote, "laptop");
+    let desktop = Home::on_remote(&clash_remote, "desktop");
+    let (_clash_plan, drawn) = laptop.plan_and_slice();
+    laptop.settle_files();
+    laptop.sync_json();
+    desktop.sync_json();
+    let laptop_file = std::path::PathBuf::from(
+        laptop.show_json(&drawn)["path"]
+            .as_str()
+            .expect("show prints the path"),
+    );
+    let desktop_file = desktop
+        .store()
+        .join(
+            laptop_file
+                .strip_prefix(laptop.store())
+                .expect("inside the store"),
+        )
+        .with_file_name(format!("{drawn}-other-work.md"));
+    let other_work = std::fs::read_to_string(&laptop_file)
+        .expect("read the slice")
+        .replace("title: Add the store", "title: Other work");
+    std::fs::write(&desktop_file, other_work).expect("the desktop draws the same ID");
+    desktop.settle_files();
+    desktop.sync_json();
+
+    let clash_sync = laptop.sync_json();
+
+    let other_file = laptop.store().join(
+        desktop_file
+            .strip_prefix(desktop.store())
+            .expect("inside the store"),
+    );
+    let relative = |file: &std::path::Path| {
+        file.strip_prefix(laptop.store())
+            .expect("inside the store")
+            .to_str()
+            .expect("a UTF-8 path")
+            .to_owned()
+    };
+    let mut clash_paths = vec![relative(&laptop_file), relative(&other_file)];
+    clash_paths.sort();
+    assert_eq!(
+        clash_sync["clashes"],
+        json!([{ "id": drawn, "paths": clash_paths }]),
+        "step 6, sync names both files: {clash_sync}"
+    );
+    let shared_claim = laptop.tikk_as("manager", &["claim", &drawn, "--json"]);
+    assert_eq!(
+        shared_claim.exit_code, 1,
+        "step 6, claim of the shared ID: {}",
+        shared_claim.stdout
+    );
+    assert_eq!(
+        parse_json(&shared_claim.stderr)["error"]["code"],
+        json!("idShared"),
+        "step 6, claim of the shared ID"
+    );
+    let (project, suffix) = drawn.rsplit_once('-').expect("an ID has a project");
+    let new_suffix = if suffix == "zzzz" { "yyyy" } else { "zzzz" };
+    let new_id = format!("{project}-{new_suffix}");
+    std::fs::rename(
+        &other_file,
+        other_file.with_file_name(format!("{new_id}-other-work.md")),
+    )
+    .expect("the user renames one file");
+    laptop.settle_files();
+    let renamed_claim = laptop.tikk_as("manager", &["claim", &drawn, "--json"]);
+    assert_eq!(
+        renamed_claim.exit_code, 0,
+        "step 6, claim after the rename: {}",
+        renamed_claim.stderr
+    );
+
     assert_eq!(
         std::fs::read_to_string(&path).expect("read the broken file"),
         broken_text,
@@ -206,4 +281,14 @@ fn trouble() {
     listed.sort_unstable();
     expected.sort_unstable();
     assert_eq!(listed, expected, "end state, ls lists every other ticket");
+    assert_eq!(
+        laptop.show_json(&drawn)["claim"]["agent"],
+        json!("manager"),
+        "end state, the slice that kept the ID is claimed"
+    );
+    assert_eq!(
+        laptop.sync_json()["clashes"],
+        json!([]),
+        "end state, sync lists no clash"
+    );
 }

@@ -58,7 +58,7 @@ pub(crate) fn failure(error: &StoreError) -> Failure {
     };
 
     let files = match error {
-        StoreError::Conflict { files, .. } => Some(
+        StoreError::Conflict { files, .. } | StoreError::IdShared { paths: files, .. } => Some(
             files
                 .iter()
                 .map(|path| path.to_string_lossy().into_owned())

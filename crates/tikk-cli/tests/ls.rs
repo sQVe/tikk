@@ -234,3 +234,32 @@ fn ls_json_of_two_thousand_tickets_reports_its_time() {
         elapsed.as_millis()
     );
 }
+
+#[test]
+fn ls_json_lists_a_shared_id_under_errors_with_both_paths() {
+    let home = Home::initialized();
+    let (_plan, slice) = home.plan_and_slice();
+    let paths = home.share_id(&slice);
+
+    let run = home.tikk(&["ls", "--json"]);
+
+    assert_eq!(run.exit_code, 0, "{}", run.stderr);
+    let errors = parse_json(&run.stdout)["errors"].clone();
+    let clashes: Vec<&Value> = errors
+        .as_array()
+        .expect("ls lists errors")
+        .iter()
+        .filter(|error| error["code"] == json!("idShared"))
+        .collect();
+    assert_eq!(clashes.len(), 1, "{errors}");
+    assert_eq!(clashes[0]["id"], json!(slice));
+    assert_eq!(clashes[0]["paths"], json!(paths));
+    let text = home.tikk(&["ls"]).stdout;
+    assert!(
+        text.contains(&format!(
+            "error: {}: 2 files share the ID {slice}.",
+            paths.join("  ")
+        )),
+        "{text}"
+    );
+}

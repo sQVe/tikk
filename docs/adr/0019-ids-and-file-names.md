@@ -19,10 +19,17 @@ random source is the operating system's. A draw that matches the ID of a ticket 
 the project draws again.
 
 Files are `tickets/<project>/<id>-<slug>.md`. The slug is set at create and never renamed. tikk
-never renames a ticket file or folder on its own, not even after an ID clash. When a sync merge
-brings two files with one ID, `tikk sync` names both files, and commands that append a fact for the
-ID refuse it with the `idShared` error. The user renames one file, and its folder if it has one, to
-a new ID.
+never renames a ticket file or folder on its own, not even after an ID clash. An ID clash is two
+ticket files in one project with one ID, as a sync merge can bring. tikk reports the clash and
+renames nothing: `tikk sync` and `tikk ls` name the ID and both files. Until the user renames one
+file, and its folder if it has one, to a new ID, commands that append a fact for the ID refuse it
+with the `idShared` error and write nothing. That covers `claim`, `release`, and the lease renewal
+by `new`, `done`, and `cancel` on an instruction of the slice.
+
+Facts cannot tell which of the two tickets they belong to, so tikk derives no state from facts for
+a shared ID. `tikk show` of the ID refuses with `idShared` and names both files, and `tikk ready`
+skips the slice with the hold `idShared`. There is no `alias` fact. After the rename, the facts
+written under the shared ID stay with the ticket that keeps the ID.
 
 A new ticket with a parent is in the parent's project, and a `--project` that differs is refused.
 Without a parent, the project is the lowercase repository name of `origin` in the working directory,
