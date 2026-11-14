@@ -1,8 +1,12 @@
 mod app;
 mod command;
 mod init;
+mod ls;
+mod new;
 mod output;
+mod show;
 mod store_error;
+mod ticket_row;
 
 use std::process::ExitCode;
 

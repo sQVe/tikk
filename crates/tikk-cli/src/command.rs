@@ -1,5 +1,7 @@
-use clap::{Parser, Subcommand};
-use tikk_core::{MachineName, StoreError};
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand};
+use tikk_core::{Kind, MachineName, ProjectName, Status, StoreError, TicketId};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -29,6 +31,57 @@ pub(crate) enum Command {
         #[arg(long, value_parser = parse_machine)]
         machine: Option<MachineName>,
     },
+    /// Create a ticket and print its ID. It writes the file and makes no commit.
+    New(NewArguments),
+    /// Show a ticket with its body, children, and folder files.
+    Show {
+        #[arg(value_name = "ID", value_parser = TicketId::parse)]
+        id: TicketId,
+    },
+    /// List tickets, and the files that fail to parse.
+    Ls(LsArguments),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct NewArguments {
+    /// plan, slice, instruction, or task.
+    #[arg(
+        value_parser = Kind::parse,
+        required_unless_present = "file",
+        conflicts_with = "file",
+        requires = "title"
+    )]
+    pub(crate) kind: Option<Kind>,
+    /// The ticket's title.
+    #[arg(required_unless_present = "file", conflicts_with = "file")]
+    pub(crate) title: Option<String>,
+    /// Create the ticket from a ticket document, in the form of a ticket file.
+    #[arg(long, value_name = "PATH")]
+    pub(crate) file: Option<PathBuf>,
+    /// The parent ticket. The new ticket takes its project.
+    #[arg(long, value_name = "ID", value_parser = TicketId::parse, conflicts_with = "file")]
+    pub(crate) parent: Option<TicketId>,
+    /// The project. The default is the parent's project, or the repository name of `origin`,
+    /// or `personal` outside a repository.
+    #[arg(long, value_parser = ProjectName::parse)]
+    pub(crate) project: Option<ProjectName>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct LsArguments {
+    #[arg(long, value_parser = ProjectName::parse)]
+    pub(crate) project: Option<ProjectName>,
+    /// plan, slice, instruction, or task.
+    #[arg(long, value_parser = Kind::parse)]
+    pub(crate) kind: Option<Kind>,
+    #[arg(long, value_name = "ID", value_parser = TicketId::parse)]
+    pub(crate) parent: Option<TicketId>,
+    /// draft, open, done, or canceled.
+    #[arg(long, value_parser = Status::parse)]
+    pub(crate) status: Option<Status>,
+    /// Keep tickets whose title or body holds the text, without regard to case.
+    #[arg(long, value_name = "TEXT")]
+    pub(crate) search: Option<String>,
 }
 
 fn parse_machine(name: &str) -> Result<MachineName, StoreError> {

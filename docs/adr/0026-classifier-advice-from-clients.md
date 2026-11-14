@@ -27,10 +27,11 @@ never blocks a command.
 
 ### Uses
 
-- Triage new loose tasks. Classify a task's purpose, such as bug, idea, chore, or question. tikk
-  returns a short list of open tickets that match the task's text, and the classifier labels each
-  pair as duplicate, related, or distinct. `tikk needs` shows the result with the new task. Nothing
-  is done or merged on its own. The project still comes from `origin`, and `kind` stays `task`.
+- Triage new loose tasks. A loose task is one with no parent; no `new: true` flag marks it. Classify
+  a task's purpose, such as bug, idea, chore, or question. tikk returns a short list of open tickets
+  that match the task's text, and the classifier labels each pair as duplicate, related, or
+  distinct. `tikk needs` shows the result with the new task. Nothing is done or merged on its own.
+  The project still comes from `origin`, and `kind` stays `task`.
 - Check criteria quality. Before a slice starts, classify each criterion as checkable or vague: does
   it name a command, test, or observable step, and an observable result? A vague criterion is a
   warning ([ADR 0021](./0021-validation-levels.md)). Missing fields stay a strict error that needs

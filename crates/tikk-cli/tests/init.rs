@@ -1,12 +1,8 @@
 mod support;
 
-use serde_json::{Value, json};
+use serde_json::json;
 
-use support::Home;
-
-fn parse_json(text: &str) -> Value {
-    serde_json::from_str(text).expect("tikk prints one JSON value")
-}
+use support::{Home, parse_json};
 
 #[test]
 fn init_json_creates_the_store_with_one_commit_on_main() {

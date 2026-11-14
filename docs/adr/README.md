@@ -62,7 +62,6 @@ the commit in its row.
 - [0014: Git history is undo, with no event sourcing for intent](./0014-git-history-as-undo.md)
 - [0015: Observed facts in per-machine JSONL](./0015-facts-in-per-machine-jsonl.md)
 - [0016: Evidence bound to code state, triage status, and coverage as a query](./0016-evidence-records-and-criteria-coverage.md)
-- [0017: A disposable SQLite cache](./0017-disposable-sqlite-cache.md)
 - [0018: Plans, slices, instructions, and tasks](./0018-work-model-and-kinds.md)
 - [0019: Short random IDs and stable file names](./0019-ids-and-file-names.md)
 - [0020: Edges are `blockedBy`, `discoveredFrom`, and `related`](./0020-edges.md)
@@ -70,6 +69,7 @@ the commit in its row.
 - [0022: Claims with leases and a ready queue that names what it skipped](./0022-claims-leases-and-ready-queue.md)
 - [0023: A slice is done when its PR merged and its criteria are met](./0023-derived-slice-done.md)
 - [0024: Archive is a field](./0024-archive-as-a-field.md)
+- [0033: Every command reads the store files, with no cache](./0033-files-only-store-without-a-cache.md)
 
 ### Clients
 
@@ -121,3 +121,4 @@ an old decision went. The ADRs themselves do not use the old numbers.
 
 | ADR | Title | Replaced by | Last commit |
 | --- | ----- | ----------- | ----------- |
+| 0017 | A disposable SQLite cache | [0033](./0033-files-only-store-without-a-cache.md) | `33cf178` |

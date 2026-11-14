@@ -1,6 +1,11 @@
 mod machine;
 mod store_init;
 mod system;
+mod ticket_create;
+mod ticket_files;
+mod ticket_id_draw;
+mod ticket_new_file;
+mod ticket_queries;
 
 use std::ffi::OsString;
 use std::fs;
@@ -11,6 +16,11 @@ use thiserror::Error;
 
 pub use machine::MachineName;
 pub use store_init::{InitOutcome, init};
+pub use ticket_create::{NewTicket, NewTicketSource, TicketEffects, create_ticket};
+pub use ticket_files::{StoredTicket, UnreadableTicket};
+pub use ticket_queries::{ShownTicket, TicketFilter, TicketListing, list_tickets, show_ticket};
+
+use crate::ticket::TicketError;
 
 const CONFIG_FILE: &str = "tikk.json";
 const STORE_UNDER_HOME: &str = ".local/share/tikk";
@@ -35,6 +45,20 @@ pub enum StoreError {
     HostNameUnavailable { message: String },
     #[error("`git {arguments}` failed: {message}")]
     Git { arguments: String, message: String },
+    #[error(transparent)]
+    Ticket(#[from] TicketError),
+    #[error("{} is not a valid ticket file: {message}", path.display())]
+    TicketParse { path: PathBuf, message: String },
+    #[error("No ticket has the ID {id}.")]
+    NotFound { id: String },
+    #[error("{} files share the ID {id}. Rename all but one.", paths.len())]
+    IdShared { id: String, paths: Vec<PathBuf> },
+    #[error("The repository name in the origin URL `{url}` is not a project name. Pass --project.")]
+    InvalidOrigin { url: String },
+    #[error("Found no free ID in the project {project}.")]
+    NoFreeId { project: String },
+    #[error("Could not read random bytes: {message}")]
+    RandomUnavailable { message: String },
     #[error("Could not {action} {}: {source}", path.display())]
     Io {
         action: &'static str,

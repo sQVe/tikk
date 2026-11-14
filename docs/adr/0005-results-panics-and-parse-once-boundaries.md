@@ -11,12 +11,12 @@
 Many agents call tikk at once, and each call must fail in a way the caller can read. A hand edit can
 break a ticket file, and tikk must keep running when it does.
 
-Data enters from ticket files, fact lines, config, `gh` output, and the cache. None of it can be
-trusted until it is parsed.
+Data enters from ticket files, fact lines, config, and `gh` output. tikk keeps no cache, so it
+parses this data on every read. None of it can be trusted until it is parsed.
 
 Agents write much of the code, so the conventions must be explicit and easy to check in review.
 
-A few values own resources that must be released exactly once, such as the SQLite handle. Everything
+A few values own resources that must be released exactly once, such as the store lock. Everything
 else is data and functions over it.
 
 ## Decision
@@ -39,8 +39,8 @@ boundary, and passes trusted types inward. Checks for impossible states run in e
 
 ### Boundaries
 
-- Decode ticket files, fact lines, config, `gh` output, and cache rows with serde. Then check their
-  meaning with domain validation. Do both once, where the data enters.
+- Decode ticket files, fact lines, config, and `gh` output with serde. Then check their meaning
+  with domain validation. Do both once, where the data enters.
 - IDs are newtypes with private fields. Each has one constructor that validates the value, so a
   value of the type is always valid.
 
@@ -48,7 +48,7 @@ boundary, and passes trusted types inward. Checks for impossible states run in e
 
 - Code is pure and immutable by default.
 - Use a struct with `Drop` only for a resource tikk owns that needs a release step, such as the
-  SQLite handle. GPUI owns desktop UI state through its own entities.
+  store lock. GPUI owns desktop UI state through its own entities.
 
 ### Dependencies
 

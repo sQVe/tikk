@@ -1,12 +1,8 @@
 mod support;
 
-use serde_json::{Value, json};
+use serde_json::json;
 
-use support::Home;
-
-fn parse_json(text: &str) -> Value {
-    serde_json::from_str(text).expect("tikk prints one JSON value")
-}
+use support::{Home, parse_json};
 
 #[test]
 fn unknown_flag_with_json_exits_with_2_and_an_error_object() {

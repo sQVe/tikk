@@ -7,8 +7,9 @@
 
 ## Context
 
-tikk reads and writes ticket files, appends facts, keeps a cache, syncs a Git store, parses a CLI,
-and draws a desktop window. Each job needs one clear owner before app code exists.
+tikk reads and writes ticket files, appends facts, syncs a Git store, parses a CLI, and draws a
+desktop window. It keeps no cache, so each read goes to the store files. Each job needs one clear
+owner before app code exists.
 
 Folders such as `domain/`, `application/`, and `adapters/` describe layers, but they do not say who
 owns a job. Separate files alone do not limit which code reads state. Written rules alone do not
@@ -21,7 +22,7 @@ which. The check refuses any use that crosses the table.
 
 ### Modules
 
-- A folder module has one entry file named after the folder, such as `cache.rs` beside `cache/`.
+- A folder module has one entry file named after the folder, such as `store.rs` beside `store/`.
   Other files in the folder are private to the module.
 - A flat module is one file. A new module starts as one file. It becomes a folder when it needs a
   second file.

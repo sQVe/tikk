@@ -36,7 +36,8 @@ store.
 ### Negative
 
 - Facts stay in Git history forever.
-- Readers need the cache to see current state, because the files hold every past line.
+- Each read scans the fact lines to find current state, because the files hold every past line and
+  tikk keeps no cache ([ADR 0033](./0033-files-only-store-without-a-cache.md)).
 
 ## Alternatives considered
 
