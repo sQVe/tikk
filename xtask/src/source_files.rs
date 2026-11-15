@@ -21,7 +21,10 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Res
             .with_context(|| format!("Could not read an entry of {}", directory.display()))?
             .path();
 
-        if path.is_dir() {
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             collect_rust_files(&path, files)?;
         } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
             files.push(path);

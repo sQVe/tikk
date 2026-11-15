@@ -151,7 +151,10 @@ fn read_modules(root: &Path) -> anyhow::Result<BTreeMap<String, Module>> {
 fn module_name(path: &Path) -> Option<String> {
     let file_name = path.file_name()?.to_str()?;
 
-    if path.is_dir() {
+    if path
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+    {
         return Some(file_name.to_string());
     }
 
@@ -166,7 +169,10 @@ fn read_module(root: &Path, directory: &Path, name: &str) -> anyhow::Result<Modu
     let entry_file = directory.join(format!("{name}.rs"));
     let folder = directory.join(name);
     let has_entry_file = entry_file.is_file();
-    let mut files = if folder.is_dir() {
+    let mut files = if folder
+        .symlink_metadata()
+        .is_ok_and(|metadata| metadata.is_dir())
+    {
         sorted_rust_files(&folder)?
     } else {
         Vec::new()

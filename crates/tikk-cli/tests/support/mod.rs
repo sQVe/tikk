@@ -449,7 +449,10 @@ fn settle_folder(folder: &Path) {
             continue;
         }
 
-        if path.is_dir() {
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             settle_folder(&path);
             continue;
         }
@@ -470,7 +473,10 @@ fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>
             continue;
         }
 
-        if path.is_dir() {
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             collect_files(root, &path, files);
             continue;
         }

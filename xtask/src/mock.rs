@@ -118,7 +118,10 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::IsADirectory
         );
-        assert!(shot.is_dir());
+        assert!(
+            shot.symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir())
+        );
         assert_eq!(
             std::fs::read_to_string(folder.path().join("crop.png")).expect("read unchanged crop"),
             "old crop"
@@ -155,6 +158,10 @@ mod tests {
 
         prepare_folder(&output).expect("create the output folder");
 
-        assert!(output.is_dir());
+        assert!(
+            output
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir())
+        );
     }
 }

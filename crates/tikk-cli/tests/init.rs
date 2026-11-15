@@ -127,7 +127,12 @@ fn init_through_a_symlink_to_an_empty_folder_creates_the_store_in_the_target() {
 
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     assert_eq!(parse_json(&run.stdout)["created"], json!(true));
-    assert!(home.store().join(".git").is_dir());
+    assert!(
+        home.store()
+            .join(".git")
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+    );
     assert!(home.store().join("tikk.json").is_file());
     assert!(
         std::fs::symlink_metadata(&link)

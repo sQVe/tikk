@@ -236,7 +236,10 @@ impl Drop for Sandbox {
     )]
     fn drop(&mut self) {
         if let Some(folder) = std::env::var_os("TIKK_E2E_ARTIFACTS")
-            && self.root().is_dir()
+            && self
+                .root()
+                .symlink_metadata()
+                .is_ok_and(|metadata| metadata.is_dir())
             && let Err(error) = self.keep_diagnostics(Path::new(&folder))
         {
             eprintln!("could not keep the diagnostics of {}: {error}", self.name);

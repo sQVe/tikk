@@ -10,6 +10,7 @@ disallowed-methods = [
   # [general] Following a symlink lets a folder walk loop through a link to an ancestor.
   { path = "std::fs::metadata", reason = "it follows symlinks; use `std::fs::symlink_metadata` so a link counts as a file", replacement = "std::fs::symlink_metadata" },
   { path = "std::path::Path::metadata", reason = "it follows symlinks; use `Path::symlink_metadata` so a link counts as a file", replacement = "symlink_metadata" },
+  { path = "std::path::Path::is_dir", reason = "it follows symlinks; use `path.symlink_metadata().is_ok_and(|metadata| metadata.is_dir())` so a link is never walked" },
 
   # [gpui] A sleep blocks its thread, which freezes the window on the UI thread.
   { path = "std::thread::sleep", reason = "in GPUI code, await `cx.background_executor().timer(duration)`; elsewhere, use an `#[expect]` that says why blocking the thread is safe" },
