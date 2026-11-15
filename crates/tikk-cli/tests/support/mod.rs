@@ -435,6 +435,10 @@ impl Home {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the tikk binary reads the real clock, so files must look a minute older than real time"
+)]
 fn settle_folder(folder: &Path) {
     let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
 

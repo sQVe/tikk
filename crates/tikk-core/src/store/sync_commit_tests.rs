@@ -14,6 +14,10 @@ fn no_wait(duration: Duration) {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the fake clock starts at the real modification time of the file the test writes"
+)]
 fn a_young_file_is_committed_after_sync_waits_for_it_to_settle() {
     let machines = Machines::new();
     let laptop = machines.laptop();
@@ -33,6 +37,10 @@ fn a_young_file_is_committed_after_sync_waits_for_it_to_settle() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the fake clock starts at the real modification time of the file the test writes"
+)]
 fn a_file_still_young_after_the_wait_stays_pending_as_settling() {
     let machines = Machines::new();
     let laptop = machines.laptop();

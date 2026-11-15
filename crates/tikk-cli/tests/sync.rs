@@ -207,6 +207,10 @@ fn new_then_sync_commits_the_new_ticket() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "a second thread plays an editor that saves every 100 real milliseconds"
+)]
 fn a_ticket_that_keeps_changing_through_the_wait_stays_pending_as_settling() {
     let remote = Remote::new();
     let laptop = Home::on_remote(&remote, "laptop");

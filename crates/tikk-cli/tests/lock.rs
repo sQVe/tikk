@@ -54,6 +54,10 @@ fn eight_processes_that_finish_or_cancel_tickets_keep_every_change() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the test holds the lock for one real second while the tikk binary waits"
+)]
 fn show_waits_for_a_lock_released_within_five_seconds() {
     let home = Home::initialized();
     let id = home.new_ticket(&["task", "Renew the domain"]);

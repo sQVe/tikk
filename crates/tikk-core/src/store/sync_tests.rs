@@ -172,6 +172,10 @@ fn fake_network(directory: &Path, arguments: &[&str]) -> Result<Vec<u8>, StoreEr
     run_store_git(directory, arguments)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "with no fixed time set, the fake clock reads the real time"
+)]
 fn fake_now() -> SystemTime {
     CLOCK.get().unwrap_or_else(SystemTime::now)
 }
@@ -193,6 +197,10 @@ fn effects() -> SyncEffects {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "an hour after the real time settles every file the test writes"
+)]
 fn later() -> Option<SystemTime> {
     Some(SystemTime::now() + Duration::from_secs(3600))
 }

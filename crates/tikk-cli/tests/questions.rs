@@ -176,6 +176,10 @@ fn ask_on_an_instruction_of_another_agents_slice_exits_with_claimed() {
 }
 
 #[test]
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the renewed lease must end after the first one under the tikk binary's real clock"
+)]
 fn ask_by_the_holder_renews_the_lease_and_a_person_is_never_refused() {
     let home = Home::initialized();
     let (_plan, slice) = home.plan_and_slice();

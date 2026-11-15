@@ -34,6 +34,10 @@ pub(crate) fn fill_random(buffer: &mut [u8]) -> Result<(), StoreError> {
     })
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "this is the production clock that effect records receive"
+)]
 pub(crate) fn now() -> Timestamp {
     Timestamp::from_system_time(SystemTime::now())
 }

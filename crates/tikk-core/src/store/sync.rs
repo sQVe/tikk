@@ -30,6 +30,10 @@ pub struct SyncEffects {
 }
 
 impl SyncEffects {
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the production record wires the real clock and a blocking wait; tikk-core has no GPUI executor"
+    )]
     pub fn system() -> Self {
         Self {
             run_git: git::run_store_git,

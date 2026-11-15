@@ -13,6 +13,10 @@ pub(crate) fn replace_ticket_file(
     replace_ticket_file_with(path, text, expected_hash, |path| fs::read(path))
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "reads the mode of one ticket file to copy onto its replacement; no folder walk follows the link"
+)]
 fn replace_ticket_file_with(
     path: &Path,
     text: &str,
@@ -100,6 +104,10 @@ mod tests {
     }
 
     // Records the text and mode of every other file in the folder when the final check reads.
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test folder holds only plain files, no links"
+    )]
     fn read_after_recording_the_temporary_file(path: &Path) -> io::Result<Vec<u8>> {
         let folder = path.parent().expect("the ticket is in a folder");
 
@@ -162,6 +170,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the test folder holds only plain files, no links"
+    )]
     fn replace_writes_the_text_and_keeps_the_file_mode() {
         let directory = tempfile::tempdir().expect("create a temporary directory");
         let path = directory.path().join("personal-abcd-a.md");

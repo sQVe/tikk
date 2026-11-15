@@ -82,6 +82,10 @@ pub(crate) fn sorted_entries(folder: &Path) -> Result<Vec<PathBuf>, StoreError> 
     Ok(paths)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "callers list one level and never recurse, so a linked project or machine folder cannot loop"
+)]
 pub(crate) fn is_folder(path: &Path) -> Result<bool, StoreError> {
     fs::metadata(path)
         .map(|metadata| metadata.is_dir())

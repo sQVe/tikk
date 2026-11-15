@@ -45,6 +45,10 @@ pub(crate) fn run_within(command: &mut Command, timeout: Duration) -> Result<Fin
     })
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tikk-core is synchronous and has no GPUI executor; the poll blocks only the caller that runs the program"
+)]
 fn wait_within(
     mut child: Child,
     program: &str,

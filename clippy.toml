@@ -1,0 +1,25 @@
+# Each ban names the API to use instead, so the Clippy error tells the reader the fix.
+# Scope tags say where a ban applies:
+#   [general] any Rust project.
+#   [gpui] any project built on GPUI and gpui-component.
+#   [tikk] only tikk's own rules.
+# To use a banned API on purpose, put `#[expect(clippy::disallowed_methods, reason = "...")]`, or
+# `clippy::disallowed_types`, on the smallest item that needs it.
+
+disallowed-methods = [
+  # [general] Following a symlink lets a folder walk loop through a link to an ancestor.
+  { path = "std::fs::metadata", reason = "it follows symlinks; use `std::fs::symlink_metadata` so a link counts as a file", replacement = "std::fs::symlink_metadata" },
+  { path = "std::path::Path::metadata", reason = "it follows symlinks; use `Path::symlink_metadata` so a link counts as a file", replacement = "symlink_metadata" },
+
+  # [gpui] A sleep blocks its thread, which freezes the window on the UI thread.
+  { path = "std::thread::sleep", reason = "in GPUI code, await `cx.background_executor().timer(duration)`; elsewhere, use an `#[expect]` that says why blocking the thread is safe" },
+
+  # [tikk] The clock is a side effect, so it reaches a module as a function that tests replace.
+  { path = "std::time::SystemTime::now", reason = "take the clock as a `now` function in the module's effect record (ADR 0007); production passes `store::system::now`, tests pass a fixed time" },
+]
+
+# Clippy accepts only type paths here, not modules, so each gpui-component type needs its own entry.
+disallowed-types = [
+  # [gpui] Only crates/tikk-ui/src/kit.rs uses gpui-component.
+  { path = "gpui_component::label::Label", reason = "use `crate::kit::label`; only `kit.rs` uses gpui-component types (ADR 0003)" },
+]
