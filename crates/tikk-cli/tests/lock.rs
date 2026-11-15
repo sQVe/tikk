@@ -3,7 +3,7 @@ mod support;
 use std::fs::TryLockError;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::json;
 
@@ -63,8 +63,7 @@ fn show_waits_for_a_lock_released_within_five_seconds() {
     let id = home.new_ticket(&["task", "Renew the domain"]);
     let holder = home.lock_file();
     holder.lock().expect("take the exclusive lock");
-    let started = Instant::now();
-    let show = home
+    let mut show = home
         .command(&["show", &id, "--json"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -72,15 +71,13 @@ fn show_waits_for_a_lock_released_within_five_seconds() {
         .expect("start the tikk binary");
 
     thread::sleep(Duration::from_secs(1));
+    let still_waiting = show.try_wait().expect("check tikk").is_none();
     holder.unlock().expect("release the lock");
     let run = finish(show.wait_with_output().expect("wait for tikk"));
 
+    assert!(still_waiting, "show did not wait for the lock");
     assert_eq!(run.exit_code, 0, "stderr: {}", run.stderr);
     assert_eq!(parse_json(&run.stdout)["id"], json!(id));
-    assert!(
-        started.elapsed() >= Duration::from_secs(1),
-        "show did not wait"
-    );
 }
 
 #[test]
