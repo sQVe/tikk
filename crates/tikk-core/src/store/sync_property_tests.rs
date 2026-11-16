@@ -8,7 +8,7 @@ use proptest::test_runner::RngSeed;
 
 use super::{CLOCK, Machines, effects, later, sync, write};
 use crate::store::StoreError;
-use crate::store::sync::{SyncOutcome, SyncStep};
+use crate::store::sync::SyncOutcome;
 use crate::store::test_support::sync_remote::{git_text, store_files};
 
 const TICKETS: [&str; 4] = [
@@ -138,7 +138,7 @@ fn run_generated_run(steps: &[Step]) {
 struct Run {
     machines: Machines,
     created: BTreeSet<PathBuf>,
-    appended: Vec<String>,
+    appended: Vec<(PathBuf, String)>,
     append_count: usize,
     conflict_seen: bool,
 }
@@ -196,14 +196,11 @@ impl Run {
 
     fn append_fact(&mut self, machine: Machine, line: usize) {
         let root = machine.root(&self.machines);
+        let path = format!("facts/{}/2026-11.jsonl", machine.name());
         let text = fact_line(line, self.append_count);
 
-        append(
-            &root,
-            &format!("facts/{}/2026-11.jsonl", machine.name()),
-            &format!("{text}\n"),
-        );
-        self.appended.push(text);
+        append(&root, &path, &format!("{text}\n"));
+        self.appended.push((PathBuf::from(path), text));
         self.append_count += 1;
     }
 
@@ -247,9 +244,9 @@ impl Run {
             );
         }
 
-        for line in &self.appended {
-            assert_fact_present(&laptop_files, line, "laptop");
-            assert_fact_present(&desktop_files, line, "desktop");
+        for (path, line) in &self.appended {
+            assert_fact_present(&laptop_files, path, line, "laptop");
+            assert_fact_present(&desktop_files, path, line, "desktop");
         }
     }
 }
@@ -285,18 +282,13 @@ fn sync_and_check(root: &Path) -> bool {
 
 fn conflict_files(result: &Result<SyncOutcome, StoreError>) -> Option<Vec<String>> {
     match result {
-        Ok(outcome) => outcome
-            .problems
-            .iter()
-            .find(|problem| problem.step == SyncStep::Merge && !problem.files.is_empty())
-            .map(|problem| problem.files.clone()),
         Err(StoreError::Conflict { files, .. }) => Some(
             files
                 .iter()
                 .map(|path| path.to_string_lossy().into_owned())
                 .collect(),
         ),
-        Err(_) => None,
+        _ => None,
     }
 }
 
@@ -346,7 +338,7 @@ fn assert_files_kept(root: &Path, before: &[(PathBuf, Vec<u8>)], named_files: &[
     }
 }
 
-fn committed_fact_lines(root: &Path) -> Vec<String> {
+fn committed_fact_lines(root: &Path) -> Vec<(PathBuf, String)> {
     let listing = git_text(
         root,
         &["ls-tree", "-r", "--name-only", "HEAD", "--", "facts"],
@@ -355,31 +347,33 @@ fn committed_fact_lines(root: &Path) -> Vec<String> {
 
     for path in listing.lines().filter(|path| !path.is_empty()) {
         let text = git_text(root, &["show", &format!("HEAD:{path}")]);
+        let path = PathBuf::from(path);
 
-        lines.extend(
-            text.lines()
-                .filter(|line| !line.trim().is_empty())
-                .map(str::to_owned),
-        );
+        for line in text.lines().filter(|line| !line.trim().is_empty()) {
+            lines.push((path.clone(), line.to_owned()));
+        }
     }
 
     lines
 }
 
-fn assert_committed_facts_stay(before: &[String], after: &[String]) {
-    for line in before {
+fn assert_committed_facts_stay(before: &[(PathBuf, String)], after: &[(PathBuf, String)]) {
+    for (path, line) in before {
         assert!(
-            after.contains(line),
-            "a committed fact line was dropped: {line}"
+            after
+                .iter()
+                .any(|(after_path, after_line)| after_path == path && after_line == line),
+            "the committed fact line {line} was dropped from {}",
+            path.display()
         );
     }
 }
 
-fn assert_fact_present(files: &[(PathBuf, Vec<u8>)], line: &str, store: &str) {
+fn assert_fact_present(files: &[(PathBuf, Vec<u8>)], path: &Path, line: &str, store: &str) {
     let present = files
         .iter()
-        .filter(|(path, _)| path.starts_with("facts"))
-        .any(|(_, bytes)| {
+        .find(|(stored, _)| stored == path)
+        .is_some_and(|(_, bytes)| {
             String::from_utf8_lossy(bytes)
                 .lines()
                 .any(|stored| stored == line)
@@ -387,7 +381,8 @@ fn assert_fact_present(files: &[(PathBuf, Vec<u8>)], line: &str, store: &str) {
 
     assert!(
         present,
-        "the fact line {line} is missing from the {store} store"
+        "the fact line {line} is missing from {} in the {store} store",
+        path.display()
     );
 }
 
@@ -413,4 +408,70 @@ fn a_created_ticket_reaches_both_stores_after_the_final_syncs() {
         ticket: 3,
         title: 0,
     }]);
+}
+
+#[test]
+fn a_create_writes_the_literal_ticket_text_to_both_stores() {
+    let mut run = Run::new();
+
+    run.apply(Step::Create {
+        machine: Machine::Laptop,
+        ticket: 0,
+        title: 0,
+    });
+    run.finish();
+
+    let path = "tickets/personal/personal-abcd-renew.md";
+    let text = "---\nkind: task\ntitle: Title 0\n---\n";
+
+    assert_eq!(
+        fs::read_to_string(run.machines.laptop().join(path)).expect("read the laptop ticket"),
+        text
+    );
+    assert_eq!(
+        fs::read_to_string(run.machines.desktop().join(path)).expect("read the desktop ticket"),
+        text
+    );
+}
+
+#[test]
+fn an_edit_of_a_missing_ticket_writes_nothing() {
+    let mut run = Run::new();
+
+    run.apply(Step::Edit {
+        machine: Machine::Laptop,
+        ticket: 0,
+        title: 1,
+    });
+
+    let path = "tickets/personal/personal-abcd-renew.md";
+
+    assert!(
+        !run.machines.laptop().join(path).exists(),
+        "an edit created a missing ticket"
+    );
+}
+
+#[test]
+fn an_edit_of_an_existing_ticket_writes_the_literal_new_text() {
+    let mut run = Run::new();
+    let path = "tickets/personal/personal-abcd-renew.md";
+
+    write(
+        &run.machines.laptop(),
+        path,
+        "---\nkind: task\ntitle: Title 0\n---\n",
+    );
+    run.apply(Step::Edit {
+        machine: Machine::Laptop,
+        ticket: 0,
+        title: 1,
+    });
+
+    let text = "---\nkind: task\ntitle: Title 1\n---\n";
+
+    assert_eq!(
+        fs::read_to_string(run.machines.laptop().join(path)).expect("read the edited ticket"),
+        text
+    );
 }
