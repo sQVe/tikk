@@ -60,7 +60,10 @@ fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>
             let target = fs::read_link(&path).expect("read a symlink");
 
             files.push((relative, target.into_os_string().into_encoded_bytes()));
-        } else if path.is_dir() {
+        } else if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             collect_files(root, &path, files);
         } else {
             let relative = path

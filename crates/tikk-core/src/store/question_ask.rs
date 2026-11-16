@@ -232,6 +232,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "the claim must be current under the real clock that the ask reads"
+    )]
     fn ask_by_another_agent_on_a_claimed_slice_is_refused_and_writes_nothing() {
         let (directory, store) = store_with_task();
         let folder = directory.path().join("tickets/personal");

@@ -26,6 +26,10 @@ pub(crate) fn lock_store(root: &Path, access: LockAccess) -> Result<StoreLock, S
     lock_store_within(root, access, LOCK_WAIT)
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "tikk-core is synchronous and has no GPUI executor; the retry blocks only the caller that waits for the lock"
+)]
 pub(crate) fn lock_store_within(
     root: &Path,
     access: LockAccess,
@@ -116,6 +120,10 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "a second thread holds the lock for a short real time"
+    )]
     fn a_waiting_lock_succeeds_when_the_holder_releases_it() {
         let store = store_folder();
         let holder = lock_store_within(store.path(), LockAccess::Exclusive, SHORT_WAIT)

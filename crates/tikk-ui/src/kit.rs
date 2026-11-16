@@ -1,3 +1,8 @@
+#![expect(
+    clippy::disallowed_types,
+    reason = "this module is the one place that uses gpui-component types"
+)]
+
 use gpui_kit::component::label::Label;
 use gpui_kit::{IntoElement, Styled};
 

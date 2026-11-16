@@ -37,6 +37,9 @@ point for every check.
 - `print_stdout` and `print_stderr` warn on printing outside deliberate command output.
   `allow_attributes_without_reason`, `should_panic_without_expect`, and `redundant_clone` check
   lint reasons, panic expectations, and needless clones.
+- `clippy.toml` at the workspace root bans APIs that tikk's rules avoid, with `disallowed-methods`
+  and `disallowed-types`. Each ban's reason names the API to use instead, and a tag marks it as
+  general Rust, GPUI, or tikk-only.
 - A suppression is `#[expect(lint, reason = "...")]` on the smallest item that needs it. Use
   `#[allow(lint, reason = "...")]` only when the lint fires in some builds but not others.
 - Unsafe code is denied.

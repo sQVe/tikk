@@ -343,6 +343,10 @@ mod tests {
         })
     }
 
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "an hour after the real time settles every file the test writes"
+    )]
     fn an_hour_later() -> SystemTime {
         SystemTime::now() + Duration::from_secs(3600)
     }

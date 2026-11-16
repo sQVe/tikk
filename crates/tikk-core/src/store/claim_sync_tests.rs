@@ -64,6 +64,10 @@ fn git_with_a_failing_merge(root: &Path, arguments: &[&str]) -> Result<Vec<u8>, 
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the fake entry gets the current time, as a file written just now would"
+)]
 fn entry_with_merge_head(path: &Path) -> Result<Option<FileEntry>, StoreError> {
     if path.ends_with(".git/MERGE_HEAD") && MERGE_STARTED.get() {
         return Ok(Some(FileEntry {

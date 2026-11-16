@@ -435,6 +435,10 @@ impl Home {
     }
 }
 
+#[expect(
+    clippy::disallowed_methods,
+    reason = "the tikk binary reads the real clock, so files must look a minute older than real time"
+)]
 fn settle_folder(folder: &Path) {
     let past = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
 
@@ -445,7 +449,10 @@ fn settle_folder(folder: &Path) {
             continue;
         }
 
-        if path.is_dir() {
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             settle_folder(&path);
             continue;
         }
@@ -466,7 +473,10 @@ fn collect_files(root: &Path, folder: &Path, files: &mut Vec<(PathBuf, Vec<u8>)>
             continue;
         }
 
-        if path.is_dir() {
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
             collect_files(root, &path, files);
             continue;
         }
