@@ -19,6 +19,8 @@ mod commit_tests;
 mod merge_tests;
 #[path = "sync_network_tests.rs"]
 mod network_tests;
+#[path = "sync_property_tests.rs"]
+mod property_tests;
 #[path = "sync_refusal_tests.rs"]
 mod refusal_tests;
 #[path = "sync_result_tests.rs"]
