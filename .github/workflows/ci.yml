@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # stomme reads stomme.toml from origin/main to refuse new recorded violations.
+          # stomme reads stomme.toml from the target branch to refuse new recorded violations.
           fetch-depth: 0
           persist-credentials: false
       - run: rustup toolchain install
@@ -40,6 +40,8 @@ jobs:
         with:
           tool: cargo-deny,cargo-shear,typos,taplo
       - run: cargo xtask check tidy
+        env:
+          STOMME_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
   test:
     name: Test (${{ matrix.name }})

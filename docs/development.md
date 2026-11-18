@@ -73,6 +73,7 @@ Warnings fail clippy, the tests, and rustdoc. Every Cargo build runs with `--loc
 
 The stomme check reads `stomme.toml`, `docs/stomme/`, the stomme block in `AGENTS.md`, and the ADR
 index. Run it alone with `mise exec -- stomme check`.
+`STOMME_BASE=origin/<parent>` makes the stomme step compare against the parent of a stacked branch.
 
 The crate-boundary check fails when `tikk-cli` or `tikk-core` depends on GPUI, `tikk-ui`, or
 `tikk-desktop`, directly or through another crate. It prints the dependency path it found.
