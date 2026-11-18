@@ -13,7 +13,7 @@ use thiserror::Error;
 pub use agent_name::AgentName;
 pub use attention::{
     Attention, AttentionInput, AttentionItem, AttentionProblem, AttentionReason, AttentionState,
-    AttentionTicket, attention,
+    AttentionTicket, derive_attention,
 };
 pub(crate) use audit_state::last_audits;
 pub use audit_state::{Audit, AuditVerdict, ShownAudit, Verdict};

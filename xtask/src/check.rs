@@ -1,9 +1,34 @@
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
 use thiserror::Error;
 
-use crate::{adr_index, boundaries, module_table, raw_values};
+use crate::raw_values;
+
+#[expect(
+    clippy::print_stderr,
+    reason = "invalid check arguments are the command's error output"
+)]
+pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
+    let groups = match parse_groups(arguments) {
+        Ok(groups) => groups,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let base = match parse_stomme_base(std::env::var_os(STOMME_BASE)) {
+        Ok(base) => base,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    check_steps(root, &build_steps(base.as_deref()), &groups)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
@@ -16,86 +41,111 @@ struct Step {
     name: &'static str,
     group: Group,
     program: &'static str,
-    arguments: &'static [&'static str],
+    arguments: Vec<String>,
     environment: &'static [(&'static str, &'static str)],
 }
 
 const DENY_WARNINGS: (&str, &str) = ("CARGO_BUILD_WARNINGS", "deny");
 
-const STEPS: &[Step] = &[
+fn build_step(
+    name: &'static str,
+    group: Group,
+    program: &'static str,
+    arguments: &[&str],
+    environment: &'static [(&'static str, &'static str)],
+) -> Step {
     Step {
-        name: "rustfmt",
-        group: Group::Tidy,
-        program: "cargo",
-        arguments: &["fmt", "--all", "--check"],
-        environment: &[],
-    },
-    Step {
-        name: "typos",
-        group: Group::Tidy,
-        program: "typos",
-        arguments: &[],
-        environment: &[],
-    },
-    Step {
-        name: "taplo",
-        group: Group::Tidy,
-        program: "taplo",
-        arguments: &["fmt", "--check"],
-        environment: &[("RUST_LOG", "warn")],
-    },
-    Step {
-        name: "cargo-deny",
-        group: Group::Tidy,
-        program: "cargo",
-        arguments: &["deny", "--locked", "check"],
-        environment: &[],
-    },
-    Step {
-        name: "cargo-shear",
-        group: Group::Tidy,
-        program: "cargo",
-        arguments: &["shear", "--locked", "--deny-warnings"],
-        environment: &[],
-    },
-    Step {
-        name: "clippy",
-        group: Group::Build,
-        program: "cargo",
-        arguments: &["clippy", "--workspace", "--all-targets", "--locked"],
-        environment: &[DENY_WARNINGS],
-    },
-    Step {
-        name: "nextest",
-        group: Group::Build,
-        program: "cargo",
-        arguments: &["nextest", "run", "--workspace", "--locked"],
-        environment: &[DENY_WARNINGS],
-    },
-    Step {
-        name: "doctests",
-        group: Group::Build,
-        program: "cargo",
-        arguments: &["test", "--doc", "--workspace", "--locked"],
-        environment: &[DENY_WARNINGS],
-    },
-    Step {
-        name: "rustdoc",
-        group: Group::Build,
-        program: "cargo",
-        arguments: &["doc", "--workspace", "--no-deps", "--locked"],
-        environment: &[DENY_WARNINGS, ("RUSTDOCFLAGS", "-D warnings")],
-    },
-];
+        name,
+        group,
+        program,
+        arguments: arguments
+            .iter()
+            .map(|argument| (*argument).to_string())
+            .collect(),
+        environment,
+    }
+}
 
-type SourceCheck = fn(&Path) -> anyhow::Result<()>;
+fn build_stomme_step(base: Option<&str>) -> Step {
+    let mut stomme = build_step(
+        "stomme",
+        Group::Tidy,
+        "mise",
+        &["exec", "--", "stomme", "check"],
+        &[],
+    );
 
-const SOURCE_CHECKS: &[(&str, SourceCheck)] = &[
-    ("adr-index", adr_index::check),
-    ("crate-boundaries", boundaries::check),
-    ("module-table", module_table::check),
-    ("raw-values", raw_values::check),
-];
+    if let Some(base) = base {
+        stomme
+            .arguments
+            .extend(["--base".to_string(), base.to_string()]);
+    }
+
+    stomme
+}
+
+fn build_steps(base: Option<&str>) -> Vec<Step> {
+    vec![
+        build_step(
+            "rustfmt",
+            Group::Tidy,
+            "cargo",
+            &["fmt", "--all", "--check"],
+            &[],
+        ),
+        build_step("typos", Group::Tidy, "typos", &[], &[]),
+        build_step(
+            "taplo",
+            Group::Tidy,
+            "taplo",
+            &["fmt", "--check"],
+            &[("RUST_LOG", "warn")],
+        ),
+        build_step(
+            "cargo-deny",
+            Group::Tidy,
+            "cargo",
+            &["deny", "--locked", "check"],
+            &[],
+        ),
+        build_step(
+            "cargo-shear",
+            Group::Tidy,
+            "cargo",
+            &["shear", "--locked", "--deny-warnings"],
+            &[],
+        ),
+        build_stomme_step(base),
+        build_step(
+            "clippy",
+            Group::Build,
+            "cargo",
+            &["clippy", "--workspace", "--all-targets", "--locked"],
+            &[DENY_WARNINGS],
+        ),
+        build_step(
+            "nextest",
+            Group::Build,
+            "cargo",
+            &["nextest", "run", "--workspace", "--locked"],
+            &[DENY_WARNINGS],
+        ),
+        build_step(
+            "doctests",
+            Group::Build,
+            "cargo",
+            &["test", "--doc", "--workspace", "--locked"],
+            &[DENY_WARNINGS],
+        ),
+        build_step(
+            "rustdoc",
+            Group::Build,
+            "cargo",
+            &["doc", "--workspace", "--no-deps", "--locked"],
+            &[DENY_WARNINGS, ("RUSTDOCFLAGS", "-D warnings")],
+        ),
+    ]
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("Unknown check arguments: {}. Use tidy, build, or none.", arguments.join(" "))]
@@ -114,6 +164,29 @@ fn parse_groups(arguments: &[String]) -> Result<Vec<Group>, UnknownArguments> {
     }
 }
 
+const STOMME_BASE: &str = "STOMME_BASE";
+const RAW_VALUES: &str = "raw-values";
+
+#[derive(Debug, Error, PartialEq, Eq)]
+enum InvalidStommeBase {
+    #[error("{variable} is not valid UTF-8")]
+    NotUtf8 { variable: &'static str },
+}
+
+fn parse_stomme_base(value: Option<OsString>) -> Result<Option<String>, InvalidStommeBase> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let base = value
+        .into_string()
+        .map_err(|_| InvalidStommeBase::NotUtf8 {
+            variable: STOMME_BASE,
+        })?;
+
+    Ok(Some(base).filter(|base| !base.is_empty()))
+}
+
 #[expect(
     clippy::print_stderr,
     reason = "check progress and failures are the command's output"
@@ -122,7 +195,7 @@ fn run_step(root: &Path, step: &Step) -> bool {
     eprintln!("==> {}", step.name);
 
     let status = Command::new(step.program)
-        .args(step.arguments)
+        .args(&step.arguments)
         .envs(step.environment.iter().copied())
         .current_dir(root)
         .status();
@@ -138,21 +211,18 @@ fn run_step(root: &Path, step: &Step) -> bool {
 
 #[expect(
     clippy::print_stderr,
-    reason = "source check progress and failures are the command's output"
+    reason = "raw-values progress and failures are the command's output"
 )]
-fn failed_source_checks(root: &Path) -> Vec<&'static str> {
-    let mut failed = Vec::new();
+fn check_raw_values(root: &Path) -> bool {
+    eprintln!("==> {RAW_VALUES}");
 
-    for (name, source_check) in SOURCE_CHECKS {
-        eprintln!("==> {name}");
-
-        if let Err(error) = source_check(root) {
+    match raw_values::check(root) {
+        Ok(()) => true,
+        Err(error) => {
             eprintln!("{error:#}");
-            failed.push(*name);
+            false
         }
     }
-
-    failed
 }
 
 // Runs every selected step, even after a failure, so one run shows every problem.
@@ -165,16 +235,22 @@ fn failed_steps<'a>(root: &Path, steps: &'a [Step], groups: &[Group]) -> Vec<&'a
         .collect()
 }
 
+fn failed_checks<'a>(root: &Path, steps: &'a [Step], groups: &[Group]) -> Vec<&'a str> {
+    let mut failed = failed_steps(root, steps, groups);
+
+    if groups.contains(&Group::Tidy) && !check_raw_values(root) {
+        failed.push(RAW_VALUES);
+    }
+
+    failed
+}
+
 #[expect(
     clippy::print_stderr,
     reason = "check progress and failures are the command's output"
 )]
 fn check_steps(root: &Path, steps: &[Step], groups: &[Group]) -> ExitCode {
-    let mut failed = failed_steps(root, steps, groups);
-
-    if groups.contains(&Group::Tidy) {
-        failed.extend(failed_source_checks(root));
-    }
+    let failed = failed_checks(root, steps, groups);
 
     if failed.is_empty() {
         eprintln!("All checks passed.");
@@ -185,34 +261,12 @@ fn check_steps(root: &Path, steps: &[Step], groups: &[Group]) -> ExitCode {
     ExitCode::FAILURE
 }
 
-#[expect(
-    clippy::print_stderr,
-    reason = "invalid check arguments are the command's error output"
-)]
-pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
-    let groups = match parse_groups(arguments) {
-        Ok(groups) => groups,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    check_steps(root, STEPS, &groups)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn shell_step(arguments: &'static [&'static str]) -> Step {
-        Step {
-            name: "shell",
-            group: Group::Tidy,
-            program: "/bin/sh",
-            arguments,
-            environment: &[],
-        }
+    fn shell_step(arguments: &[&str]) -> Step {
+        build_step("shell", Group::Tidy, "/bin/sh", arguments, &[])
     }
 
     #[test]
@@ -346,9 +400,9 @@ mod tests {
     }
 
     #[test]
-    fn steps_group_every_command_check() {
+    fn build_steps_group_every_command_check() {
         let names = |group| {
-            STEPS
+            build_steps(None)
                 .iter()
                 .filter(|step| step.group == group)
                 .map(|step| step.name)
@@ -357,7 +411,14 @@ mod tests {
 
         assert_eq!(
             names(Group::Tidy),
-            ["rustfmt", "typos", "taplo", "cargo-deny", "cargo-shear"]
+            [
+                "rustfmt",
+                "typos",
+                "taplo",
+                "cargo-deny",
+                "cargo-shear",
+                "stomme"
+            ]
         );
         assert_eq!(
             names(Group::Build),
@@ -366,11 +427,48 @@ mod tests {
     }
 
     #[test]
-    fn steps_lock_cargo_and_deny_build_warnings() {
-        for step in STEPS {
+    fn build_steps_gives_the_stomme_step_its_base() {
+        let stomme = ["exec", "--", "stomme", "check"];
+        let with_base = ["exec", "--", "stomme", "check", "--base", "origin/feature"];
+        let cases: [(Option<OsString>, &[&str]); 3] = [
+            (None, &stomme),
+            (Some(OsString::new()), &stomme),
+            (Some(OsString::from("origin/feature")), &with_base),
+        ];
+
+        for (value, expected) in cases {
+            let base = parse_stomme_base(value.clone()).expect("the base is valid");
+            let steps = build_steps(base.as_deref());
+            let stomme_step = steps
+                .iter()
+                .find(|candidate| candidate.name == "stomme")
+                .expect("the stomme step exists");
+
+            assert_eq!(stomme_step.program, "mise", "{value:?}");
+            assert_eq!(stomme_step.arguments, expected, "{value:?}");
+            assert!(stomme_step.environment.is_empty(), "{value:?}");
+            assert_eq!(steps[0].arguments, ["fmt", "--all", "--check"], "{value:?}");
+        }
+    }
+
+    #[test]
+    fn parse_stomme_base_rejects_a_non_utf8_value() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        assert_eq!(
+            parse_stomme_base(Some(OsString::from_vec(vec![0xff, 0xfe]))),
+            Err(InvalidStommeBase::NotUtf8 {
+                variable: "STOMME_BASE"
+            })
+        );
+    }
+
+    #[test]
+    fn build_steps_lock_cargo_and_deny_build_warnings() {
+        for step in build_steps(None) {
             if step.program == "cargo" && step.name != "rustfmt" {
                 assert!(
-                    step.arguments.contains(&"--locked"),
+                    step.arguments.iter().any(|argument| argument == "--locked"),
                     "{} is locked",
                     step.name
                 );
@@ -390,42 +488,11 @@ mod tests {
         }
     }
 
-    fn source_folders() -> tempfile::TempDir {
+    #[test]
+    fn check_steps_fails_a_tidy_run_on_a_raw_value_and_leaves_the_source() {
         let root = crate::test_support::temporary_directory();
-
         std::fs::create_dir_all(root.path().join("crates/tikk-ui/src"))
             .expect("create UI source folder");
-        std::fs::create_dir_all(root.path().join("crates/tikk-core/src"))
-            .expect("create core source folder");
-
-        root
-    }
-
-    fn workspace_with_valid_metadata() -> tempfile::TempDir {
-        let root = source_folders();
-
-        std::fs::create_dir_all(root.path().join("docs/adr")).expect("create ADR folder");
-        std::fs::write(root.path().join("docs/adr/README.md"), "## Index\n")
-            .expect("write empty ADR index");
-        std::fs::create_dir(root.path().join("src")).expect("create source folder");
-        std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
-        std::fs::write(root.path().join("Cargo.toml"),
-            "[workspace]\n[package]\nname = \"tikk-core\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"
-        ).expect("write manifest");
-        let status = Command::new("cargo")
-            .args(["generate-lockfile", "--offline"])
-            .current_dir(root.path())
-            .status()
-            .expect("start cargo to prepare fixture");
-
-        assert!(status.success());
-
-        root
-    }
-
-    #[test]
-    fn tidy_passes_when_boundary_metadata_has_no_violations() {
-        let root = workspace_with_valid_metadata();
 
         assert_eq!(
             check_steps(root.path(), &[], &[Group::Tidy]),
@@ -441,51 +508,29 @@ mod tests {
             ExitCode::FAILURE
         );
         assert_eq!(
+            failed_checks(root.path(), &[], &[Group::Tidy]),
+            ["raw-values"]
+        );
+        assert_eq!(
             std::fs::read_to_string(scene).expect("read unchanged UI source"),
             source
         );
     }
 
     #[test]
-    fn tidy_fails_when_a_module_uses_a_forbidden_module() {
-        let root = workspace_with_valid_metadata();
-        let ticket = root.path().join("crates/tikk-core/src/ticket.rs");
-        std::fs::write(&ticket, "use crate::store::read;\n").expect("write forbidden use");
+    fn check_steps_skips_raw_values_in_a_build_only_run() {
+        let root = crate::test_support::temporary_directory();
+        std::fs::create_dir_all(root.path().join("crates/tikk-ui/src"))
+            .expect("create UI source folder");
+        std::fs::write(
+            root.path().join("crates/tikk-ui/src/scene.rs"),
+            "div().w(px(3.0));",
+        )
+        .expect("write raw UI value");
 
         assert_eq!(
-            check_steps(root.path(), &[], &[Group::Tidy]),
-            ExitCode::FAILURE
-        );
-
-        std::fs::write(&ticket, "").expect("remove forbidden use");
-
-        assert_eq!(
-            check_steps(root.path(), &[], &[Group::Tidy]),
+            check_steps(root.path(), &[], &[Group::Build]),
             ExitCode::SUCCESS
-        );
-    }
-
-    #[test]
-    fn tidy_reports_adr_index_failures() {
-        let root = workspace_with_valid_metadata();
-        let path = root.path().join("docs/adr/0001-choice.md");
-        let source = "# ADR 0001: A choice\n";
-        std::fs::write(&path, source).expect("write unlisted ADR");
-
-        assert_eq!(failed_source_checks(root.path()), ["adr-index"]);
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read unchanged ADR"),
-            source
-        );
-    }
-
-    #[test]
-    fn tidy_fails_when_boundary_metadata_cannot_be_read() {
-        let root = source_folders();
-
-        assert_eq!(
-            check_steps(root.path(), &[], &[Group::Tidy]),
-            ExitCode::FAILURE
         );
     }
 

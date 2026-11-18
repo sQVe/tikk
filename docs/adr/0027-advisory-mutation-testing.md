@@ -2,7 +2,8 @@
 
 **Date**: 2026-11-04\
 **Status**: Accepted\
-**Related**: [ADR 0004 (Toolchain, dependencies, and quality gates)](./0004-toolchain-and-quality-gates.md),
+**Related**: [Shared ADR 0009 (Advisory mutation testing and size as a review signal)](../stomme/shared/adr/0009-advisory-review-signals.md),
+[ADR 0004 (Toolchain, dependencies, and quality gates)](./0004-toolchain-and-quality-gates.md),
 [cargo-mutants](https://mutants.rs)
 
 ## Context
@@ -16,23 +17,21 @@ for one job.
 
 ## Decision
 
-tikk runs mutation testing with cargo-mutants through `cargo xtask mutation`. The CI job that runs
-it is advisory.
+tikk runs mutation testing with cargo-mutants through `cargo xtask mutation`. Shared ADR 0009 states
+the advisory policy: which lines each mode mutates, which code is left out, and how the author
+treats each survivor. This ADR records tikk's commands and CI jobs.
 
 ### Commands
 
 - `cargo xtask mutation changed <base>` mutates the lines changed since a base ref. `cargo xtask
   mutation audit <paths>` mutates whole files.
 - Both modes print one JSON report on stdout, in the format that Tau's `mutation_check` tool reads.
-- The command exits 0 when every mutant is caught, 2 for survivors in changed mode, and 1 for an
-  error or an unmutated file.
+- The command exits 0 when the run completes, survivors included, and 1 for an error or an
+  unmutated file. Survivors stay in the report.
 - Every test runs for each mutant, not only the tests near the mutated file. tikk's cross-module
   tests in `tests/` are part of what kills mutants.
 - `xtask` stays under mutation testing. A check that reports success after a tool fails is a
-  failure of the check itself, so its tests must catch that case. Test code and helpers are
-  excluded because mutating them only weakens the tests.
-- A surviving mutant is a survivor. The author decides whether to add a test that fails when that
-  line changes, or to accept the survivor as equivalent.
+  failure of the check itself, so its tests must catch that case.
 
 ### CI jobs
 
@@ -67,11 +66,6 @@ it is advisory.
 
 Run a JavaScript mutation tool beside the Rust build. Rejected because it needs a second toolchain
 in CI and locally for this one job.
-
-### Make the job a required check
-
-Block a merge on any survivor. Rejected because some survivors are equivalent mutants, and blocking
-on them would push authors to suppress mutants in production code.
 
 ### Run only the tests near the mutated file
 

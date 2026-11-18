@@ -28,8 +28,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # stomme reads stomme.toml from the target branch to refuse new recorded violations.
+          fetch-depth: 0
           persist-credentials: false
       - run: rustup toolchain install
+      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5.2.9
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
@@ -37,6 +40,8 @@ jobs:
         with:
           tool: cargo-deny,cargo-shear,typos,taplo
       - run: cargo xtask check tidy
+        env:
+          STOMME_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
 
   test:
     name: Test (${{ matrix.name }})
@@ -137,9 +142,7 @@ jobs:
             jq -r '"Status: \(.status), \(.survivors | length) survivors"' mutation-report.json
             jq -r '.survivors[] | "- `\(.file):\(.line)`: \(.original) -> \(.replacement)"' mutation-report.json
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
-            exit "$status"
-          fi
+          exit "$status"
 
   mutation-audit:
     name: Mutation audit

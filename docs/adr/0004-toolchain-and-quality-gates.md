@@ -3,8 +3,7 @@
 **Date**: 2026-11-04\
 **Status**: Accepted\
 **Related**: [ADR 0002 (Native Rust app with GPUI, as two binaries over one core crate)](./0002-native-rust-gpui-two-binaries.md),
-[ADR 0005 (Typed results for expected failures, panics for bugs, and parse-once
-boundaries)](./0005-results-panics-and-parse-once-boundaries.md)
+[Shared rules table](../stomme/shared/rules.md)
 
 ## Context
 
@@ -32,6 +31,9 @@ point for every check.
 ### Linting
 
 - Clippy lint levels live in `[workspace.lints]`, and every crate uses them.
+- stomme's shared Rust lint policy sets the floor. `[workspace.lints]` keeps each shared lint at
+  its shared level or stricter, and `clippy.toml` keeps each shared ban with its reason. tikk adds
+  its own lints and bans above that floor.
 - The `all` group warns and `correctness` denies. Single lints, such as `dbg_macro` and `todo`, are
   added when they are needed. The whole pedantic, nursery, and restriction groups stay off.
 - `print_stdout` and `print_stderr` warn on printing outside deliberate command output.
@@ -65,12 +67,15 @@ point for every check.
 ### Tests and checks
 
 - cargo-nextest runs the tests, and doctests run separately.
-- `cargo xtask check` runs rustfmt, typos, taplo, cargo-deny, cargo-shear, clippy, nextest,
-  doctests, rustdoc, and a crate-boundary check. It reports every failed check at the end and
-  changes no files.
-- The crate-boundary check fails when `tikk-cli` or `tikk-core` depends on GPUI, `tikk-ui`, or
-  `tikk-desktop`, directly or through another crate. It reads the dependency graph from
-  `cargo metadata`.
+- `cargo xtask check` runs rustfmt, typos, taplo, cargo-deny, cargo-shear, `stomme check`, the
+  raw-value check, clippy, nextest, doctests, and rustdoc. It reports every failed check at the end
+  and changes no files.
+- `stomme check` runs at the version that mise pins. It checks `stomme.toml`, the synced
+  `docs/stomme/` tree, the ADR index, file names, the module table of
+  [ADR 0035](./0035-capability-modules-in-stomme-toml.md), and the shared lint policy. When
+  `STOMME_BASE` is set, the check passes it as the target branch for recorded violations.
+- stomme's `gpui-plain-core` rule fails when `tikk-cli` or `tikk-core` depends on GPUI or on a UI,
+  kit, or app role crate, directly or through another crate.
 - prek runs formatting and linting as Git hooks before a commit.
 
 ### Mutation testing
@@ -80,7 +85,8 @@ point for every check.
 - Pull requests mutate changed lines. Scheduled and manual runs on `main` audit the whole
   workspace and save the cargo-mutants report.
 - Survivors are advice and do not fail CI. Errors, unmutated files, and failing baselines do.
-  [ADR 0027](./0027-advisory-mutation-testing.md) records the mutation policy.
+  [Shared ADR 0009](../stomme/shared/adr/0009-advisory-review-signals.md) states the policy, and
+  [ADR 0027](./0027-advisory-mutation-testing.md) records tikk's commands and jobs.
 
 ## Consequences
 
@@ -100,6 +106,7 @@ point for every check.
 - Selected lints catch less than the pedantic group, so some style problems are left to review.
 - A new license in the dependency tree blocks the build until someone reviews and allows it.
 - Hooks add time to each commit, and prek is one more tool to install.
+- `stomme check` needs mise and the pinned stomme release on every machine and in CI.
 
 ## Alternatives considered
 
@@ -122,6 +129,11 @@ change formatting, so the same code passes on one machine and fails on another.
 
 Pin every dependency to one exact version in `Cargo.toml`. Rejected because each update becomes a
 manifest edit, and the lock file already fixes the shipped versions.
+
+### A local crate-boundary check
+
+Keep tikk's own check of the crate dependency graph beside `stomme check`. Rejected because
+`gpui-plain-core` reads the same graph, and two copies of one rule drift apart.
 
 ### No license and advisory checks
 

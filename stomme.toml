@@ -1,0 +1,106 @@
+schema = 1
+version = "0.2.0"
+language = "rust"
+layers = ["gpui", "gpui-component"]
+
+[roles]
+app = "crates/tikk-desktop"
+cli = "crates/tikk-cli"
+core = "crates/tikk-core"
+ui = "crates/tikk-ui"
+
+[modules.fact]
+entry = "crates/tikk-core/src/fact.rs"
+imports = ["ticket"]
+
+[modules.store]
+entry = "crates/tikk-core/src/store.rs"
+imports = ["fact", "ticket"]
+
+[modules.ticket]
+entry = "crates/tikk-core/src/ticket.rs"
+
+[modules.kit]
+entry = "crates/tikk-ui/src/kit.rs"
+imports = ["theme"]
+
+[modules.parts]
+entry = "crates/tikk-ui/src/parts.rs"
+imports = ["kit", "theme"]
+
+[modules.scenes]
+entry = "crates/tikk-ui/src/scenes.rs"
+imports = ["parts", "theme"]
+
+[modules.theme]
+entry = "crates/tikk-ui/src/theme.rs"
+
+[[violations]]
+path = "crates/tikk-desktop"
+rule = "role-folder"
+key = "app:tikk-desktop"
+
+[[violations]]
+path = "crates/tikk-cli/tests/support/mod.rs"
+rule = "rust-catch-all-name"
+key = "mod.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/claim_sync_tests.rs"
+rule = "rust-test-placement"
+key = "claim_sync_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/store_init_race_tests.rs"
+rule = "rust-test-placement"
+key = "store_init_race_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/store_init_remote_tests.rs"
+rule = "rust-test-placement"
+key = "store_init_remote_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/store_init_tests.rs"
+rule = "rust-test-placement"
+key = "store_init_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_commit_tests.rs"
+rule = "rust-test-placement"
+key = "sync_commit_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_merge_tests.rs"
+rule = "rust-test-placement"
+key = "sync_merge_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_network_tests.rs"
+rule = "rust-test-placement"
+key = "sync_network_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_property_tests.rs"
+rule = "rust-test-placement"
+key = "sync_property_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_refusal_tests.rs"
+rule = "rust-test-placement"
+key = "sync_refusal_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_result_tests.rs"
+rule = "rust-test-placement"
+key = "sync_result_tests.rs"
+
+[[violations]]
+path = "crates/tikk-core/src/store/sync_tests.rs"
+rule = "rust-test-placement"
+key = "sync_tests.rs"
+
+[[violations]]
+path = "crates/tikk-ui/src/bin/tikk-scene.rs"
+rule = "rust-file-case"
+key = "tikk-scene.rs"

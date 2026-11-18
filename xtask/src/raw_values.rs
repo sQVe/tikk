@@ -2,14 +2,12 @@ mod source;
 mod value;
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
 use thiserror::Error;
 
 use source::scan_source;
-
-use crate::source_files::sorted_rust_files;
 
 const UI_SOURCE: &str = "crates/tikk-ui/src";
 const THEME_FILE: &str = "theme.rs";
@@ -29,6 +27,37 @@ pub(crate) fn check(root: &Path) -> anyhow::Result<()> {
     }
 
     Err(RawValues { failures }.into())
+}
+
+fn sorted_rust_files(directory: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+
+    collect_rust_files(directory, &mut files)?;
+    files.sort();
+
+    Ok(files)
+}
+
+fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> anyhow::Result<()> {
+    let entries = fs::read_dir(directory)
+        .with_context(|| format!("Could not list {}", directory.display()))?;
+
+    for entry in entries {
+        let path = entry
+            .with_context(|| format!("Could not read an entry of {}", directory.display()))?
+            .path();
+
+        if path
+            .symlink_metadata()
+            .is_ok_and(|metadata| metadata.is_dir())
+        {
+            collect_rust_files(&path, files)?;
+        } else if path.extension().and_then(|extension| extension.to_str()) == Some("rs") {
+            files.push(path);
+        }
+    }
+
+    Ok(())
 }
 
 fn scan_directory(root: &Path, directory: &Path) -> anyhow::Result<Vec<String>> {
