@@ -59,6 +59,13 @@ const STEPS: &[Step] = &[
         environment: &[],
     },
     Step {
+        name: "stomme",
+        group: Group::Tidy,
+        program: "mise",
+        arguments: &["exec", "--", "stomme", "check"],
+        environment: &[],
+    },
+    Step {
         name: "clippy",
         group: Group::Build,
         program: "cargo",
@@ -357,12 +364,31 @@ mod tests {
 
         assert_eq!(
             names(Group::Tidy),
-            ["rustfmt", "typos", "taplo", "cargo-deny", "cargo-shear"]
+            [
+                "rustfmt",
+                "typos",
+                "taplo",
+                "cargo-deny",
+                "cargo-shear",
+                "stomme"
+            ]
         );
         assert_eq!(
             names(Group::Build),
             ["clippy", "nextest", "doctests", "rustdoc"]
         );
+    }
+
+    #[test]
+    fn stomme_step_runs_the_pinned_stomme_through_mise() {
+        let step = STEPS
+            .iter()
+            .find(|step| step.name == "stomme")
+            .expect("the stomme step exists");
+
+        assert_eq!(step.program, "mise");
+        assert_eq!(step.arguments, ["exec", "--", "stomme", "check"]);
+        assert!(step.environment.is_empty());
     }
 
     #[test]
