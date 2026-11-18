@@ -1,8 +1,5 @@
-mod adr_index;
-mod boundaries;
 mod check;
 mod mock;
-mod module_table;
 mod mutation;
 mod raw_values;
 #[cfg(target_os = "linux")]

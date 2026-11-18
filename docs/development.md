@@ -66,8 +66,7 @@ cargo xtask check
 ```
 
 It changes no files. It runs rustfmt, typos, taplo, cargo-deny, cargo-shear, stomme, clippy,
-nextest, doctests, rustdoc, the raw-value check, the crate-boundary check, and the module table check, and
-reports every failed check at the end.
+nextest, doctests, rustdoc, and the raw-value check, and reports every failed check at the end.
 Warnings fail clippy, the tests, and rustdoc. Every Cargo build runs with `--locked`, so a stale
 `Cargo.lock` fails too.
 
@@ -75,16 +74,8 @@ The stomme check reads `stomme.toml`, `docs/stomme/`, the stomme block in `AGENT
 index. Run it alone with `mise exec -- stomme check`.
 `STOMME_BASE=origin/<parent>` makes the stomme step compare against the parent of a stacked branch.
 
-The crate-boundary check fails when `tikk-cli` or `tikk-core` depends on GPUI, `tikk-ui`, or
-`tikk-desktop`, directly or through another crate. It prints the dependency path it found.
-
-The module table check reads every top-level module of `crates/tikk-core/src/`, except `lib.rs`.
-It reads paths that start with `crate::` in `use` items and in code, and skips comments and
-strings. It fails when a module uses a module that its table entry does not allow, when a path
-names something at the crate root that is no module, such as `crate::Error` or `crate::*`, or when
-the table does not list a module. It prints one line per problem, with the module and the file path,
-and the line for a forbidden use. A new module or a new use between modules needs a change to the
-table in `xtask/src/module_table.rs`.
+The stomme check also checks crate boundaries, ADR numbering and the ADR index, and the module
+table in `stomme.toml`. A new module or a new use between modules needs a change to that table.
 
 The raw-value check scans `crates/tikk-ui/src/`, except its top-level `theme.rs`. Sizes, spacing,
 radii, text sizes, and colors must use theme tokens or kit defaults. Run this check alone with
@@ -94,8 +85,8 @@ The theme's contrast test checks text against each surface at 4.5:1 and control 
 3:1. It fails for a new failing pair or a known failing pair that starts to pass. The initial
 known-failure list is empty.
 
-`cargo xtask check tidy` runs only the checks that do not compile code, the crate-boundary check
-and the module table check included. `cargo xtask check build` runs only the ones that do.
+`cargo xtask check tidy` runs only the checks that do not compile code. `cargo xtask check build`
+runs only the ones that do.
 
 Fix problems with these commands:
 

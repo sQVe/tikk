@@ -4,7 +4,7 @@ use std::process::{Command, ExitCode};
 
 use thiserror::Error;
 
-use crate::{adr_index, boundaries, module_table, raw_values};
+use crate::raw_values;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
@@ -98,12 +98,7 @@ const STEPS: &[Step] = &[
 
 type SourceCheck = fn(&Path) -> anyhow::Result<()>;
 
-const SOURCE_CHECKS: &[(&str, SourceCheck)] = &[
-    ("adr-index", adr_index::check),
-    ("crate-boundaries", boundaries::check),
-    ("module-table", module_table::check),
-    ("raw-values", raw_values::check),
-];
+const SOURCE_CHECKS: &[(&str, SourceCheck)] = &[("raw-values", raw_values::check)];
 
 #[derive(Debug, Error, PartialEq, Eq)]
 #[error("Unknown check arguments: {}. Use tidy, build, or none.", arguments.join(" "))]
@@ -511,42 +506,11 @@ mod tests {
         }
     }
 
-    fn source_folders() -> tempfile::TempDir {
+    #[test]
+    fn tidy_fails_when_the_raw_value_check_fails() {
         let root = crate::test_support::temporary_directory();
-
         std::fs::create_dir_all(root.path().join("crates/tikk-ui/src"))
             .expect("create UI source folder");
-        std::fs::create_dir_all(root.path().join("crates/tikk-core/src"))
-            .expect("create core source folder");
-
-        root
-    }
-
-    fn workspace_with_valid_metadata() -> tempfile::TempDir {
-        let root = source_folders();
-
-        std::fs::create_dir_all(root.path().join("docs/adr")).expect("create ADR folder");
-        std::fs::write(root.path().join("docs/adr/README.md"), "## Index\n")
-            .expect("write empty ADR index");
-        std::fs::create_dir(root.path().join("src")).expect("create source folder");
-        std::fs::write(root.path().join("src/lib.rs"), "").expect("write library");
-        std::fs::write(root.path().join("Cargo.toml"),
-            "[workspace]\n[package]\nname = \"tikk-core\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"
-        ).expect("write manifest");
-        let status = Command::new("cargo")
-            .args(["generate-lockfile", "--offline"])
-            .current_dir(root.path())
-            .status()
-            .expect("start cargo to prepare fixture");
-
-        assert!(status.success());
-
-        root
-    }
-
-    #[test]
-    fn tidy_passes_when_boundary_metadata_has_no_violations() {
-        let root = workspace_with_valid_metadata();
 
         assert_eq!(
             check_steps(root.path(), &[], &[Group::Tidy], None),
@@ -561,52 +525,10 @@ mod tests {
             check_steps(root.path(), &[], &[Group::Tidy], None),
             ExitCode::FAILURE
         );
+        assert_eq!(failed_source_checks(root.path()), ["raw-values"]);
         assert_eq!(
             std::fs::read_to_string(scene).expect("read unchanged UI source"),
             source
-        );
-    }
-
-    #[test]
-    fn tidy_fails_when_a_module_uses_a_forbidden_module() {
-        let root = workspace_with_valid_metadata();
-        let ticket = root.path().join("crates/tikk-core/src/ticket.rs");
-        std::fs::write(&ticket, "use crate::store::read;\n").expect("write forbidden use");
-
-        assert_eq!(
-            check_steps(root.path(), &[], &[Group::Tidy], None),
-            ExitCode::FAILURE
-        );
-
-        std::fs::write(&ticket, "").expect("remove forbidden use");
-
-        assert_eq!(
-            check_steps(root.path(), &[], &[Group::Tidy], None),
-            ExitCode::SUCCESS
-        );
-    }
-
-    #[test]
-    fn tidy_reports_adr_index_failures() {
-        let root = workspace_with_valid_metadata();
-        let path = root.path().join("docs/adr/0001-choice.md");
-        let source = "# ADR 0001: A choice\n";
-        std::fs::write(&path, source).expect("write unlisted ADR");
-
-        assert_eq!(failed_source_checks(root.path()), ["adr-index"]);
-        assert_eq!(
-            std::fs::read_to_string(&path).expect("read unchanged ADR"),
-            source
-        );
-    }
-
-    #[test]
-    fn tidy_fails_when_boundary_metadata_cannot_be_read() {
-        let root = source_folders();
-
-        assert_eq!(
-            check_steps(root.path(), &[], &[Group::Tidy], None),
-            ExitCode::FAILURE
         );
     }
 
