@@ -6,7 +6,7 @@ pub use fact::{
     AgentName, Answer, Attention, AttentionInput, AttentionItem, AttentionProblem, AttentionReason,
     AttentionState, AttentionTicket, Audit, AuditVerdict, Claim, ClaimState, PrObservation,
     PrState, PullRequest, Question, QuestionItem, Repository, ShownAudit, ShownPr, Timestamp,
-    Verdict, attention,
+    Verdict, derive_attention,
 };
 pub use store::{
     AnswerEffects, AskEffects, AttentionEffects, AuditCheck, AuditEffects, AuditReason,

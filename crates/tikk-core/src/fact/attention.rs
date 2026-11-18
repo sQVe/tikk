@@ -137,7 +137,7 @@ impl AttentionProblem {
     }
 }
 
-pub fn attention(input: AttentionInput<'_>) -> Attention {
+pub fn derive_attention(input: AttentionInput<'_>) -> Attention {
     let tickets: HashMap<&TicketId, &AttentionTicket> = input
         .tickets
         .iter()
@@ -280,7 +280,7 @@ mod tests {
 
     use super::{
         AttentionInput, AttentionItem, AttentionProblem, AttentionReason, AttentionState,
-        AttentionTicket, attention,
+        AttentionTicket, derive_attention,
     };
     use crate::fact::{
         AgentName, Answer, Claim, PrObservation, PrState, PullRequest, Question, QuestionItem,
@@ -359,7 +359,7 @@ mod tests {
         }
 
         fn items(&self) -> Vec<(String, &'static str)> {
-            attention(AttentionInput {
+            derive_attention(AttentionInput {
                 tickets: &self.tickets,
                 questions: &self.questions,
                 claims: &self.claims,
@@ -452,7 +452,7 @@ mod tests {
             vec![question("bbbb", false), question("aaaa", true)],
         );
 
-        let listed = attention(AttentionInput {
+        let listed = derive_attention(AttentionInput {
             tickets: &fixture.tickets,
             questions: &fixture.questions,
             claims: &fixture.claims,
@@ -491,7 +491,7 @@ mod tests {
             claim("manager", "2026-11-13T12:00:00.001Z"),
         );
 
-        let listed = attention(AttentionInput {
+        let listed = derive_attention(AttentionInput {
             tickets: &fixture.tickets,
             questions: &fixture.questions,
             claims: &fixture.claims,
@@ -531,7 +531,7 @@ mod tests {
             ticket("tikk-wwww", Kind::Task, AttentionState::Open),
         ]);
 
-        let listed = attention(AttentionInput {
+        let listed = derive_attention(AttentionInput {
             tickets: &fixture.tickets,
             questions: &fixture.questions,
             claims: &fixture.claims,
@@ -577,7 +577,7 @@ mod tests {
         fixture.prs.insert(id("tikk-aaaa"), merged_pr());
         fixture.prs.insert(id("tikk-bbbb"), merged_pr());
 
-        let listed = attention(AttentionInput {
+        let listed = derive_attention(AttentionInput {
             tickets: &fixture.tickets,
             questions: &fixture.questions,
             claims: &fixture.claims,
@@ -621,7 +621,7 @@ mod tests {
             files: vec!["tickets/tikk/tikk-aaaa.md".to_owned()],
         };
 
-        let listed = attention(AttentionInput {
+        let listed = derive_attention(AttentionInput {
             tickets: &fixture.tickets,
             questions: &fixture.questions,
             claims: &fixture.claims,

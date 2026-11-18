@@ -1,6 +1,6 @@
 use crate::fact::{
-    Attention, AttentionInput, AttentionProblem, AttentionState, AttentionTicket, attention,
-    current_claims, current_prs, current_questions,
+    Attention, AttentionInput, AttentionProblem, AttentionState, AttentionTicket, current_claims,
+    current_prs, current_questions, derive_attention,
 };
 use std::path::Path;
 
@@ -54,7 +54,7 @@ pub fn read_attention(store: &Store, effects: &AttentionEffects) -> Result<Atten
 
     problems.extend(sync_problems);
 
-    Ok(attention(AttentionInput {
+    Ok(derive_attention(AttentionInput {
         tickets: &attention_tickets(&scan, &derived),
         questions: &current_questions(&facts.facts),
         claims: &current_claims(&facts.facts),
