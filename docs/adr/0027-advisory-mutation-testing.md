@@ -26,8 +26,8 @@ treats each survivor. This ADR records tikk's commands and CI jobs.
 - `cargo xtask mutation changed <base>` mutates the lines changed since a base ref. `cargo xtask
   mutation audit <paths>` mutates whole files.
 - Both modes print one JSON report on stdout, in the format that Tau's `mutation_check` tool reads.
-- The command exits 0 when every mutant is caught, 2 for survivors in changed mode, and 1 for an
-  error or an unmutated file.
+- The command exits 0 when the run completes, survivors included, and 1 for an error or an
+  unmutated file. Survivors stay in the report.
 - Every test runs for each mutant, not only the tests near the mutated file. tikk's cross-module
   tests in `tests/` are part of what kills mutants.
 - `xtask` stays under mutation testing. A check that reports success after a tool fails is a

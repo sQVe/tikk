@@ -142,9 +142,7 @@ jobs:
             jq -r '"Status: \(.status), \(.survivors | length) survivors"' mutation-report.json
             jq -r '.survivors[] | "- `\(.file):\(.line)`: \(.original) -> \(.replacement)"' mutation-report.json
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then
-            exit "$status"
-          fi
+          exit "$status"
 
   mutation-audit:
     name: Mutation audit

@@ -1,8 +1,8 @@
 //! `cargo xtask mutation`: runs cargo-mutants and prints Tau's mutation report on stdout.
 //!
-//! Exit codes follow Tau's contract: 0 for `pass`, `nothing`, or survivors in audit mode, 2 for
-//! survivors in changed mode, and 1 for an error or any unmutated file. Everything except the
-//! report goes to stderr, because Tau parses stdout as JSON.
+//! Survivors are advice and never fail the command: it exits 0 for `pass`, `nothing`, or survivors,
+//! and 1 for an error or any unmutated file. Everything except the report goes to stderr, because
+//! Tau parses stdout as JSON.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -440,7 +440,7 @@ fn error_report(message: &str) -> Value {
     })
 }
 
-fn ran_report(mode: Mode, survivors: &[Survivor], unmutated: &[String]) -> (Value, u8) {
+fn ran_report(survivors: &[Survivor], unmutated: &[String]) -> (Value, u8) {
     let survivor_values: Vec<Value> = survivors
         .iter()
         .map(|survivor| {
@@ -476,12 +476,7 @@ fn ran_report(mode: Mode, survivors: &[Survivor], unmutated: &[String]) -> (Valu
         return (report, 1);
     }
 
-    let exit = match (survivors.is_empty(), mode) {
-        (false, Mode::Changed) => 2,
-        _ => 0,
-    };
-
-    (report, exit)
+    (report, 0)
 }
 
 fn report(root: &Path, arguments: &[String], cargo: &str, git: &str) -> (Value, u8) {
@@ -498,7 +493,7 @@ fn report(root: &Path, arguments: &[String], cargo: &str, git: &str) -> (Value, 
         Ok(Outcome::Ran {
             survivors,
             unmutated,
-        }) => ran_report(request.mode, &survivors, &unmutated),
+        }) => ran_report(&survivors, &unmutated),
         Err(error) => (error_report(&format!("{error:#}")), 1),
     }
 }
@@ -1101,29 +1096,57 @@ mod tests {
     }
 
     #[test]
+    fn report_exits_zero_and_lists_survivors_in_changed_mode() {
+        let fixture = Fixture::new();
+        let outcomes = json!({ "outcomes": [{
+            "summary": "MissedMutant",
+            "scenario": { "Mutant": {
+                "file": "a.rs", "genre": "BinaryOperator", "replacement": ">",
+                "span": { "start": { "line": 1, "column": 3 }, "end": { "line": 1, "column": 5 } },
+            } },
+        }] });
+        let outcomes_path = fixture
+            .folder
+            .path()
+            .join(OUTPUT_DIRECTORY)
+            .join("mutants.out/outcomes.json");
+        let cargo = fixture.cargo(LISTING, 0, "exit 2");
+        let git = fixture.git(DIFF, 0);
+
+        fs::write(fixture.folder.path().join("a.rs"), "a <= b\n").expect("write source");
+        fs::write(&outcomes_path, outcomes.to_string()).expect("write outcomes");
+
+        let (report, exit) = fixture.report(&["changed", "main"], &cargo, &git);
+
+        assert_eq!((report["status"].as_str(), exit), (Some("survivors"), 0));
+        assert_eq!(
+            report["survivors"],
+            json!([{
+                "file": "a.rs", "line": 1, "mutator": "BinaryOperator", "original": "<=",
+                "replacement": ">", "covered": true,
+            }])
+        );
+    }
+
+    #[test]
     fn ran_report_sets_status_and_exit_code() {
         let found = [survivor()];
         let skipped = strings(&["b.rs"]);
 
-        let (passed, passed_exit) = ran_report(Mode::Changed, &[], &[]);
-        let (changed, changed_exit) = ran_report(Mode::Changed, &found, &[]);
-        let (audit, audit_exit) = ran_report(Mode::Audit, &found, &[]);
-        let (capped, capped_exit) = ran_report(Mode::Audit, &[], &skipped);
-        let (both, both_exit) = ran_report(Mode::Changed, &found, &skipped);
+        let (passed, passed_exit) = ran_report(&[], &[]);
+        let (found_report, found_exit) = ran_report(&found, &[]);
+        let (capped, capped_exit) = ran_report(&[], &skipped);
+        let (both, both_exit) = ran_report(&found, &skipped);
 
         assert_eq!((passed["status"].as_str(), passed_exit), (Some("pass"), 0));
         assert_eq!(
-            (changed["status"].as_str(), changed_exit),
-            (Some("survivors"), 2)
-        );
-        assert_eq!(
-            (audit["status"].as_str(), audit_exit),
+            (found_report["status"].as_str(), found_exit),
             (Some("survivors"), 0)
         );
         assert_eq!((capped["status"].as_str(), capped_exit), (Some("error"), 1));
         assert_eq!((both["status"].as_str(), both_exit), (Some("survivors"), 1));
         assert_eq!(
-            changed["survivors"][0],
+            found_report["survivors"][0],
             json!({
                 "file": "src/lib.rs", "line": 3, "mutator": "BinaryOperator", "original": "<=",
                 "replacement": ">", "covered": true,

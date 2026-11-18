@@ -175,9 +175,9 @@ cargo xtask mutation changed origin/main --max-mutants 50
 `.cargo/mutants.toml` includes `xtask` and leaves out the `tikk` entry point, `tikk-desktop`, the
 scene binary, fake scene data, vendor code, tests, and test helpers. Each exclusion states its
 reason. Review each survivor and add a test when it
-exposes missing coverage. The command exits 0 when every mutant is caught, no mutant matches, or
-survivors remain in audit mode. It exits 2 for survivors in changed mode, and 1 for an error or an
-unmutated file. cargo-mutants writes its logs to `target/mutants/mutants.out`.
+exposes missing coverage. The command exits 0 when the run completes, survivors included, and 1 for
+an error or an unmutated file. The report lists the survivors. cargo-mutants writes its logs to
+`target/mutants/mutants.out`.
 
 ## CI
 
