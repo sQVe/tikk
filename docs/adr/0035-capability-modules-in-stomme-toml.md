@@ -34,18 +34,12 @@ table.
 - `kit`, `parts`, `scenes`, and `theme` are modules in `tikk-ui`.
 - `tikk-cli`, `tikk-desktop`, and `xtask` have no rows.
 
-### Edges
+### Dependency direction
 
-- `fact` uses `ticket`.
-- `store` uses `fact` and `ticket`.
-- `ticket` uses no module.
-- `kit` uses `theme`.
-- `parts` uses `kit` and `theme`.
-- `scenes` uses `parts` and `theme`.
-- `theme` uses no module.
-
-No row imports `store`, so no module uses the I/O module. An edge that keeps these directions is a
-table edit. An edge that reverses one needs a new ADR.
+[`stomme.toml`](../../stomme.toml) lists the allowed imports of each module. Imports run from the
+I/O module toward the pure modules in `tikk-core`, and from `scenes` down to `theme` in `tikk-ui`.
+No module imports `store`, so no module uses the I/O module. A table edit that keeps these
+directions needs no ADR. An edit that reverses one needs a new ADR.
 
 ### Crates
 
