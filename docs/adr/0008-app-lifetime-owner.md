@@ -3,7 +3,7 @@
 **Date**: 2026-11-04\
 **Status**: Accepted\
 **Related**: [ADR 0002 (Native Rust app with GPUI, as two binaries over one core crate)](./0002-native-rust-gpui-two-binaries.md),
-[ADR 0007 (Side effects as narrow records of functions)](./0007-side-effect-function-records.md)
+[GPUI guide](../stomme/layers/gpui/guide.md)
 
 ## Context
 
@@ -13,16 +13,16 @@ quit with a shortcut, and each path must clean up the same way.
 
 ## Decision
 
-One module of the desktop app owns the GPUI application, its windows, the action and key
-registration, background tasks, and shutdown. The entry point composes dependencies and starts that
-module. Every exit path goes through the same owner.
+The GPUI guide's `gpui-app-lifetime` rule is the base: one module of the desktop app owns the GPUI
+application, its windows, the action and key registration, background tasks, and shutdown. The
+entry point composes dependencies and starts that module. Quit, the last window closing, and a
+system quit request run the same shutdown path once. tikk adds the shutdown steps and the editor
+rules below.
 
 ### Shutdown
 
-- One shutdown path runs for quit, for the last window closing, and for a system quit request. It
-  runs once, even when several triggers fire.
-- It stops new work and cancels running tasks and owned child processes. It waits a bounded time for
-  children to exit, then ends the rest.
+- The shutdown path stops new work and cancels running tasks and owned child processes. It waits a
+  bounded time for children to exit, then ends the rest.
 - It finishes pending writes under the store lock before the process exits.
 - A fatal error shows the user a message before the process exits.
 

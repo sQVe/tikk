@@ -4,8 +4,8 @@ Record lasting decisions and the reasons behind them, not how a feature works.
 
 ## Before writing
 
-Follow [ADR 0001](./0001-documentation-scope.md) for documentation scope. Before opening the
-[template](./TEMPLATE.md), answer:
+Follow [shared ADR 0001](../stomme/shared/adr/0001-documentation-scope.md) for documentation scope.
+Before opening the [template](./TEMPLATE.md), answer:
 
 - What choice are we making, and what lasting reason stands behind it?
 - What credible alternative did we consider, and why did we reject it?
@@ -29,10 +29,6 @@ the commit in its row.
 
 ## Index
 
-### Documentation
-
-- [0001: Documentation scope](./0001-documentation-scope.md)
-
 ### Platform and project
 
 - [0002: Native Rust app with GPUI, as two binaries over one core crate](./0002-native-rust-gpui-two-binaries.md)
@@ -43,12 +39,9 @@ the commit in its row.
 
 ### Code structure
 
-- [0005: Typed results for expected failures, panics for bugs, and parse-once boundaries](./0005-results-panics-and-parse-once-boundaries.md)
-- [0006: Capability modules with an enforced dependency table](./0006-capability-modules.md)
-- [0007: Side effects as narrow records of functions](./0007-side-effect-function-records.md)
 - [0008: One owner for the desktop app's lifetime](./0008-app-lifetime-owner.md)
-- [0009: Owner files inside modules, thin coordinators, and owner-first file names](./0009-owner-files-and-file-names.md)
-- [0030: A Rust coding guide adapts Tau's coding rules](./0030-rust-coding-guide.md)
+- [0035: tikk lists its capability modules in `stomme.toml`](./0035-capability-modules-in-stomme-toml.md)
+- [0036: tikk keeps only its own rules beside the shared guides](./0036-project-rules-beside-the-shared-guides.md)
 
 ### Agent interface
 
@@ -122,4 +115,10 @@ an old decision went. The ADRs themselves do not use the old numbers.
 
 | ADR | Title | Replaced by | Last commit |
 | --- | ----- | ----------- | ----------- |
+| 0001 | Documentation scope | [Shared ADR 0001](../stomme/shared/adr/0001-documentation-scope.md) | `91c88e5` |
+| 0005 | Typed results for expected failures, panics for bugs, and parse-once boundaries | [Shared ADR 0005](../stomme/shared/adr/0005-results-and-parse-once.md) | `8db2fa9` |
+| 0006 | Capability modules with an enforced dependency table | [Shared ADR 0002](../stomme/shared/adr/0002-capability-modules.md) and [0035](./0035-capability-modules-in-stomme-toml.md) | `8db2fa9` |
+| 0007 | Side effects as narrow records of functions | [Shared ADR 0006](../stomme/shared/adr/0006-side-effect-records.md) | `33cf178` |
+| 0009 | Owner files inside modules, thin coordinators, and owner-first file names | [Shared ADR 0003](../stomme/shared/adr/0003-owner-folders-and-file-names.md) and [shared ADR 0007](../stomme/shared/adr/0007-test-placement-and-fakes.md) | `8db2fa9` |
 | 0017 | A disposable SQLite cache | [0033](./0033-files-only-store-without-a-cache.md) | `33cf178` |
+| 0030 | A Rust coding guide adapts Tau's coding rules | [Shared coding guide](../stomme/shared/coding.md), [Rust guide](../stomme/languages/rust/guide.md), [GPUI guide](../stomme/layers/gpui/guide.md), and [0036](./0036-project-rules-beside-the-shared-guides.md) | `99d5cca` |

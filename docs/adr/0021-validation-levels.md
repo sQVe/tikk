@@ -2,7 +2,7 @@
 
 **Date**: 2026-10-18\
 **Status**: Accepted\
-**Related**: [ADR 0005 (Typed results for expected failures, panics for bugs, and parse-once boundaries)](./0005-results-panics-and-parse-once-boundaries.md),
+**Related**: [Shared ADR 0005 (Typed results, panics for bugs, and parsing once)](../stomme/shared/adr/0005-results-and-parse-once.md),
 [ADR 0016 (Evidence records bound to code state)](./0016-evidence-records-and-criteria-coverage.md)
 
 ## Context

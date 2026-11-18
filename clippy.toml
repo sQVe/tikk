@@ -16,7 +16,7 @@ disallowed-methods = [
   { path = "std::thread::sleep", reason = "in GPUI code, await `cx.background_executor().timer(duration)`; elsewhere, use an `#[expect]` that says why blocking the thread is safe" },
 
   # [tikk] The clock is a side effect, so it reaches a module as a function that tests replace.
-  { path = "std::time::SystemTime::now", reason = "take the clock as a `now` function in the module's effect record (ADR 0007); production passes `store::system::now`, tests pass a fixed time" },
+  { path = "std::time::SystemTime::now", reason = "take the clock as a `now` function in the module's effect record (shared ADR 0006); production passes `store::system::now`, tests pass a fixed time" },
 ]
 
 # Clippy accepts only type paths here, not modules, so each gpui-component type needs its own entry.
