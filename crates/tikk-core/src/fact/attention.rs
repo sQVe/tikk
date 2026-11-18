@@ -279,8 +279,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        AttentionInput, AttentionItem, AttentionProblem, AttentionReason, AttentionState,
-        AttentionTicket, derive_attention,
+        Attention, AttentionInput, AttentionItem, AttentionProblem, AttentionReason,
+        AttentionState, AttentionTicket, derive_attention,
     };
     use crate::fact::{
         AgentName, Answer, Claim, PrObservation, PrState, PullRequest, Question, QuestionItem,
@@ -358,19 +358,15 @@ mod tests {
             }
         }
 
-        fn items(&self) -> Vec<(String, &'static str)> {
+        fn derive(&self, problems: Vec<AttentionProblem>) -> Attention {
             derive_attention(AttentionInput {
                 tickets: &self.tickets,
                 questions: &self.questions,
                 claims: &self.claims,
                 prs: &self.prs,
-                problems: Vec::new(),
+                problems,
                 now: at("2026-11-13T12:00:00Z"),
             })
-            .items
-            .iter()
-            .map(|item| (item.id.to_string(), item.reason.as_str()))
-            .collect()
         }
     }
 
@@ -452,14 +448,7 @@ mod tests {
             vec![question("bbbb", false), question("aaaa", true)],
         );
 
-        let listed = derive_attention(AttentionInput {
-            tickets: &fixture.tickets,
-            questions: &fixture.questions,
-            claims: &fixture.claims,
-            prs: &fixture.prs,
-            problems: Vec::new(),
-            now: at("2026-11-13T12:00:00Z"),
-        });
+        let listed = fixture.derive(Vec::new());
 
         assert_eq!(
             listed.items,
@@ -491,14 +480,7 @@ mod tests {
             claim("manager", "2026-11-13T12:00:00.001Z"),
         );
 
-        let listed = derive_attention(AttentionInput {
-            tickets: &fixture.tickets,
-            questions: &fixture.questions,
-            claims: &fixture.claims,
-            prs: &fixture.prs,
-            problems: Vec::new(),
-            now: at("2026-11-13T12:00:00Z"),
-        });
+        let listed = fixture.derive(Vec::new());
 
         assert_eq!(
             listed.items,
@@ -531,14 +513,7 @@ mod tests {
             ticket("tikk-wwww", Kind::Task, AttentionState::Open),
         ]);
 
-        let listed = derive_attention(AttentionInput {
-            tickets: &fixture.tickets,
-            questions: &fixture.questions,
-            claims: &fixture.claims,
-            prs: &fixture.prs,
-            problems: Vec::new(),
-            now: at("2026-11-13T12:00:00Z"),
-        });
+        let listed = fixture.derive(Vec::new());
 
         assert_eq!(
             listed.items,
@@ -565,7 +540,14 @@ mod tests {
             ticket("tikk-eeee", Kind::Task, AttentionState::Open),
         ]);
 
-        assert_eq!(fixture.items(), [("tikk-aaaa".to_owned(), "looseTask")]);
+        let listed = fixture.derive(Vec::new());
+
+        let reasons: Vec<(String, &str)> = listed
+            .items
+            .iter()
+            .map(|item| (item.id.to_string(), item.reason.as_str()))
+            .collect();
+        assert_eq!(reasons, [("tikk-aaaa".to_owned(), "looseTask")]);
     }
 
     #[test]
@@ -577,14 +559,7 @@ mod tests {
         fixture.prs.insert(id("tikk-aaaa"), merged_pr());
         fixture.prs.insert(id("tikk-bbbb"), merged_pr());
 
-        let listed = derive_attention(AttentionInput {
-            tickets: &fixture.tickets,
-            questions: &fixture.questions,
-            claims: &fixture.claims,
-            prs: &fixture.prs,
-            problems: Vec::new(),
-            now: at("2026-11-13T12:00:00Z"),
-        });
+        let listed = fixture.derive(Vec::new());
 
         assert_eq!(
             listed.items,
@@ -621,14 +596,7 @@ mod tests {
             files: vec!["tickets/tikk/tikk-aaaa.md".to_owned()],
         };
 
-        let listed = derive_attention(AttentionInput {
-            tickets: &fixture.tickets,
-            questions: &fixture.questions,
-            claims: &fixture.claims,
-            prs: &fixture.prs,
-            problems: vec![problem.clone()],
-            now: at("2026-11-13T12:00:00Z"),
-        });
+        let listed = fixture.derive(vec![problem.clone()]);
 
         let order: Vec<(String, &str, Option<String>)> = listed
             .items
