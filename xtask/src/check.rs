@@ -6,6 +6,30 @@ use thiserror::Error;
 
 use crate::raw_values;
 
+#[expect(
+    clippy::print_stderr,
+    reason = "invalid check arguments are the command's error output"
+)]
+pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
+    let groups = match parse_groups(arguments) {
+        Ok(groups) => groups,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let base = match parse_stomme_base(std::env::var_os(STOMME_BASE)) {
+        Ok(base) => base,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    check_steps(root, &build_steps(base.as_deref()), &groups)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Group {
     // Checks whose result does not depend on the operating system.
@@ -237,48 +261,9 @@ fn check_steps(root: &Path, steps: &[Step], groups: &[Group]) -> ExitCode {
     ExitCode::FAILURE
 }
 
-#[expect(
-    clippy::print_stderr,
-    reason = "invalid check arguments are the command's error output"
-)]
-fn run_with_environment(
-    root: &Path,
-    arguments: &[String],
-    base_value: Option<OsString>,
-    build: impl FnOnce(Option<&str>) -> Vec<Step>,
-) -> ExitCode {
-    let groups = match parse_groups(arguments) {
-        Ok(groups) => groups,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let base = match parse_stomme_base(base_value) {
-        Ok(base) => base,
-        Err(error) => {
-            eprintln!("{error}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    check_steps(root, &build(base.as_deref()), &groups)
-}
-
-pub(crate) fn run(root: &Path, arguments: &[String]) -> ExitCode {
-    run_with_environment(root, arguments, std::env::var_os(STOMME_BASE), build_steps)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn non_utf8_value() -> OsString {
-        use std::os::unix::ffi::OsStringExt as _;
-
-        OsString::from_vec(vec![0xff, 0xfe])
-    }
 
     fn shell_step(arguments: &[&str]) -> Step {
         build_step("shell", Group::Tidy, "/bin/sh", arguments, &[])
@@ -468,47 +453,14 @@ mod tests {
 
     #[test]
     fn parse_stomme_base_rejects_a_non_utf8_value() {
+        use std::os::unix::ffi::OsStringExt as _;
+
         assert_eq!(
-            parse_stomme_base(Some(non_utf8_value())),
+            parse_stomme_base(Some(OsString::from_vec(vec![0xff, 0xfe]))),
             Err(InvalidStommeBase::NotUtf8 {
                 variable: "STOMME_BASE"
             })
         );
-    }
-
-    #[test]
-    fn run_with_environment_fails_on_a_non_utf8_base_before_any_step_runs() {
-        let root = crate::test_support::temporary_directory();
-        let build = |_base: Option<&str>| vec![shell_step(&["-c", "touch ran"])];
-
-        assert_eq!(
-            run_with_environment(root.path(), &[], Some(non_utf8_value()), build),
-            ExitCode::FAILURE
-        );
-        assert!(!root.path().join("ran").exists());
-    }
-
-    #[test]
-    fn run_with_environment_runs_the_steps_for_a_valid_base() {
-        let root = crate::test_support::temporary_directory();
-        let build = |base: Option<&str>| {
-            assert_eq!(base, Some("origin/feature"));
-            vec![Step {
-                group: Group::Build,
-                ..shell_step(&["-c", "touch ran"])
-            }]
-        };
-
-        assert_eq!(
-            run_with_environment(
-                root.path(),
-                &["build".to_string()],
-                Some(OsString::from("origin/feature")),
-                build
-            ),
-            ExitCode::SUCCESS
-        );
-        assert!(root.path().join("ran").exists());
     }
 
     #[test]
