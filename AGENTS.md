@@ -48,3 +48,19 @@ setup and verification.
   `cargo xtask mock capture placeholder`; the shot, crop, and metadata go to
   `.tau/judge/placeholder/`. See [the development guide](docs/development.md#sandbox) and
   [ADR 0032](docs/adr/0032-qa-in-the-ruta-sandbox.md).
+<!-- stomme:start -->
+# Shared rules
+
+- Run the full check before finishing changes: `cargo xtask check`.
+- Format with `cargo fmt`.
+- Follow the decisions in [docs/adr](docs/adr/README.md).
+- Follow the shared ADRs in [docs/stomme/shared/adr](docs/stomme/shared/adr/README.md).
+- Record new decisions in [docs/adr](docs/adr/README.md).
+- Edit an ADR in place when its details change.
+- Comment only what the code cannot say. Never describe history.
+- Document decisions, not features. See [ADR 0001](docs/stomme/shared/adr/0001-documentation-scope.md).
+- Read [the general guide](docs/stomme/shared/coding.md).
+- Read [the Rust guide](docs/stomme/languages/rust/guide.md).
+- Read [the gpui guide](docs/stomme/layers/gpui/guide.md).
+- Read [the gpui-component guide](docs/stomme/layers/gpui-component/guide.md).
+<!-- stomme:end -->
