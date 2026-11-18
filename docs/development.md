@@ -10,7 +10,15 @@
    cargo install --locked cargo-nextest cargo-deny cargo-shear cargo-mutants typos-cli taplo-cli prek
    ```
 
-3. Install the Git hooks:
+3. Install [mise](https://mise.jdx.dev), then install the pinned tools. `mise.toml` pins the
+   `stomme` binary that the check runs:
+
+   ```sh
+   mise trust
+   mise install
+   ```
+
+4. Install the Git hooks:
 
    ```sh
    prek install
@@ -57,11 +65,14 @@ Run every check before you open a pull request:
 cargo xtask check
 ```
 
-It changes no files. It runs rustfmt, typos, taplo, cargo-deny, cargo-shear, clippy, nextest,
-doctests, rustdoc, the raw-value check, the crate-boundary check, and the module table check, and
+It changes no files. It runs rustfmt, typos, taplo, cargo-deny, cargo-shear, stomme, clippy,
+nextest, doctests, rustdoc, the raw-value check, the crate-boundary check, and the module table check, and
 reports every failed check at the end.
 Warnings fail clippy, the tests, and rustdoc. Every Cargo build runs with `--locked`, so a stale
 `Cargo.lock` fails too.
+
+The stomme check reads `stomme.toml`, `docs/stomme/`, the stomme block in `AGENTS.md`, and the ADR
+index. Run it alone with `mise exec -- stomme check`.
 
 The crate-boundary check fails when `tikk-cli` or `tikk-core` depends on GPUI, `tikk-ui`, or
 `tikk-desktop`, directly or through another crate. It prints the dependency path it found.
