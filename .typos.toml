@@ -1,2 +1,6 @@
 [files]
 extend-exclude = ["vendor/"]
+
+[default.extend-words]
+# A TypeScript test-skip marker that stomme's ratchet guide lists.
+xdescribe = "xdescribe"
